@@ -203,6 +203,16 @@ ISSUE_TEMPLATES = {
             ("Rollback Plan", "Steps to rollback if needed"),
         ],
     },
+    "devops": {
+        "name": "DevOps / Infrastructure Task",
+        "sections": [
+            ("Description", "Brief overview of the infrastructure task and its scope"),
+            ("Requirement", "- What needs to be deployed, configured, or changed\n- Capacity and performance considerations\n- Monitoring and alerting requirements"),
+            ("Expected Result", "- Servers/services are deployed and operational\n- Monitoring confirms healthy state\n- Documentation and scripts are updated"),
+            ("Affected Services", "List of services, servers, or environments involved"),
+            ("Rollback Plan", "Steps to revert changes if something goes wrong"),
+        ],
+    },
 }
 
 
