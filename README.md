@@ -36,6 +36,8 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 
 **Option A — via CLI** (recommended):
 
+> **Prerequisite:** [uv](https://docs.astral.sh/uv/) is required. Install with: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+
 ```bash
 claude mcp add youtrack \
   -e YOUTRACK_URL=https://your-instance.youtrack.cloud \
