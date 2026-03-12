@@ -142,6 +142,157 @@ async def get_agiles() -> str:
         return "\n".join(lines) if lines else "No agile boards found."
 
 
+ISSUE_TEMPLATES = {
+    "bug": {
+        "name": "Bug Report",
+        "sections": [
+            ("Summary", "Brief description of the bug"),
+            ("Steps to Reproduce", "1. \n2. \n3. "),
+            ("Expected Result", "What should happen"),
+            ("Actual Result", "What actually happens"),
+            ("Environment", "OS, browser, app version, device"),
+            ("Severity", "Critical / Major / Minor / Trivial"),
+            ("Screenshots / Logs", "Attach if available"),
+        ],
+    },
+    "feature": {
+        "name": "Feature Request",
+        "sections": [
+            ("Problem", "What problem does this solve?"),
+            ("Proposed Solution", "How should it work?"),
+            ("Alternatives Considered", "Other approaches evaluated"),
+            ("Acceptance Criteria", "- [ ] Criterion 1\n- [ ] Criterion 2"),
+            ("Priority", "Must have / Should have / Nice to have"),
+        ],
+    },
+    "task": {
+        "name": "Task",
+        "sections": [
+            ("Objective", "What needs to be done"),
+            ("Requirements", "- Requirement 1\n- Requirement 2"),
+            ("Technical Notes", "Implementation details, links, references"),
+            ("Definition of Done", "- [ ] Done criterion 1\n- [ ] Done criterion 2"),
+        ],
+    },
+    "daily": {
+        "name": "Daily Standup",
+        "sections": [
+            ("Done Yesterday", "- "),
+            ("Planned Today", "- "),
+            ("Blockers", "None"),
+        ],
+    },
+    "spike": {
+        "name": "Research / Spike",
+        "sections": [
+            ("Goal", "What are we trying to learn?"),
+            ("Context", "Why is this research needed?"),
+            ("Scope", "What's in/out of scope"),
+            ("Timebox", "Maximum time to spend"),
+            ("Findings", "To be filled after research"),
+            ("Recommendation", "To be filled after research"),
+        ],
+    },
+    "release": {
+        "name": "Release Checklist",
+        "sections": [
+            ("Version", "x.y.z"),
+            ("Changes Included", "- "),
+            ("Pre-release Checklist", "- [ ] Tests pass\n- [ ] Code review done\n- [ ] Staging tested"),
+            ("Post-release Checklist", "- [ ] Production verified\n- [ ] Monitoring checked\n- [ ] Docs updated"),
+            ("Rollback Plan", "Steps to rollback if needed"),
+        ],
+    },
+}
+
+
+@mcp.tool()
+async def list_templates() -> str:
+    """List all available issue templates with their sections."""
+    lines = ["## Available issue templates", ""]
+    for key, tpl in ISSUE_TEMPLATES.items():
+        sections = ", ".join(s[0] for s in tpl["sections"])
+        lines.append(f"- **{key}** — {tpl['name']} ({sections})")
+    lines.append("")
+    lines.append("Use `create_issue_from_template` to create an issue with a template.")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+async def create_issue_from_template(
+    project: str,
+    template: str,
+    summary: str,
+    fields: str = "",
+) -> str:
+    """Create a YouTrack issue using a predefined template.
+
+    The template provides the description structure. You can fill in sections
+    by passing field values in the 'fields' parameter.
+
+    Args:
+        project: Project short name (e.g., 'DO', 'AP')
+        template: Template name (bug, feature, task, daily, spike, release)
+        summary: Issue title
+        fields: Section values as 'Section Name: value' separated by '|||'.
+                Example: 'Steps to Reproduce: 1. Open app 2. Click X|||Expected Result: Page loads|||Severity: Major'
+                Sections not provided will keep placeholder text.
+    """
+    tpl = ISSUE_TEMPLATES.get(template.lower())
+    if not tpl:
+        available = ", ".join(ISSUE_TEMPLATES.keys())
+        return f"Unknown template '{template}'. Available: {available}"
+
+    # Parse provided field values
+    provided = {}
+    if fields:
+        for pair in fields.split("|||"):
+            pair = pair.strip()
+            if ":" in pair:
+                key, value = pair.split(":", 1)
+                provided[key.strip().lower()] = value.strip()
+
+    # Build description from template
+    desc_parts = []
+    for section_name, placeholder in tpl["sections"]:
+        value = provided.get(section_name.lower(), placeholder)
+        desc_parts.append(f"## {section_name}\n{value}")
+
+    description = "\n\n".join(desc_parts)
+
+    # Create the issue using the existing create_issue logic
+    payload = {
+        "project": {"id": None},
+        "summary": summary,
+        "description": description,
+    }
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        proj_resp = await client.get(
+            f"{YOUTRACK_URL}/api/admin/projects",
+            params={"query": f"shortName: {project}", "fields": "id,shortName"},
+            headers=_headers(),
+        )
+        proj_resp.raise_for_status()
+        projects = proj_resp.json()
+        if not projects:
+            return f"Project '{project}' not found."
+        payload["project"]["id"] = projects[0]["id"]
+
+        resp = await client.post(
+            f"{YOUTRACK_URL}/api/issues",
+            json=payload,
+            headers={**_headers(), "Content-Type": "application/json"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return (
+            f"Created from **{tpl['name']}** template: "
+            f"**{data.get('idReadable', '?')}** — {data.get('summary', '')}\n\n"
+            f"**Description preview:**\n{description}"
+        )
+
+
 @mcp.tool()
 async def create_issue(project: str, summary: str, description: str = "") -> str:
     """Create a new issue in a YouTrack project.
