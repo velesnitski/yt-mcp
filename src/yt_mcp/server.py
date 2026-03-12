@@ -246,29 +246,45 @@ async def update_issue(
 
 
 @mcp.tool()
-async def delete_issue(issue_id: str) -> str:
-    """Delete a YouTrack issue permanently. This action cannot be undone.
+async def delete_issue(issue_id: str, permanent: bool = False) -> str:
+    """Delete a YouTrack issue. By default performs a soft delete (sets state to Obsolete).
+    Use permanent=True only when you need to remove the issue entirely — this cannot be undone.
 
     Args:
         issue_id: Issue ID (e.g., 'DEVOPS-423')
+        permanent: If True, permanently delete the issue. If False (default), set state to Obsolete.
     """
     async with httpx.AsyncClient(timeout=30) as client:
-        # Fetch issue details first for confirmation message
+        # Fetch issue details first
         resp = await client.get(
             f"{YOUTRACK_URL}/api/issues/{issue_id}",
-            params={"fields": "idReadable,summary"},
+            params={"fields": "idReadable,summary,state(name)"},
             headers=_headers(),
         )
         resp.raise_for_status()
         data = resp.json()
         summary = data.get("summary", "")
+        old_state = data.get("state", {}).get("name", "?")
 
-        resp = await client.delete(
-            f"{YOUTRACK_URL}/api/issues/{issue_id}",
-            headers=_headers(),
+        if permanent:
+            resp = await client.delete(
+                f"{YOUTRACK_URL}/api/issues/{issue_id}",
+                headers=_headers(),
+            )
+            resp.raise_for_status()
+            return f"Permanently deleted: **{issue_id}** — {summary}"
+
+        # Soft delete: set state to Obsolete
+        resp = await client.post(
+            f"{YOUTRACK_URL}/api/issues/{issue_id}/execute",
+            json={"query": "State Obsolete"},
+            headers={**_headers(), "Content-Type": "application/json"},
         )
         resp.raise_for_status()
-        return f"Deleted: **{issue_id}** — {summary}"
+        return (
+            f"Soft-deleted: **{issue_id}** — {summary}\n"
+            f"**State:** {old_state} → Obsolete"
+        )
 
 
 @mcp.tool()
