@@ -199,6 +199,53 @@ created: -3d .. today                           # issues created in last 3 days
 project: Backend tag: ZTNA                      # Backend issues tagged ZTNA
 ```
 
+## Issue templates
+
+The server includes built-in templates for creating structured issues. Ask Claude to list them or use them directly:
+
+- *"List available templates"*
+- *"Create a bug report in the Android project"*
+
+### Available templates
+
+| Template | Sections |
+|---|---|
+| `bug` | Summary, Steps to Reproduce, Expected/Actual Result, Environment, Severity |
+| `feature` | Problem, Proposed Solution, Alternatives, Acceptance Criteria, Priority |
+| `task` | Objective, Requirements, Technical Notes, Definition of Done |
+| `daily` | Done Yesterday, Planned Today, Blockers |
+| `spike` | Goal, Context, Scope, Timebox, Findings, Recommendation |
+| `release` | Version, Changes, Pre/Post-release Checklists, Rollback Plan |
+| `devops` | Description, Requirement, Expected Result, Affected Services, Rollback Plan |
+
+### Examples
+
+**Bug report** — just describe the problem naturally:
+
+> *"Create a bug in MOBILE: app crashes when switching between servers. Steps: connect to server A, tap server B, app freezes and restarts. Happens on Android 14. Critical severity."*
+
+**Feature request:**
+
+> *"Create a feature request in WEB: add dark mode toggle to the extension popup. Should follow system theme by default. Must have priority."*
+
+**DevOps task:**
+
+> *"Create a devops task in OPS: Deploy new nodes in two additional regions. Need 2 servers per region with monitoring configured. Monitoring via monitoring. Affected services: free-tier, premium-tier."*
+
+**Daily standup:**
+
+> *"Create a daily in OPS: Yesterday — fixed monitoring alerts for servers, deployed config update to staging. Today — production rollout, server audit. No blockers."*
+
+**Research spike:**
+
+> *"Create a spike in MOBILE: Research crash causes on Android 13+. Timebox: 2 days. Need to determine if the issue is in the native layer or Java bridge."*
+
+**Release checklist:**
+
+> *"Create a release task in MOBILE: version 2.5.0. Changes: new auth flow, config updates, purchase module. Rollback: revert to 2.4.9 via app store."*
+
+Claude will automatically use the matching template and fill in the sections from your description.
+
 ## Using with n8n, Langchain, and other HTTP clients
 
 By default the server uses **stdio** transport (for Claude Code). For integration with **n8n**, **Langchain**, **OpenAI Agents SDK**, or any HTTP-based MCP client, start the server in **SSE** or **streamable-http** mode:
