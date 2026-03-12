@@ -12,7 +12,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 - *"List all agile boards"*
 - *"What did the DevOps team close this week?"*
 
-### Available tools (22)
+### Available tools (24)
 
 | Tool | Description |
 |---|---|
@@ -38,6 +38,8 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `bulk_update_execute` | Apply a command to all issues matching a query (auto-tags for rollback) |
 | `bulk_rollback` | Undo all changes from a bulk update batch using its tag |
 | `create_agile_board` | Create a new agile board for one or more projects |
+| `get_issues_for_translation` | Fetch issues with Cyrillic text for LLM-assisted translation |
+| `apply_translations` | Apply translated text to issues with batch tagging for rollback |
 
 ## Setup for Claude Code
 
@@ -149,7 +151,7 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{
     uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
 ```
 
-You should see all 22 tools listed.
+You should see all 24 tools listed.
 
 ## Setup for Windows
 
