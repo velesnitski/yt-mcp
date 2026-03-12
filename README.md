@@ -22,6 +22,10 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `get_agiles` | List all agile boards |
 | `create_issue` | Create a new issue in a project |
 | `update_issue` | Update issue fields (summary, description, state, assignee) |
+| `delete_issue` | Delete an issue permanently |
+| `bulk_update_preview` | Preview which issues a bulk command would affect (dry run) |
+| `bulk_update_execute` | Apply a command to all issues matching a query |
+| `create_agile_board` | Create a new agile board for one or more projects |
 
 ## Setup for Claude Code
 
@@ -133,7 +137,7 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{
     uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
 ```
 
-You should see all six tools listed: `search_issues`, `get_issue`, `list_projects`, `get_agiles`, `create_issue`, `update_issue`.
+You should see all ten tools listed.
 
 ## Environment variables
 
@@ -227,7 +231,7 @@ The server will be available at `http://localhost:8000/mcp`.
 1. Start the server in SSE mode (see above)
 2. In n8n, add an **MCP Client** node (or use the HTTP Request node)
 3. Set the MCP server URL to `http://localhost:8000/sse`
-4. The six YouTrack tools will be available as actions in your n8n workflows
+4. The YouTrack tools will be available as actions in your n8n workflows
 
 ### Docker (for remote / always-on deployments)
 

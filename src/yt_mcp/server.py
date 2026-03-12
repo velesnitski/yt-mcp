@@ -245,6 +245,188 @@ async def update_issue(
         )
 
 
+@mcp.tool()
+async def delete_issue(issue_id: str) -> str:
+    """Delete a YouTrack issue permanently. This action cannot be undone.
+
+    Args:
+        issue_id: Issue ID (e.g., 'DEVOPS-423')
+    """
+    async with httpx.AsyncClient(timeout=30) as client:
+        # Fetch issue details first for confirmation message
+        resp = await client.get(
+            f"{YOUTRACK_URL}/api/issues/{issue_id}",
+            params={"fields": "idReadable,summary"},
+            headers=_headers(),
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        summary = data.get("summary", "")
+
+        resp = await client.delete(
+            f"{YOUTRACK_URL}/api/issues/{issue_id}",
+            headers=_headers(),
+        )
+        resp.raise_for_status()
+        return f"Deleted: **{issue_id}** — {summary}"
+
+
+@mcp.tool()
+async def bulk_update_preview(query: str, command: str, max_results: int = 50) -> str:
+    """Preview which issues would be affected by a bulk update (dry run).
+
+    Always call this BEFORE bulk_update_execute to review the affected issues.
+
+    Args:
+        query: YouTrack search query to select issues (e.g., 'project: DO state: Open')
+        command: YouTrack command to apply (e.g., 'State Done', 'Assignee John', 'tag Important')
+        max_results: Maximum number of issues to preview (default: 50)
+    """
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(
+            f"{YOUTRACK_URL}/api/issues",
+            params={
+                "query": query,
+                "fields": "idReadable,summary,state(name),assignee(name)",
+                "$top": str(max_results),
+            },
+            headers=_headers(),
+        )
+        resp.raise_for_status()
+        issues = resp.json()
+
+        if not issues:
+            return f"No issues match query: `{query}`"
+
+        lines = [
+            f"## Bulk update preview",
+            f"**Query:** `{query}`",
+            f"**Command:** `{command}`",
+            f"**Issues affected:** {len(issues)}",
+            "",
+        ]
+        for issue in issues:
+            assignee = issue.get("assignee", {})
+            assignee_name = assignee.get("name", "Unassigned") if assignee else "Unassigned"
+            state = issue.get("state", {})
+            state_name = state.get("name", "Unknown") if state else "Unknown"
+            lines.append(
+                f"- **{issue.get('idReadable', '?')}** [{state_name}] "
+                f"{issue.get('summary', 'No summary')} → {assignee_name}"
+            )
+
+        lines.append("")
+        lines.append("⚠ Call `bulk_update_execute` with the same query and command to apply.")
+        return "\n".join(lines)
+
+
+@mcp.tool()
+async def bulk_update_execute(query: str, command: str, max_results: int = 50) -> str:
+    """Execute a bulk update on issues matching a query. DESTRUCTIVE — call bulk_update_preview first.
+
+    Args:
+        query: YouTrack search query to select issues (e.g., 'project: DO state: Open')
+        command: YouTrack command to apply (e.g., 'State Done', 'Assignee John', 'tag Important')
+        max_results: Maximum number of issues to update (default: 50)
+    """
+    async with httpx.AsyncClient(timeout=30) as client:
+        # Fetch matching issues
+        resp = await client.get(
+            f"{YOUTRACK_URL}/api/issues",
+            params={
+                "query": query,
+                "fields": "idReadable,summary",
+                "$top": str(max_results),
+            },
+            headers=_headers(),
+        )
+        resp.raise_for_status()
+        issues = resp.json()
+
+        if not issues:
+            return f"No issues match query: `{query}`"
+
+        # Apply command to each issue
+        updated = []
+        errors = []
+        for issue in issues:
+            issue_id = issue.get("idReadable", "?")
+            try:
+                resp = await client.post(
+                    f"{YOUTRACK_URL}/api/issues/{issue_id}/execute",
+                    json={"query": command},
+                    headers={**_headers(), "Content-Type": "application/json"},
+                )
+                resp.raise_for_status()
+                updated.append(issue_id)
+            except httpx.HTTPStatusError as e:
+                errors.append(f"{issue_id}: {e.response.status_code}")
+
+        lines = [f"## Bulk update complete"]
+        lines.append(f"**Command:** `{command}`")
+        lines.append(f"**Updated:** {len(updated)} issues")
+        if updated:
+            lines.append(f"**IDs:** {', '.join(updated)}")
+        if errors:
+            lines.append(f"\n**Errors ({len(errors)}):**")
+            for err in errors:
+                lines.append(f"- {err}")
+        return "\n".join(lines)
+
+
+@mcp.tool()
+async def create_agile_board(
+    name: str,
+    projects: str,
+    column_field: str = "State",
+) -> str:
+    """Create a new agile board in YouTrack.
+
+    Args:
+        name: Board name (e.g., 'My Sprint Board')
+        projects: Comma-separated project short names (e.g., 'DO,BAC')
+        column_field: Field to use for columns (default: 'State')
+    """
+    project_list = [p.strip() for p in projects.split(",")]
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        # Resolve project IDs
+        project_ids = []
+        for short_name in project_list:
+            resp = await client.get(
+                f"{YOUTRACK_URL}/api/admin/projects",
+                params={"query": f"shortName: {short_name}", "fields": "id,shortName"},
+                headers=_headers(),
+            )
+            resp.raise_for_status()
+            found = resp.json()
+            if found:
+                project_ids.append({"id": found[0]["id"]})
+            else:
+                return f"Project '{short_name}' not found."
+
+        payload = {
+            "name": name,
+            "projects": project_ids,
+            "columnSettings": {
+                "field": {"name": column_field},
+                "$type": "ColumnSettings",
+            },
+        }
+        resp = await client.post(
+            f"{YOUTRACK_URL}/api/agiles",
+            json=payload,
+            headers={**_headers(), "Content-Type": "application/json"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return (
+            f"Created board: **{data.get('name', name)}**\n"
+            f"**ID:** {data.get('id', '?')}\n"
+            f"**Projects:** {', '.join(project_list)}"
+        )
+
+
 def main():
     import argparse
 
