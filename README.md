@@ -36,9 +36,10 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 **Option A — via CLI** (recommended):
 
 ```bash
-claude mcp add -e YOUTRACK_URL=https://your-instance.youtrack.cloud \
-               -e YOUTRACK_TOKEN=perm:your-token-here \
-               youtrack -- uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
+claude mcp add youtrack \
+  -e YOUTRACK_URL=https://your-instance.youtrack.cloud \
+  -e YOUTRACK_TOKEN=perm:your-token-here \
+  -- uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
 ```
 
 **Option B — manually edit settings:**
