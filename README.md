@@ -20,6 +20,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `get_issue` | Get full details of a specific issue (description, comments, fields) |
 | `list_projects` | List all accessible projects |
 | `get_agiles` | List all agile boards |
+| `get_agile_board` | Search for an agile board by name (partial match) |
 | `list_templates` | List available issue templates |
 | `create_issue_from_template` | Create an issue using a template (bug, feature, task, daily, spike, release) |
 | `create_issue` | Create a new issue in a project (freeform) |
