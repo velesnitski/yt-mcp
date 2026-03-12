@@ -69,6 +69,27 @@ Add to your Claude Code settings file:
 }
 ```
 
+> **Troubleshooting: MCP server not found**
+>
+> If Claude Code can't find `uvx` at startup (e.g., `/mcp` doesn't show the server), use the full path instead:
+>
+> ```json
+> {
+>   "mcpServers": {
+>     "youtrack": {
+>       "command": "/full/path/to/uvx",
+>       "args": ["--from", "git+https://github.com/velesnitski/yt-mcp", "yt-mcp"],
+>       "env": {
+>         "YOUTRACK_URL": "https://your-instance.youtrack.cloud",
+>         "YOUTRACK_TOKEN": "perm:your-token-here"
+>       }
+>     }
+>   }
+> }
+> ```
+>
+> Find the full path with `which uvx` (typically `~/.local/bin/uvx` or `/opt/homebrew/bin/uvx`).
+
 ### 3. Restart Claude Code
 
 ```bash
