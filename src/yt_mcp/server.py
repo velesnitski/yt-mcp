@@ -16,6 +16,18 @@ def _headers():
     }
 
 
+def _get_product(issue: dict) -> str:
+    """Extract Product field value from an issue's custom fields."""
+    for cf in issue.get("customFields", []):
+        if cf.get("name") == "Product":
+            val = cf.get("value")
+            if isinstance(val, list):
+                return ", ".join(v.get("name", "") for v in val if v.get("name"))
+            if isinstance(val, dict) and val.get("name"):
+                return val["name"]
+    return ""
+
+
 def _format_issues(issues: list) -> str:
     if not issues:
         return "No issues found."
@@ -25,8 +37,10 @@ def _format_issues(issues: list) -> str:
         assignee_name = assignee.get("name", "Unassigned") if assignee else "Unassigned"
         state = issue.get("state", {})
         state_name = state.get("name", "Unknown") if state else "Unknown"
+        product = _get_product(issue)
+        product_str = f" ({product})" if product else ""
         lines.append(
-            f"- **{issue.get('idReadable', '?')}** [{state_name}] "
+            f"- **{issue.get('idReadable', '?')}** [{state_name}]{product_str} "
             f"{issue.get('summary', 'No summary')} → {assignee_name}"
         )
     return "\n".join(lines)
@@ -47,7 +61,7 @@ async def search_issues(query: str, max_results: int = 50) -> str:
             f"{YOUTRACK_URL}/api/issues",
             params={
                 "query": query,
-                "fields": "idReadable,summary,state(name),assignee(name),created,updated",
+                "fields": "idReadable,summary,state(name),assignee(name),customFields(name,value(name)),created,updated",
                 "$top": str(max_results),
             },
             headers=_headers(),
@@ -82,6 +96,10 @@ async def get_issue(issue_id: str) -> str:
 
         assignee = data.get("assignee")
         parts.append(f"**Assignee:** {assignee.get('name') if assignee else 'Unassigned'}")
+
+        product = _get_product(data)
+        if product:
+            parts.append(f"**Product:** {product}")
 
         tags = data.get("tags", [])
         if tags:
@@ -140,6 +158,16 @@ async def get_agiles() -> str:
             owner_name = owner.get("name", "?") if owner else "?"
             lines.append(f"- **{b.get('name', '?')}** (projects: {projects}, owner: {owner_name})")
         return "\n".join(lines) if lines else "No agile boards found."
+
+
+async def _set_product(client: httpx.AsyncClient, issue_id: str, product: str) -> None:
+    """Set the Product custom field on an issue via command."""
+    resp = await client.post(
+        f"{YOUTRACK_URL}/api/issues/{issue_id}/execute",
+        json={"query": f"Product {product}"},
+        headers={**_headers(), "Content-Type": "application/json"},
+    )
+    resp.raise_for_status()
 
 
 ISSUE_TEMPLATES = {
@@ -234,6 +262,7 @@ async def create_issue_from_template(
     template: str,
     summary: str,
     fields: str = "",
+    product: str = "",
 ) -> str:
     """Create a YouTrack issue using a predefined template.
 
@@ -242,11 +271,12 @@ async def create_issue_from_template(
 
     Args:
         project: Project short name (e.g., 'DO', 'AP')
-        template: Template name (bug, feature, task, daily, spike, release)
+        template: Template name (bug, feature, task, daily, spike, release, devops)
         summary: Issue title
         fields: Section values as 'Section Name: value' separated by '|||'.
                 Example: 'Steps to Reproduce: 1. Open app 2. Click X|||Expected Result: Page loads|||Severity: Major'
                 Sections not provided will keep placeholder text.
+        product: Product name for the Product custom field (leave empty to skip)
     """
     tpl = ISSUE_TEMPLATES.get(template.lower())
     if not tpl:
@@ -296,21 +326,29 @@ async def create_issue_from_template(
         )
         resp.raise_for_status()
         data = resp.json()
+        issue_id = data.get("idReadable", "?")
+
+        product_str = ""
+        if product:
+            await _set_product(client, issue_id, product)
+            product_str = f"\n**Product:** {product}"
+
         return (
             f"Created from **{tpl['name']}** template: "
-            f"**{data.get('idReadable', '?')}** — {data.get('summary', '')}\n\n"
+            f"**{issue_id}** — {data.get('summary', '')}{product_str}\n\n"
             f"**Description preview:**\n{description}"
         )
 
 
 @mcp.tool()
-async def create_issue(project: str, summary: str, description: str = "") -> str:
+async def create_issue(project: str, summary: str, description: str = "", product: str = "") -> str:
     """Create a new issue in a YouTrack project.
 
     Args:
-        project: Project short name (e.g., 'DEVOPS', 'Android')
+        project: Project short name (e.g., 'DO', 'AP')
         summary: Issue title
         description: Issue description (markdown supported)
+        product: Product name for the Product custom field (leave empty to skip)
     """
     payload = {
         "project": {"id": None},
@@ -338,7 +376,14 @@ async def create_issue(project: str, summary: str, description: str = "") -> str
         )
         resp.raise_for_status()
         data = resp.json()
-        return f"Created: **{data.get('idReadable', '?')}** — {data.get('summary', '')}"
+        issue_id = data.get("idReadable", "?")
+
+        product_str = ""
+        if product:
+            await _set_product(client, issue_id, product)
+            product_str = f" | **Product:** {product}"
+
+        return f"Created: **{issue_id}** — {data.get('summary', '')}{product_str}"
 
 
 @mcp.tool()
@@ -348,6 +393,7 @@ async def update_issue(
     description: str = "",
     state: str = "",
     assignee: str = "",
+    product: str = "",
 ) -> str:
     """Update fields of an existing YouTrack issue.
 
@@ -357,6 +403,7 @@ async def update_issue(
         description: New description (leave empty to keep current)
         state: New state name (e.g., 'In Progress', 'Done', 'Open')
         assignee: New assignee login or full name (leave empty to keep current)
+        product: Product name for the Product custom field (leave empty to keep current)
     """
     payload: dict = {}
     if summary:
@@ -364,7 +411,7 @@ async def update_issue(
     if description:
         payload["description"] = description
 
-    if not payload and not state and not assignee:
+    if not payload and not state and not assignee and not product:
         return "Nothing to update — provide at least one field."
 
     async with httpx.AsyncClient(timeout=30) as client:
@@ -381,6 +428,8 @@ async def update_issue(
             commands.append(f"State {state}")
         if assignee:
             commands.append(f"Assignee {assignee}")
+        if product:
+            commands.append(f"Product {product}")
 
         if commands:
             resp = await client.post(
