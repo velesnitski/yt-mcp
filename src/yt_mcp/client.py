@@ -5,37 +5,50 @@ from yt_mcp.config import YouTrackConfig
 class YouTrackClient:
     def __init__(self, config: YouTrackConfig):
         self._config = config
+        self._client = httpx.AsyncClient(
+            timeout=30,
+            headers={
+                "Authorization": f"Bearer {config.token}",
+                "Accept": "application/json",
+            },
+            base_url=config.url,
+        )
 
-    def _headers(self, with_content_type: bool = False) -> dict:
-        h = {
-            "Authorization": f"Bearer {self._config.token}",
-            "Accept": "application/json",
-        }
-        if with_content_type:
-            h["Content-Type"] = "application/json"
-        return h
+    def _content_type_headers(self) -> dict:
+        return {"Content-Type": "application/json"}
 
-    def _url(self, path: str) -> str:
-        return f"{self._config.url}{path}"
+    async def _handle_error(self, resp: httpx.Response) -> None:
+        """Extract YouTrack error message for 400/404 responses, raise for other errors."""
+        if resp.status_code in (400, 404):
+            try:
+                error_data = resp.json()
+                error_msg = error_data.get(
+                    "error_description",
+                    error_data.get("error", str(resp.text)),
+                )
+            except Exception:
+                error_msg = resp.text
+            raise ValueError(
+                f"YouTrack {'query' if resp.status_code == 400 else 'not found'} error "
+                f"({resp.status_code}): {error_msg}"
+            )
+        resp.raise_for_status()
 
     async def get(self, path: str, params: dict | None = None):
-        async with httpx.AsyncClient(timeout=30) as c:
-            resp = await c.get(self._url(path), params=params, headers=self._headers())
-            resp.raise_for_status()
-            return resp.json()
+        resp = await self._client.get(path, params=params)
+        await self._handle_error(resp)
+        return resp.json()
 
     async def post(self, path: str, json: dict | None = None):
-        async with httpx.AsyncClient(timeout=30) as c:
-            resp = await c.post(
-                self._url(path), json=json, headers=self._headers(with_content_type=True)
-            )
-            resp.raise_for_status()
-            return resp.json() if resp.content else {}
+        resp = await self._client.post(
+            path, json=json, headers=self._content_type_headers()
+        )
+        await self._handle_error(resp)
+        return resp.json() if resp.content else {}
 
     async def delete(self, path: str) -> None:
-        async with httpx.AsyncClient(timeout=30) as c:
-            resp = await c.delete(self._url(path), headers=self._headers())
-            resp.raise_for_status()
+        resp = await self._client.delete(path)
+        await self._handle_error(resp)
 
     async def execute_command(self, issue_id: str, command: str) -> None:
         await self.post(f"/api/issues/{issue_id}/execute", json={"query": command})

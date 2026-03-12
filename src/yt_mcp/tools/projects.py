@@ -1,4 +1,5 @@
 from yt_mcp.client import YouTrackClient
+from yt_mcp.formatters import _resolve_state, _resolve_assignee, _get_custom_field
 
 
 def register(mcp, client: YouTrackClient):
@@ -129,3 +130,100 @@ def register(mcp, client: YouTrackClient):
             f"**ID:** {data.get('id', '?')}\n"
             f"**Projects:** {', '.join(project_list)}"
         )
+
+    @mcp.tool()
+    async def get_sprint_board(board_name: str, sprint: str = "current") -> str:
+        """Get issues on an agile board grouped by column (state).
+
+        Args:
+            board_name: Full or partial board name
+            sprint: Sprint name or 'current' for active sprint (default: 'current')
+        """
+        # Find the board
+        boards = await client.get(
+            "/api/agiles",
+            params={
+                "fields": "id,name,currentSprint(id,name),"
+                "sprints(id,name,start,finish,archived)",
+            },
+        )
+
+        query_lower = board_name.lower()
+        matches = [b for b in boards if query_lower in b.get("name", "").lower()]
+
+        if not matches:
+            return f"No agile board found matching '{board_name}'."
+
+        board = matches[0]
+        board_id = board["id"]
+        board_display_name = board.get("name", board_name)
+
+        # Find the sprint
+        sprint_id = None
+        sprint_name = None
+
+        if sprint.lower() == "current":
+            cs = board.get("currentSprint")
+            if cs:
+                sprint_id = cs.get("id")
+                sprint_name = cs.get("name", "Current Sprint")
+            else:
+                # Try to find first non-archived sprint
+                active = [s for s in board.get("sprints", []) if not s.get("archived")]
+                if active:
+                    sprint_id = active[-1].get("id")
+                    sprint_name = active[-1].get("name", "?")
+                else:
+                    return f"No current sprint found for board '{board_display_name}'."
+        else:
+            sprint_lower = sprint.lower()
+            for s in board.get("sprints", []):
+                if sprint_lower in s.get("name", "").lower():
+                    sprint_id = s.get("id")
+                    sprint_name = s.get("name", sprint)
+                    break
+            if not sprint_id:
+                return f"Sprint '{sprint}' not found on board '{board_display_name}'."
+
+        # Fetch sprint issues via board cells
+        sprint_data = await client.get(
+            f"/api/agiles/{board_id}/sprints/{sprint_id}",
+            params={
+                "fields": "name,start,finish,"
+                "board(columns(presentation,wipLimit,"
+                "issues(idReadable,summary,assignee(name),"
+                "customFields(name,value(name)))))",
+            },
+        )
+
+        start = sprint_data.get("start")
+        finish = sprint_data.get("finish")
+        date_range = ""
+        if start and finish:
+            from datetime import datetime, timezone
+            start_str = datetime.fromtimestamp(start / 1000, tz=timezone.utc).strftime("%b %d")
+            finish_str = datetime.fromtimestamp(finish / 1000, tz=timezone.utc).strftime("%b %d")
+            date_range = f" ({start_str} - {finish_str})"
+
+        parts = [f"## {board_display_name} — {sprint_name}{date_range}"]
+
+        board_data = sprint_data.get("board", {})
+        columns = board_data.get("columns", [])
+
+        if not columns:
+            parts.append("\nNo columns/issues found in this sprint.")
+            return "\n".join(parts)
+
+        for col in columns:
+            col_name = col.get("presentation", "?")
+            issues = col.get("issues", [])
+            parts.append(f"\n### {col_name} ({len(issues)})")
+            for issue in issues:
+                assignee_name = _resolve_assignee(issue)
+                parts.append(
+                    f"- {issue.get('idReadable', '?')} "
+                    f"{issue.get('summary', 'No summary')} "
+                    f"→ {assignee_name}"
+                )
+
+        return "\n".join(parts)

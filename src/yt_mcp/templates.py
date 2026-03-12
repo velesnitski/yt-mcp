@@ -69,6 +69,30 @@ ISSUE_TEMPLATES = {
             ("Rollback Plan", "Steps to revert changes if something goes wrong"),
         ],
     },
+    "incident": {
+        "name": "Production Incident",
+        "sections": [
+            ("Impact", "Who is affected? How many users? Which regions?"),
+            ("Symptoms", "What errors/behaviors are observed?"),
+            ("Environment", "prod / staging / dev"),
+            ("Steps to Reproduce", "1. \n2. "),
+            ("Root Cause", "To be filled after investigation"),
+            ("Fix Applied", "To be filled after resolution"),
+            ("Prevention", "How to prevent recurrence"),
+        ],
+    },
+    "epic": {
+        "name": "Epic",
+        "sections": [
+            ("Goal", "What are we trying to achieve?"),
+            ("Background", "Why is this needed?"),
+            ("Scope", "What's included and excluded"),
+            ("Success Criteria", "How do we know we're done?"),
+            ("Dependencies", "External teams, services, approvals needed"),
+            ("Risks", "What could go wrong?"),
+            ("Subtasks", "- [ ] Task 1\n- [ ] Task 2"),
+        ],
+    },
 }
 
 

@@ -114,3 +114,219 @@ def register(mcp, client: YouTrackClient):
             f"Rolled back **{issue_id}**:\n"
             f"**{field_name}:** restored to **{old_value}**"
         )
+
+    @mcp.tool()
+    async def get_work_items(issue_id: str) -> str:
+        """Get time tracking work items for an issue.
+
+        Args:
+            issue_id: Issue ID (e.g., 'BAC-1828')
+        """
+        items = await client.get(
+            f"/api/issues/{issue_id}/timeTracking/workItems",
+            params={
+                "fields": "date,duration(minutes),author(name),text",
+            },
+        )
+
+        if not items:
+            return f"No work items found for **{issue_id}**."
+
+        lines = [f"## Work items for {issue_id}", ""]
+        total_minutes = 0
+        for item in items:
+            date_ms = item.get("date")
+            if date_ms:
+                date_str = datetime.fromtimestamp(
+                    date_ms / 1000, tz=timezone.utc
+                ).strftime("%Y-%m-%d")
+            else:
+                date_str = "?"
+
+            duration = item.get("duration", {})
+            minutes = duration.get("minutes", 0) if duration else 0
+            total_minutes += minutes
+
+            author = item.get("author", {}).get("name", "?")
+            text = item.get("text", "")
+            text_str = f" — {text}" if text else ""
+
+            if minutes >= 60:
+                duration_str = f"{minutes // 60}h {minutes % 60}m" if minutes % 60 else f"{minutes // 60}h"
+            else:
+                duration_str = f"{minutes}m"
+
+            lines.append(f"- {date_str}: **{duration_str}** by {author}{text_str}")
+
+        # Total
+        if total_minutes >= 60:
+            total_str = f"{total_minutes // 60}h {total_minutes % 60}m" if total_minutes % 60 else f"{total_minutes // 60}h"
+        else:
+            total_str = f"{total_minutes}m"
+        lines.append(f"\n**Total:** {total_str}")
+
+        return "\n".join(lines)
+
+    @mcp.tool()
+    async def get_issue_changes_summary(
+        issue_id: str,
+        since: str = "",
+    ) -> str:
+        """Get a compact summary of issue changes: state transitions, assignee changes,
+        and comment count. Filters noise (description edits, spent time).
+
+        Args:
+            issue_id: Issue ID (e.g., 'MAN-118')
+            since: Optional ISO date to filter from (e.g., '2026-03-01'). Empty = all history.
+        """
+        # Fetch all activities (state, assignee, comments, work items)
+        activities = await client.get(
+            f"/api/issues/{issue_id}/activities",
+            params={
+                "fields": "id,timestamp,author(name),field(name),"
+                "added(name,text),removed(name,text)",
+                "categories": "CustomFieldCategory,SummaryCategory,"
+                "DescriptionCategory,CommentsCategory,SpentTimeCategory",
+                "$top": 500,
+            },
+        )
+
+        # Also get basic issue info
+        issue_data = await client.get(
+            f"/api/issues/{issue_id}",
+            params={
+                "fields": "idReadable,summary,created,reporter(name),"
+                "customFields(name,value(name))",
+            },
+        )
+
+        # Parse since filter
+        since_ts = 0
+        if since:
+            try:
+                since_dt = datetime.strptime(since, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+                since_ts = int(since_dt.timestamp() * 1000)
+            except ValueError:
+                pass
+
+        # Filter by since
+        if since_ts:
+            activities = [a for a in activities if a.get("timestamp", 0) >= since_ts]
+
+        # Extract state transitions
+        state_transitions = []
+        for a in activities:
+            field_name = a.get("field", {}).get("name", "")
+            if field_name == "State":
+                added = a.get("added")
+                ts = a.get("timestamp", 0)
+                if isinstance(added, list) and added:
+                    new_state = added[0].get("name", "?")
+                elif isinstance(added, dict):
+                    new_state = added.get("name", "?")
+                else:
+                    continue
+                date_str = datetime.fromtimestamp(
+                    ts / 1000, tz=timezone.utc
+                ).strftime("%b %d")
+                state_transitions.append((ts, new_state, date_str))
+
+        # Extract comment info
+        comment_authors: dict[str, int] = {}
+        comment_count = 0
+        for a in activities:
+            field_name = a.get("field", {}).get("name", "")
+            if field_name == "comments":
+                added = a.get("added")
+                if added:
+                    comment_count += 1 if not isinstance(added, list) else len(added)
+                    author = a.get("author", {}).get("name", "?")
+                    comment_authors[author] = comment_authors.get(author, 0) + (
+                        1 if not isinstance(added, list) else len(added)
+                    )
+
+        # Extract time logged
+        total_minutes = 0
+        time_authors: dict[str, int] = {}
+        for a in activities:
+            field_name = a.get("field", {}).get("name", "")
+            if field_name == "Spent time":
+                added = a.get("added")
+                author = a.get("author", {}).get("name", "?")
+                # Spent time added is typically a duration value
+                if isinstance(added, list) and added:
+                    for item in added:
+                        mins = item.get("minutes", 0)
+                        total_minutes += mins
+                        time_authors[author] = time_authors.get(author, 0) + mins
+
+        # Last activity
+        last_activity_ts = 0
+        last_activity_desc = ""
+        for a in activities:
+            ts = a.get("timestamp", 0)
+            if ts > last_activity_ts:
+                last_activity_ts = ts
+                field_name = a.get("field", {}).get("name", "?")
+                last_activity_desc = field_name
+
+        # Build output
+        created_ms = issue_data.get("created")
+        created_str = ""
+        if created_ms:
+            created_str = datetime.fromtimestamp(
+                created_ms / 1000, tz=timezone.utc
+            ).strftime("%Y-%m-%d")
+        reporter = issue_data.get("reporter", {})
+        reporter_name = reporter.get("name", "?") if reporter else "?"
+
+        from yt_mcp.formatters import _resolve_state
+        current_state = _resolve_state(issue_data)
+
+        parts = [f"## {issue_data.get('idReadable', issue_id)} — Change Summary"]
+
+        if created_str:
+            parts.append(f"**Created:** {created_str} by {reporter_name}")
+
+        # State transitions line
+        if state_transitions:
+            transitions_str = " → ".join(
+                f"{s} ({d})" for _, s, d in state_transitions
+            )
+            parts.append(f"**State transitions:** {transitions_str}")
+
+        # Time in current state
+        if state_transitions:
+            last_state_ts = state_transitions[-1][0]
+            days_in_state = (
+                datetime.now(tz=timezone.utc)
+                - datetime.fromtimestamp(last_state_ts / 1000, tz=timezone.utc)
+            ).days
+            parts.append(f"**Current state:** {current_state} ({days_in_state} days)")
+        else:
+            parts.append(f"**Current state:** {current_state}")
+
+        # Comments
+        if comment_count:
+            authors_str = ", ".join(
+                f"{name}" for name in comment_authors.keys()
+            )
+            parts.append(f"**Comments:** {comment_count} (by {authors_str})")
+
+        # Time logged
+        if total_minutes:
+            if total_minutes >= 60:
+                time_str = f"{total_minutes // 60}h {total_minutes % 60}m" if total_minutes % 60 else f"{total_minutes // 60}h"
+            else:
+                time_str = f"{total_minutes} min"
+            authors_str = ", ".join(time_authors.keys())
+            parts.append(f"**Time logged:** {time_str} (by {authors_str})")
+
+        # Last activity
+        if last_activity_ts:
+            last_date = datetime.fromtimestamp(
+                last_activity_ts / 1000, tz=timezone.utc
+            ).strftime("%Y-%m-%d")
+            parts.append(f"**Last activity:** {last_date} ({last_activity_desc})")
+
+        return "\n".join(parts)

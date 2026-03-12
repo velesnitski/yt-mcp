@@ -86,15 +86,15 @@ def register(mcp, client: YouTrackClient):
             try:
                 await client.execute_command(issue_id, f"tag {batch_tag}")
                 tagged.append(issue_id)
-            except httpx.HTTPStatusError as e:
-                errors.append(f"{issue_id}: tag failed ({e.response.status_code})")
+            except (httpx.HTTPStatusError, ValueError) as e:
+                errors.append(f"{issue_id}: tag failed ({e})")
 
         for issue_id in tagged:
             try:
                 await client.execute_command(issue_id, command)
                 updated.append(issue_id)
-            except httpx.HTTPStatusError as e:
-                errors.append(f"{issue_id}: command failed ({e.response.status_code})")
+            except (httpx.HTTPStatusError, ValueError) as e:
+                errors.append(f"{issue_id}: command failed ({e})")
 
         lines = [f"## Bulk update complete"]
         lines.append(f"**Batch tag:** `{batch_tag}`")
@@ -192,8 +192,8 @@ def register(mcp, client: YouTrackClient):
 
                 await client.execute_command(issue_id, f"untag {batch_tag}")
 
-            except httpx.HTTPStatusError as e:
-                errors.append(f"{issue_id}: {e.response.status_code}")
+            except (httpx.HTTPStatusError, ValueError) as e:
+                errors.append(f"{issue_id}: {e}")
 
         lines = [f"## Bulk rollback complete"]
         lines.append(f"**Batch tag:** `{batch_tag}`")
