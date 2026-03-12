@@ -77,6 +77,59 @@ claude
 
 You should see `youtrack` listed when Claude starts. Try asking: *"List my YouTrack projects"*
 
+### 4. Verify the server works
+
+**Check that `uv` is installed** (required for the `uvx` command):
+
+```bash
+uv --version
+```
+
+If not installed, get it with:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+**Test the server starts and responds** by sending a JSON-RPC `initialize` request via stdio:
+
+```bash
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"clientInfo":{"name":"test"},"protocolVersion":"2024-11-05"}}' \
+  | YOUTRACK_URL="https://your-instance.youtrack.cloud" \
+    YOUTRACK_TOKEN="perm:your-token-here" \
+    uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
+```
+
+A successful response looks like:
+
+```json
+{"jsonrpc":"2.0","id":1,"result":{"serverInfo":{"name":"youtrack"},"capabilities":{"tools":{}},...}}
+```
+
+If you see `command not found: uvx`, install `uv` first (see above).
+
+**Test from a local clone:**
+
+```bash
+cd yt-mcp
+pip install -e .
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"clientInfo":{"name":"test"},"protocolVersion":"2024-11-05"}}' \
+  | YOUTRACK_URL="https://your-instance.youtrack.cloud" \
+    YOUTRACK_TOKEN="perm:your-token-here" \
+    yt-mcp
+```
+
+**List available tools** by sending a `tools/list` request after initialization:
+
+```bash
+printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"clientInfo":{"name":"test"},"protocolVersion":"2024-11-05"}}\n{"jsonrpc":"2.0","id":2,"method":"tools/list"}\n' \
+  | YOUTRACK_URL="https://your-instance.youtrack.cloud" \
+    YOUTRACK_TOKEN="perm:your-token-here" \
+    uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
+```
+
+You should see all five tools listed: `search_issues`, `get_issue`, `list_projects`, `get_agiles`, `create_issue`.
+
 ## Environment variables
 
 | Variable | Required | Description |
@@ -141,8 +194,53 @@ project: Backend tag: ZTNA                      # Backend issues tagged ZTNA
 
 ## Requirements
 
-- Python 3.10+
-- `uv` (recommended) or `pip`
+### Python 3.10+
+
+Check your version:
+
+```bash
+python3 --version
+```
+
+If not installed or below 3.10:
+
+- **macOS** (via [Homebrew](https://brew.sh)):
+  ```bash
+  brew install python@3.12
+  ```
+- **Ubuntu / Debian**:
+  ```bash
+  sudo apt update && sudo apt install python3 python3-pip
+  ```
+- **Windows**: download from [python.org](https://www.python.org/downloads/) or use `winget install Python.Python.3.12`
+
+### uv (recommended)
+
+[uv](https://docs.astral.sh/uv/) is a fast Python package manager. The `uvx` command (included with `uv`) is used to run the MCP server without a manual install.
+
+```bash
+uv --version   # check if already installed
+```
+
+If not installed:
+
+- **macOS / Linux**:
+  ```bash
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  ```
+  Then restart your shell or run `source $HOME/.local/bin/env`.
+
+- **macOS** (Homebrew alternative):
+  ```bash
+  brew install uv
+  ```
+
+- **Windows**:
+  ```powershell
+  powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+  ```
+
+If you prefer not to use `uv`, see [Alternative installation methods](#alternative-installation-methods) for `pip`-based setup.
 
 ## License
 
