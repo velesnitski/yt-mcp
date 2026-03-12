@@ -1,10 +1,10 @@
 # yt-mcp
 
-YouTrack MCP server for [Claude Code](https://claude.com/claude-code). Talk to your YouTrack instance in natural language.
+YouTrack MCP server for [Claude Code](https://claude.com/claude-code), [n8n](https://n8n.io), and any MCP-compatible client. Talk to your YouTrack instance in natural language.
 
 ## What it does
 
-Gives Claude Code live access to your YouTrack instance. Instead of opening the YouTrack UI, just ask:
+Gives MCP clients live access to your YouTrack instance. Instead of opening the YouTrack UI, just ask:
 
 - *"What open issues does the Android team have?"*
 - *"Show me DEVOPS-423"*
@@ -22,7 +22,7 @@ Gives Claude Code live access to your YouTrack instance. Instead of opening the 
 | `get_agiles` | List all agile boards |
 | `create_issue` | Create a new issue in a project |
 
-## Setup
+## Setup for Claude Code
 
 ### 1. Get a YouTrack permanent token
 
@@ -33,26 +33,17 @@ Gives Claude Code live access to your YouTrack instance. Instead of opening the 
 
 ### 2. Install in Claude Code
 
-Add to your Claude Code settings file:
+**Option A — via CLI** (recommended):
 
-**Per-project** — create/edit `.claude/settings.json` in your project root:
-
-```json
-{
-  "mcpServers": {
-    "youtrack": {
-      "command": "uvx",
-      "args": ["--from", "git+https://github.com/velesnitski/yt-mcp", "yt-mcp"],
-      "env": {
-        "YOUTRACK_URL": "https://your-instance.youtrack.cloud",
-        "YOUTRACK_TOKEN": "perm:your-token-here"
-      }
-    }
-  }
-}
+```bash
+claude mcp add -e YOUTRACK_URL=https://your-instance.youtrack.cloud \
+               -e YOUTRACK_TOKEN=perm:your-token-here \
+               youtrack -- uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
 ```
 
-**Global** (all projects) — edit `~/.claude/settings.json`:
+**Option B — manually edit settings:**
+
+Edit `~/.claude/settings.json` (global) or `.claude/settings.json` in your project root (per-project):
 
 ```json
 {
@@ -74,38 +65,10 @@ Add to your Claude Code settings file:
 > If Claude Code can't find `uvx` at startup (e.g., `/mcp` doesn't show the server), use the full path instead:
 >
 > ```json
-> {
->   "mcpServers": {
->     "youtrack": {
->       "command": "/full/path/to/uvx",
->       "args": ["--from", "git+https://github.com/velesnitski/yt-mcp", "yt-mcp"],
->       "env": {
->         "YOUTRACK_URL": "https://your-instance.youtrack.cloud",
->         "YOUTRACK_TOKEN": "perm:your-token-here"
->       }
->     }
->   }
-> }
+> "command": "/full/path/to/uvx"
 > ```
 >
 > Find the full path with `which uvx` (typically `~/.local/bin/uvx` or `/opt/homebrew/bin/uvx`).
-
-> **Troubleshooting: `claude mcp add` doesn't pass environment variables**
->
-> The `claude mcp add` CLI command does not support setting environment variables. If you add the server via CLI:
->
-> ```bash
-> claude mcp add youtrack -- /path/to/uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
-> ```
->
-> It will create the entry with `"env": {}` — missing `YOUTRACK_URL` and `YOUTRACK_TOKEN`. You must manually edit `~/.claude.json`, find the `youtrack` MCP entry under your project, and add the env vars:
->
-> ```json
-> "env": {
->   "YOUTRACK_URL": "https://your-instance.youtrack.cloud",
->   "YOUTRACK_TOKEN": "perm:your-token-here"
-> }
-> ```
 
 ### 3. Restart Claude Code
 
@@ -132,7 +95,7 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 **Test the server starts and responds** by sending a JSON-RPC `initialize` request via stdio:
 
 ```bash
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"clientInfo":{"name":"test"},"protocolVersion":"2024-11-05"}}' \
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"},"protocolVersion":"2024-11-05"}}' \
   | YOUTRACK_URL="https://your-instance.youtrack.cloud" \
     YOUTRACK_TOKEN="perm:your-token-here" \
     uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
@@ -151,7 +114,7 @@ If you see `command not found: uvx`, install `uv` first (see above).
 ```bash
 cd yt-mcp
 pip install -e .
-echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"clientInfo":{"name":"test"},"protocolVersion":"2024-11-05"}}' \
+echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"},"protocolVersion":"2024-11-05"}}' \
   | YOUTRACK_URL="https://your-instance.youtrack.cloud" \
     YOUTRACK_TOKEN="perm:your-token-here" \
     yt-mcp
@@ -160,7 +123,7 @@ echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},
 **List available tools** by sending a `tools/list` request after initialization:
 
 ```bash
-printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"clientInfo":{"name":"test"},"protocolVersion":"2024-11-05"}}\n{"jsonrpc":"2.0","id":2,"method":"tools/list"}\n' \
+printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{},"clientInfo":{"name":"test","version":"1.0.0"},"protocolVersion":"2024-11-05"}}\n{"jsonrpc":"2.0","id":2,"method":"tools/list"}\n' \
   | YOUTRACK_URL="https://your-instance.youtrack.cloud" \
     YOUTRACK_TOKEN="perm:your-token-here" \
     uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
@@ -206,8 +169,8 @@ Then use in settings:
 ```bash
 git clone https://github.com/velesnitski/yt-mcp.git
 cd yt-mcp
-pip install -r requirements.txt  # or: pip install mcp httpx
-python src/yt_mcp/server.py
+pip install -e .  # installs mcp and httpx dependencies
+yt-mcp
 ```
 
 ## Query syntax examples
