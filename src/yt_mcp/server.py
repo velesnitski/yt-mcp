@@ -180,6 +180,71 @@ async def create_issue(project: str, summary: str, description: str = "") -> str
         return f"Created: **{data.get('idReadable', '?')}** — {data.get('summary', '')}"
 
 
+@mcp.tool()
+async def update_issue(
+    issue_id: str,
+    summary: str = "",
+    description: str = "",
+    state: str = "",
+    assignee: str = "",
+) -> str:
+    """Update fields of an existing YouTrack issue.
+
+    Args:
+        issue_id: Issue ID (e.g., 'DEVOPS-423')
+        summary: New title (leave empty to keep current)
+        description: New description (leave empty to keep current)
+        state: New state name (e.g., 'In Progress', 'Done', 'Open')
+        assignee: New assignee login or full name (leave empty to keep current)
+    """
+    payload: dict = {}
+    if summary:
+        payload["summary"] = summary
+    if description:
+        payload["description"] = description
+
+    if not payload and not state and not assignee:
+        return "Nothing to update — provide at least one field."
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        if payload:
+            resp = await client.post(
+                f"{YOUTRACK_URL}/api/issues/{issue_id}",
+                json=payload,
+                headers={**_headers(), "Content-Type": "application/json"},
+            )
+            resp.raise_for_status()
+
+        commands = []
+        if state:
+            commands.append(f"State {state}")
+        if assignee:
+            commands.append(f"Assignee {assignee}")
+
+        if commands:
+            resp = await client.post(
+                f"{YOUTRACK_URL}/api/issues/{issue_id}/execute",
+                json={"query": " ".join(commands)},
+                headers={**_headers(), "Content-Type": "application/json"},
+            )
+            resp.raise_for_status()
+
+        # Fetch updated issue to confirm
+        resp = await client.get(
+            f"{YOUTRACK_URL}/api/issues/{issue_id}",
+            params={"fields": "idReadable,summary,state(name),assignee(name)"},
+            headers=_headers(),
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        a = data.get("assignee")
+        return (
+            f"Updated: **{data.get('idReadable', '?')}** — {data.get('summary', '')}\n"
+            f"**State:** {data.get('state', {}).get('name', '?')} | "
+            f"**Assignee:** {a.get('name') if a else 'Unassigned'}"
+        )
+
+
 def main():
     import argparse
 
