@@ -246,6 +246,158 @@ async def update_issue(
 
 
 @mcp.tool()
+async def get_issue_history(issue_id: str, max_results: int = 20) -> str:
+    """Get the change history of a YouTrack issue from the activity log.
+
+    Shows who changed what field, when, and the old/new values.
+    Useful for auditing changes or finding values to rollback.
+
+    Args:
+        issue_id: Issue ID (e.g., 'DEVOPS-423')
+        max_results: Maximum number of activities to return (default: 20)
+    """
+    from datetime import datetime, timezone
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.get(
+            f"{YOUTRACK_URL}/api/issues/{issue_id}/activities",
+            params={
+                "fields": "id,timestamp,author(name),field(name),"
+                "added(name,text),removed(name,text)",
+                "categories": "CustomFieldCategory,SummaryCategory,DescriptionCategory",
+                "$top": str(max_results),
+            },
+            headers=_headers(),
+        )
+        resp.raise_for_status()
+        activities = resp.json()
+
+        if not activities:
+            return f"No change history found for **{issue_id}**."
+
+        def _format_value(val):
+            if val is None:
+                return "(empty)"
+            if isinstance(val, list):
+                names = [v.get("name", "") or v.get("text", "") for v in val]
+                return ", ".join(names) if names else "(empty)"
+            if isinstance(val, str):
+                return val[:200] if len(val) > 200 else val
+            return str(val)
+
+        lines = [f"## Change history for {issue_id}", ""]
+        for a in activities:
+            field = a.get("field", {}).get("name", "?")
+            added = _format_value(a.get("added"))
+            removed = _format_value(a.get("removed"))
+            author = a.get("author", {}).get("name", "?")
+            ts = datetime.fromtimestamp(
+                a["timestamp"] / 1000, tz=timezone.utc
+            ).strftime("%Y-%m-%d %H:%M UTC")
+            activity_id = a.get("id", "?")
+            lines.append(
+                f"- `{activity_id}` **{field}**: {removed} → {added} "
+                f"(by {author}, {ts})"
+            )
+
+        return "\n".join(lines)
+
+
+@mcp.tool()
+async def rollback_issue(issue_id: str, activity_id: str) -> str:
+    """Rollback a specific change on a YouTrack issue by restoring the previous value.
+
+    Use get_issue_history first to find the activity_id of the change to revert.
+
+    Args:
+        issue_id: Issue ID (e.g., 'DEVOPS-423')
+        activity_id: Activity ID from get_issue_history (e.g., '0-0.88-598477')
+    """
+    async with httpx.AsyncClient(timeout=30) as client:
+        # Fetch the specific activity to get old value
+        resp = await client.get(
+            f"{YOUTRACK_URL}/api/issues/{issue_id}/activities",
+            params={
+                "fields": "id,field(name),added(name,text),removed(name,text)",
+                "categories": "CustomFieldCategory,SummaryCategory,DescriptionCategory",
+                "$top": 100,
+            },
+            headers=_headers(),
+        )
+        resp.raise_for_status()
+        activities = resp.json()
+
+        target = None
+        for a in activities:
+            if a.get("id") == activity_id:
+                target = a
+                break
+
+        if not target:
+            return f"Activity `{activity_id}` not found for **{issue_id}**."
+
+        field_name = target.get("field", {}).get("name", "")
+        removed = target.get("removed")  # this is the old value to restore
+
+        # Handle summary rollback via API
+        if field_name.lower() == "summary":
+            if isinstance(removed, str):
+                old_summary = removed
+            else:
+                return "Cannot determine old summary value."
+            resp = await client.post(
+                f"{YOUTRACK_URL}/api/issues/{issue_id}",
+                json={"summary": old_summary},
+                headers={**_headers(), "Content-Type": "application/json"},
+            )
+            resp.raise_for_status()
+            return (
+                f"Rolled back **{issue_id}** summary:\n"
+                f"**Restored:** {old_summary}"
+            )
+
+        # Handle description rollback via API
+        if field_name.lower() == "description":
+            old_desc = removed if isinstance(removed, str) else ""
+            resp = await client.post(
+                f"{YOUTRACK_URL}/api/issues/{issue_id}",
+                json={"description": old_desc},
+                headers={**_headers(), "Content-Type": "application/json"},
+            )
+            resp.raise_for_status()
+            return (
+                f"Rolled back **{issue_id}** description to previous version."
+            )
+
+        # Handle custom fields (State, Assignee, Priority, etc.) via command
+        if isinstance(removed, list) and removed:
+            old_value = removed[0].get("name", "")
+        elif isinstance(removed, list) and not removed:
+            # Field was empty before — need to unset
+            old_value = ""
+        else:
+            old_value = str(removed) if removed else ""
+
+        if not old_value:
+            return (
+                f"Cannot rollback **{field_name}** — previous value was empty. "
+                f"Use `update_issue` to manually set the desired value."
+            )
+
+        command = f"{field_name} {old_value}"
+        resp = await client.post(
+            f"{YOUTRACK_URL}/api/issues/{issue_id}/execute",
+            json={"query": command},
+            headers={**_headers(), "Content-Type": "application/json"},
+        )
+        resp.raise_for_status()
+        return (
+            f"Rolled back **{issue_id}**:\n"
+            f"**{field_name}:** restored to **{old_value}**"
+        )
+
+
+@mcp.tool()
 async def delete_issue(issue_id: str, permanent: bool = False) -> str:
     """Delete a YouTrack issue. By default performs a soft delete (sets state to Obsolete).
     Use permanent=True only when you need to remove the issue entirely — this cannot be undone.

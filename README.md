@@ -22,6 +22,8 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `get_agiles` | List all agile boards |
 | `create_issue` | Create a new issue in a project |
 | `update_issue` | Update issue fields (summary, description, state, assignee) |
+| `get_issue_history` | View change history of an issue (who changed what, when) |
+| `rollback_issue` | Revert a specific change using its activity ID |
 | `delete_issue` | Soft-delete (state → Obsolete) or permanently delete an issue |
 | `bulk_update_preview` | Preview which issues a bulk command would affect (dry run) |
 | `bulk_update_execute` | Apply a command to all issues matching a query |
@@ -137,7 +139,7 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{
     uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
 ```
 
-You should see all ten tools listed.
+You should see all twelve tools listed.
 
 ## Environment variables
 
