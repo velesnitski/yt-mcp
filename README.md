@@ -26,7 +26,8 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `rollback_issue` | Revert a specific change using its activity ID |
 | `delete_issue` | Soft-delete (state → Obsolete) or permanently delete an issue |
 | `bulk_update_preview` | Preview which issues a bulk command would affect (dry run) |
-| `bulk_update_execute` | Apply a command to all issues matching a query |
+| `bulk_update_execute` | Apply a command to all issues matching a query (auto-tags for rollback) |
+| `bulk_rollback` | Undo all changes from a bulk update batch using its tag |
 | `create_agile_board` | Create a new agile board for one or more projects |
 
 ## Setup for Claude Code
@@ -139,7 +140,7 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{
     uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
 ```
 
-You should see all twelve tools listed.
+You should see all thirteen tools listed.
 
 ## Environment variables
 

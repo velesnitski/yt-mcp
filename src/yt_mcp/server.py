@@ -492,11 +492,19 @@ async def bulk_update_preview(query: str, command: str, max_results: int = 50) -
 async def bulk_update_execute(query: str, command: str, max_results: int = 50) -> str:
     """Execute a bulk update on issues matching a query. DESTRUCTIVE — call bulk_update_preview first.
 
+    Each batch is tagged with a unique ID (e.g., 'yt-mcp-1741794000') for rollback.
+    Use bulk_rollback with the batch tag to undo all changes from a batch.
+
     Args:
         query: YouTrack search query to select issues (e.g., 'project: DO state: Open')
         command: YouTrack command to apply (e.g., 'State Done', 'Assignee John', 'tag Important')
         max_results: Maximum number of issues to update (default: 50)
     """
+    import time
+
+    batch_tag = f"yt-mcp-{int(time.time())}"
+    batch_ts = int(time.time() * 1000)  # ms timestamp for activity lookup
+
     async with httpx.AsyncClient(timeout=30) as client:
         # Fetch matching issues
         resp = await client.get(
@@ -514,11 +522,26 @@ async def bulk_update_execute(query: str, command: str, max_results: int = 50) -
         if not issues:
             return f"No issues match query: `{query}`"
 
-        # Apply command to each issue
+        # Tag all issues first, then apply command
+        tagged = []
         updated = []
         errors = []
+
         for issue in issues:
             issue_id = issue.get("idReadable", "?")
+            try:
+                # Add batch tag
+                resp = await client.post(
+                    f"{YOUTRACK_URL}/api/issues/{issue_id}/execute",
+                    json={"query": f"tag {batch_tag}"},
+                    headers={**_headers(), "Content-Type": "application/json"},
+                )
+                resp.raise_for_status()
+                tagged.append(issue_id)
+            except httpx.HTTPStatusError as e:
+                errors.append(f"{issue_id}: tag failed ({e.response.status_code})")
+
+        for issue_id in tagged:
             try:
                 resp = await client.post(
                     f"{YOUTRACK_URL}/api/issues/{issue_id}/execute",
@@ -528,13 +551,143 @@ async def bulk_update_execute(query: str, command: str, max_results: int = 50) -
                 resp.raise_for_status()
                 updated.append(issue_id)
             except httpx.HTTPStatusError as e:
-                errors.append(f"{issue_id}: {e.response.status_code}")
+                errors.append(f"{issue_id}: command failed ({e.response.status_code})")
 
         lines = [f"## Bulk update complete"]
+        lines.append(f"**Batch tag:** `{batch_tag}`")
         lines.append(f"**Command:** `{command}`")
         lines.append(f"**Updated:** {len(updated)} issues")
         if updated:
             lines.append(f"**IDs:** {', '.join(updated)}")
+        if errors:
+            lines.append(f"\n**Errors ({len(errors)}):**")
+            for err in errors:
+                lines.append(f"- {err}")
+        lines.append("")
+        lines.append(f"To undo: `bulk_rollback(batch_tag=\"{batch_tag}\")`")
+        return "\n".join(lines)
+
+
+@mcp.tool()
+async def bulk_rollback(batch_tag: str) -> str:
+    """Rollback all changes from a bulk update batch.
+
+    Finds all issues tagged with the batch tag, looks up the changes made
+    after the tag was applied, and reverts each change to its previous value.
+
+    Args:
+        batch_tag: The batch tag from bulk_update_execute (e.g., 'yt-mcp-1741794000')
+    """
+    from datetime import datetime, timezone
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        # Find all issues with the batch tag
+        resp = await client.get(
+            f"{YOUTRACK_URL}/api/issues",
+            params={
+                "query": f"tag: {{{batch_tag}}}",
+                "fields": "idReadable,summary",
+                "$top": 200,
+            },
+            headers=_headers(),
+        )
+        resp.raise_for_status()
+        issues = resp.json()
+
+        if not issues:
+            return f"No issues found with tag `{batch_tag}`. The batch may have already been rolled back."
+
+        # Extract timestamp from tag name
+        try:
+            batch_ts = int(batch_tag.split("-")[-1]) * 1000
+        except (ValueError, IndexError):
+            return f"Invalid batch tag format: `{batch_tag}`"
+
+        rolled_back = []
+        errors = []
+
+        for issue in issues:
+            issue_id = issue.get("idReadable", "?")
+            try:
+                # Fetch activities after the batch timestamp
+                resp = await client.get(
+                    f"{YOUTRACK_URL}/api/issues/{issue_id}/activities",
+                    params={
+                        "fields": "id,timestamp,field(name),"
+                        "added(name,text),removed(name,text)",
+                        "categories": "CustomFieldCategory,SummaryCategory,"
+                        "DescriptionCategory",
+                        "$top": 50,
+                    },
+                    headers=_headers(),
+                )
+                resp.raise_for_status()
+                activities = resp.json()
+
+                # Find changes made around the batch time (within 60s window)
+                batch_changes = [
+                    a for a in activities
+                    if a.get("timestamp", 0) >= batch_ts
+                    and a.get("timestamp", 0) <= batch_ts + 60000
+                    and a.get("field", {}).get("name", "").lower() != "tag"
+                ]
+
+                for change in batch_changes:
+                    field_name = change.get("field", {}).get("name", "")
+                    removed = change.get("removed")
+
+                    if field_name.lower() == "summary":
+                        if isinstance(removed, str) and removed:
+                            resp = await client.post(
+                                f"{YOUTRACK_URL}/api/issues/{issue_id}",
+                                json={"summary": removed},
+                                headers={**_headers(), "Content-Type": "application/json"},
+                            )
+                            resp.raise_for_status()
+                            rolled_back.append(f"{issue_id}: summary restored")
+                    elif field_name.lower() == "description":
+                        old_desc = removed if isinstance(removed, str) else ""
+                        resp = await client.post(
+                            f"{YOUTRACK_URL}/api/issues/{issue_id}",
+                            json={"description": old_desc},
+                            headers={**_headers(), "Content-Type": "application/json"},
+                        )
+                        resp.raise_for_status()
+                        rolled_back.append(f"{issue_id}: description restored")
+                    else:
+                        # Custom field — use command
+                        if isinstance(removed, list) and removed:
+                            old_value = removed[0].get("name", "")
+                        else:
+                            old_value = ""
+                        if old_value:
+                            resp = await client.post(
+                                f"{YOUTRACK_URL}/api/issues/{issue_id}/execute",
+                                json={"query": f"{field_name} {old_value}"},
+                                headers={**_headers(), "Content-Type": "application/json"},
+                            )
+                            resp.raise_for_status()
+                            rolled_back.append(f"{issue_id}: {field_name} → {old_value}")
+
+                # Remove the batch tag
+                resp = await client.post(
+                    f"{YOUTRACK_URL}/api/issues/{issue_id}/execute",
+                    json={"query": f"untag {batch_tag}"},
+                    headers={**_headers(), "Content-Type": "application/json"},
+                )
+                resp.raise_for_status()
+
+            except httpx.HTTPStatusError as e:
+                errors.append(f"{issue_id}: {e.response.status_code}")
+
+        lines = [f"## Bulk rollback complete"]
+        lines.append(f"**Batch tag:** `{batch_tag}`")
+        lines.append(f"**Issues processed:** {len(issues)}")
+        lines.append(f"**Changes reverted:** {len(rolled_back)}")
+        if rolled_back:
+            lines.append("")
+            for r in rolled_back:
+                lines.append(f"- {r}")
         if errors:
             lines.append(f"\n**Errors ({len(errors)}):**")
             for err in errors:
