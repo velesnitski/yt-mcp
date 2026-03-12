@@ -20,7 +20,9 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `get_issue` | Get full details of a specific issue (description, comments, fields) |
 | `list_projects` | List all accessible projects |
 | `get_agiles` | List all agile boards |
-| `create_issue` | Create a new issue in a project |
+| `list_templates` | List available issue templates |
+| `create_issue_from_template` | Create an issue using a template (bug, feature, task, daily, spike, release) |
+| `create_issue` | Create a new issue in a project (freeform) |
 | `update_issue` | Update issue fields (summary, description, state, assignee) |
 | `get_issue_history` | View change history of an issue (who changed what, when) |
 | `rollback_issue` | Revert a specific change using its activity ID |
