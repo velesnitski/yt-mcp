@@ -144,6 +144,33 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{
 
 You should see all thirteen tools listed.
 
+## Setup for Windows
+
+**1. Install uv** (Python package runner):
+
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+Restart your terminal after installation.
+
+**2. Get a YouTrack token:**
+
+Open YouTrack → **Profile** → **Account Security** → **Tokens** → **New token** → scope: `YouTrack` → copy the `perm:...` token.
+
+**3. Add the MCP server to Claude Code:**
+
+```powershell
+claude mcp add youtrack `
+  -e YOUTRACK_URL=https://your-instance.youtrack.cloud `
+  -e YOUTRACK_TOKEN=perm:your-token-here `
+  -- uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
+```
+
+> **Note:** If Claude Code can't find `uvx`, use the full path. Find it with `where uvx` (typically `%USERPROFILE%\.local\bin\uvx.exe`) and set `"command"` to that path in your settings.
+
+**4. Restart Claude Code** and try: *"List my YouTrack projects"*
+
 ## Environment variables
 
 | Variable | Required | Description |
