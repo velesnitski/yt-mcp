@@ -22,7 +22,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `get_agiles` | List all agile boards |
 | `create_issue` | Create a new issue in a project |
 | `update_issue` | Update issue fields (summary, description, state, assignee) |
-| `delete_issue` | Delete an issue permanently |
+| `delete_issue` | Soft-delete (state → Obsolete) or permanently delete an issue |
 | `bulk_update_preview` | Preview which issues a bulk command would affect (dry run) |
 | `bulk_update_execute` | Apply a command to all issues matching a query |
 | `create_agile_board` | Create a new agile board for one or more projects |
