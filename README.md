@@ -143,7 +143,7 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{
     uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
 ```
 
-You should see all thirteen tools listed.
+You should see all sixteen tools listed.
 
 ## Setup for Windows
 
