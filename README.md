@@ -226,15 +226,15 @@ The server includes built-in templates for creating structured issues. Ask Claud
 
 **Feature request:**
 
-> *"Create a feature request in WEB: add dark mode toggle to the extension popup. Should follow system theme by default. Must have priority."*
+> *"Create a feature request in WEB: add dark mode toggle to the settings page. Should follow system theme by default. Must have priority."*
 
 **DevOps task:**
 
-> *"Create a devops task in OPS: Deploy new nodes in two additional regions. Need 2 servers per region. Monitoring via monitoring. Affected services: free-tier, premium-tier."*
+> *"Create a devops task in OPS: Deploy new nodes in two additional regions. Need 2 servers per region with monitoring configured. Affected services: free-tier, premium-tier."*
 
 **Daily standup:**
 
-> *"Create a daily in OPS: Yesterday — fixed monitoring alerts for servers, deployed config update to staging. Today — production rollout, server audit. No blockers."*
+> *"Create a daily in OPS: Yesterday — fixed monitoring alerts, deployed config update to staging. Today — production rollout, server audit. No blockers."*
 
 **Research spike:**
 
