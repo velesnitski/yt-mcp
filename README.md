@@ -12,20 +12,26 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 - *"List all agile boards"*
 - *"What did the DevOps team close this week?"*
 
-### Available tools
+### Available tools (22)
 
 | Tool | Description |
 |---|---|
 | `search_issues` | Search issues using [YouTrack query syntax](https://www.jetbrains.com/help/youtrack/server/Search-and-Command-Attributes.html) |
-| `get_issue` | Get full details of a specific issue (description, comments, fields) |
+| `get_issue` | Get full details of a specific issue (description, comments, fields, links) |
+| `get_issue_links` | Get all linked issues (parent, subtask, depends on, relates to, duplicates) |
+| `add_issue_link` | Link two issues together (relates, depends on, parent/subtask, duplicates) |
+| `add_comment` | Add a comment to an issue (markdown supported) |
 | `list_projects` | List all accessible projects |
 | `get_agiles` | List all agile boards |
 | `get_agile_board` | Search for an agile board by name (partial match) |
+| `get_sprint_board` | Get issues on an agile board grouped by column/state for a sprint |
 | `list_templates` | List available issue templates |
-| `create_issue_from_template` | Create an issue using a template (bug, feature, task, daily, spike, release) |
+| `create_issue_from_template` | Create an issue using a template (bug, feature, task, daily, spike, release, devops, incident, epic) |
 | `create_issue` | Create a new issue in a project (freeform) |
-| `update_issue` | Update issue fields (summary, description, state, assignee) |
+| `update_issue` | Update issue fields (summary, description, state, assignee, tags) |
 | `get_issue_history` | View change history of an issue (who changed what, when) |
+| `get_issue_changes_summary` | Get a compact summary of issue changes (state transitions, comments, time logged) |
+| `get_work_items` | Get time tracking work items for an issue |
 | `rollback_issue` | Revert a specific change using its activity ID |
 | `delete_issue` | Soft-delete (state → Obsolete) or permanently delete an issue |
 | `bulk_update_preview` | Preview which issues a bulk command would affect (dry run) |
@@ -143,7 +149,7 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{
     uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
 ```
 
-You should see all sixteen tools listed.
+You should see all 22 tools listed.
 
 ## Setup for Windows
 
@@ -245,6 +251,8 @@ The server includes built-in templates for creating structured issues. Ask Claud
 | `spike` | Goal, Context, Scope, Timebox, Findings, Recommendation |
 | `release` | Version, Changes, Pre/Post-release Checklists, Rollback Plan |
 | `devops` | Description, Requirement, Expected Result, Affected Services, Rollback Plan |
+| `incident` | Impact, Symptoms, Environment, Steps to Reproduce, Root Cause, Fix Applied, Prevention |
+| `epic` | Goal, Background, Scope, Success Criteria, Dependencies, Risks, Subtasks |
 
 ### Examples
 
