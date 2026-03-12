@@ -230,7 +230,7 @@ The server includes built-in templates for creating structured issues. Ask Claud
 
 **DevOps task:**
 
-> *"Create a devops task in OPS: Deploy new nodes in two additional regions. Need 2 servers per region with monitoring configured. Monitoring via monitoring. Affected services: free-tier, premium-tier."*
+> *"Create a devops task in OPS: Deploy new nodes in two additional regions. Need 2 servers per region. Monitoring via monitoring. Affected services: free-tier, premium-tier."*
 
 **Daily standup:**
 
