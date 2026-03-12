@@ -90,6 +90,23 @@ Add to your Claude Code settings file:
 >
 > Find the full path with `which uvx` (typically `~/.local/bin/uvx` or `/opt/homebrew/bin/uvx`).
 
+> **Troubleshooting: `claude mcp add` doesn't pass environment variables**
+>
+> The `claude mcp add` CLI command does not support setting environment variables. If you add the server via CLI:
+>
+> ```bash
+> claude mcp add youtrack -- /path/to/uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
+> ```
+>
+> It will create the entry with `"env": {}` — missing `YOUTRACK_URL` and `YOUTRACK_TOKEN`. You must manually edit `~/.claude.json`, find the `youtrack` MCP entry under your project, and add the env vars:
+>
+> ```json
+> "env": {
+>   "YOUTRACK_URL": "https://your-instance.youtrack.cloud",
+>   "YOUTRACK_TOKEN": "perm:your-token-here"
+> }
+> ```
+
 ### 3. Restart Claude Code
 
 ```bash
