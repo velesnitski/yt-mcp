@@ -53,6 +53,13 @@ class YouTrackClient:
     async def execute_command(self, issue_id: str, command: str) -> None:
         await self.post(f"/api/issues/{issue_id}/execute", json={"query": command})
 
+    async def update_comment(self, issue_id: str, comment_id: str, text: str) -> dict:
+        """Update an existing comment's text."""
+        return await self.post(
+            f"/api/issues/{issue_id}/comments/{comment_id}",
+            json={"text": text},
+        )
+
     async def resolve_project_id(self, short_name: str) -> str | None:
         projects = await self.get(
             "/api/admin/projects",

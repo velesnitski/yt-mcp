@@ -59,7 +59,7 @@ def register(mcp, client: YouTrackClient):
             "customFields(name,value(name))))"
         )
         if include_comments:
-            fields += ",comments(text,author(name),created)"
+            fields += ",comments(id,text,author(name),created)"
 
         data = await client.get(
             f"/api/issues/{issue_id}",

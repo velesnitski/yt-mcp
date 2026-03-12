@@ -147,10 +147,10 @@ def register(mcp, client: YouTrackClient):
                     f"/api/issues/{issue_id}/activities",
                     params={
                         "fields": "id,timestamp,field(name),"
-                        "added(name,text),removed(name,text)",
+                        "added(id,name,text),removed(id,name,text)",
                         "categories": "CustomFieldCategory,SummaryCategory,"
-                        "DescriptionCategory",
-                        "$top": 50,
+                        "DescriptionCategory,CommentsCategory",
+                        "$top": 100,
                     },
                 )
 
@@ -179,6 +179,26 @@ def register(mcp, client: YouTrackClient):
                             json={"description": old_desc},
                         )
                         rolled_back.append(f"{issue_id}: description restored")
+                    elif field_name.lower() == "comments":
+                        # Comment was edited — restore old text
+                        if isinstance(removed, list):
+                            for old_comment in removed:
+                                c_id = old_comment.get("id", "")
+                                c_text = old_comment.get("text", "")
+                                if c_id and c_text:
+                                    await client.update_comment(issue_id, c_id, c_text)
+                                    rolled_back.append(f"{issue_id}: comment {c_id} restored")
+                        # Comment was added — check if it's an audit comment to delete
+                        added = change.get("added")
+                        if isinstance(added, list):
+                            for new_comment in added:
+                                c_id = new_comment.get("id", "")
+                                c_text = new_comment.get("text", "")
+                                if c_id and c_text and "[yt-mcp]" in c_text:
+                                    await client.delete(
+                                        f"/api/issues/{issue_id}/comments/{c_id}"
+                                    )
+                                    rolled_back.append(f"{issue_id}: audit comment removed")
                     else:
                         if isinstance(removed, list) and removed:
                             old_value = removed[0].get("name", "")
