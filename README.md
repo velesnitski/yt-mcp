@@ -223,10 +223,62 @@ created: -3d .. today                           # issues created in last 3 days
 project: Backend tag: ZTNA                      # Backend issues tagged ZTNA
 ```
 
+## Using with n8n, Langchain, and other HTTP clients
+
+By default the server uses **stdio** transport (for Claude Code). For integration with **n8n**, **Langchain**, **OpenAI Agents SDK**, or any HTTP-based MCP client, start the server in **SSE** or **streamable-http** mode:
+
+### Start the server with SSE transport
+
+```bash
+YOUTRACK_URL="https://your-instance.youtrack.cloud" \
+YOUTRACK_TOKEN="perm:your-token-here" \
+uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp --transport sse --port 8000
+```
+
+The server will be available at `http://localhost:8000/sse`.
+
+### Start with streamable HTTP transport
+
+```bash
+YOUTRACK_URL="https://your-instance.youtrack.cloud" \
+YOUTRACK_TOKEN="perm:your-token-here" \
+uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp --transport streamable-http --port 8000
+```
+
+The server will be available at `http://localhost:8000/mcp`.
+
+### CLI options
+
+| Flag | Default | Description |
+|---|---|---|
+| `--transport` | `stdio` | Transport protocol: `stdio`, `sse`, or `streamable-http` |
+| `--host` | `0.0.0.0` | Host to bind to |
+| `--port` | `8000` | Port to bind to |
+
+### n8n setup
+
+1. Start the server in SSE mode (see above)
+2. In n8n, add an **MCP Client** node (or use the HTTP Request node)
+3. Set the MCP server URL to `http://localhost:8000/sse`
+4. The five YouTrack tools will be available as actions in your n8n workflows
+
+### Docker (for remote / always-on deployments)
+
+```bash
+docker run -d --name youtrack-mcp \
+  -e YOUTRACK_URL="https://your-instance.youtrack.cloud" \
+  -e YOUTRACK_TOKEN="perm:your-token-here" \
+  -p 8000:8000 \
+  ghcr.io/velesnitski/yt-mcp --transport sse
+```
+
+> **Note:** Docker image is not yet published. For now, use the local install method with `uvx` or `pip`.
+
 ## Security
 
 - Tokens are passed via environment variables — never hardcoded
-- The server runs locally on your machine via stdio (no network exposure)
+- In **stdio** mode, the server has no network exposure (local pipes only)
+- In **SSE/HTTP** mode, the server listens on a network port — bind to `127.0.0.1` if you don't need external access, or use a reverse proxy with authentication for production
 - YouTrack API calls use HTTPS
 - Consider using a token with minimal required permissions (read-only if you don't need `create_issue`)
 
