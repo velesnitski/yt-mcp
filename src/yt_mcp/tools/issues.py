@@ -110,8 +110,24 @@ def register(mcp, client: YouTrackClient):
         product: str = "",
         add_tag: str = "",
         remove_tag: str = "",
+        command: str = "",
     ) -> str:
         """Update fields of an existing YouTrack issue.
+
+        Returns previous field values so changes can be rolled back.
+
+        The `command` parameter accepts any YouTrack command string and can set
+        ANY field, including custom fields. Multiple commands can be combined in
+        one string. Use this for fields not covered by the explicit parameters.
+
+        Command examples:
+            "Priority High"
+            "Type Bug Priority Critical"
+            "Deadline 2026-04-01"
+            "Version Main"
+            "Dev Estimate 12"
+            "Assignee John, Jane"  (multiple assignees)
+            "project MOBILE"  (move issue to another project)
 
         Args:
             issue_id: Issue ID (e.g., 'DEVOPS-423')
@@ -122,19 +138,58 @@ def register(mcp, client: YouTrackClient):
             product: Product name for the Product custom field (leave empty to keep current)
             add_tag: Tag name to add to the issue (leave empty to skip)
             remove_tag: Tag name to remove from the issue (leave empty to skip)
+            command: YouTrack command string for any field (e.g., 'Priority High Type Bug')
         """
+        has_changes = (
+            summary or description or state or assignee
+            or product or add_tag or remove_tag or command
+        )
+        if not has_changes:
+            return "Nothing to update — provide at least one field or command."
+
+        # Snapshot before changes for rollback
+        before = await client.get(
+            f"/api/issues/{issue_id}",
+            params={
+                "fields": "idReadable,summary,description,"
+                "state(name),assignee(name),tags(name),"
+                "customFields(name,value(name,login))",
+            },
+        )
+
+        from yt_mcp.formatters import _resolve_state, _resolve_assignee
+        old_summary = before.get("summary", "?")
+        old_state = _resolve_state(before)
+        old_assignee = _resolve_assignee(before)
+        old_tags = [t.get("name", "") for t in before.get("tags", [])]
+
+        # Collect old custom field values for rollback info
+        old_fields: dict[str, str] = {}
+        for cf in before.get("customFields", []):
+            cf_name = cf.get("name", "")
+            cf_value = cf.get("value")
+            if cf_value is None:
+                old_fields[cf_name] = "(empty)"
+            elif isinstance(cf_value, list):
+                old_fields[cf_name] = ", ".join(
+                    v.get("name", v.get("login", "?")) for v in cf_value
+                )
+            elif isinstance(cf_value, dict):
+                old_fields[cf_name] = cf_value.get("name", cf_value.get("login", "?"))
+            else:
+                old_fields[cf_name] = str(cf_value)
+
+        # Apply REST API changes (summary, description)
         payload: dict = {}
         if summary:
             payload["summary"] = summary
         if description:
             payload["description"] = description
 
-        if not payload and not state and not assignee and not product and not add_tag and not remove_tag:
-            return "Nothing to update — provide at least one field."
-
         if payload:
             await client.post(f"/api/issues/{issue_id}", json=payload)
 
+        # Build command string from explicit params + raw command
         commands = []
         if state:
             commands.append(f"State {state}")
@@ -146,27 +201,80 @@ def register(mcp, client: YouTrackClient):
             commands.append(f"tag {add_tag}")
         if remove_tag:
             commands.append(f"untag {remove_tag}")
+        if command:
+            commands.append(command)
 
         if commands:
             await client.execute_command(issue_id, " ".join(commands))
 
-        data = await client.get(
+        # Fetch updated state
+        after = await client.get(
             f"/api/issues/{issue_id}",
             params={
                 "fields": "idReadable,summary,state(name),assignee(name),"
-                "customFields(name,value(name)),tags(name)",
+                "customFields(name,value(name,login)),tags(name)",
             },
         )
-        from yt_mcp.formatters import _resolve_state, _resolve_assignee
-        a_name = _resolve_assignee(data)
-        s_name = _resolve_state(data)
-        tags = data.get("tags", [])
-        tag_str = f" | **Tags:** {', '.join(t.get('name', '') for t in tags)}" if tags else ""
-        return (
-            f"Updated: **{data.get('idReadable', '?')}** — {data.get('summary', '')}\n"
-            f"**State:** {s_name} | "
-            f"**Assignee:** {a_name}{tag_str}"
-        )
+        new_state = _resolve_state(after)
+        new_assignee = _resolve_assignee(after)
+        new_tags = [t.get("name", "") for t in after.get("tags", [])]
+
+        # Build response with changes + rollback info
+        parts = [
+            f"Updated: **{after.get('idReadable', '?')}** — {after.get('summary', '')}"
+        ]
+
+        # Show what changed
+        changes = []
+        if summary and summary != old_summary:
+            changes.append(f"**Summary:** {old_summary} → {summary}")
+        if new_state != old_state:
+            changes.append(f"**State:** {old_state} → {new_state}")
+        if new_assignee != old_assignee:
+            changes.append(f"**Assignee:** {old_assignee} → {new_assignee}")
+        if new_tags != old_tags:
+            changes.append(f"**Tags:** {', '.join(old_tags) or '(none)'} → {', '.join(new_tags) or '(none)'}")
+
+        # Check custom fields for changes
+        for cf in after.get("customFields", []):
+            cf_name = cf.get("name", "")
+            cf_value = cf.get("value")
+            if cf_value is None:
+                new_val = "(empty)"
+            elif isinstance(cf_value, list):
+                new_val = ", ".join(
+                    v.get("name", v.get("login", "?")) for v in cf_value
+                )
+            elif isinstance(cf_value, dict):
+                new_val = cf_value.get("name", cf_value.get("login", "?"))
+            else:
+                new_val = str(cf_value)
+            old_val = old_fields.get(cf_name, "(empty)")
+            if new_val != old_val:
+                changes.append(f"**{cf_name}:** {old_val} → {new_val}")
+
+        if changes:
+            parts.append("")
+            parts.extend(changes)
+        else:
+            parts.append("No field changes detected.")
+
+        # Rollback instructions
+        rollback_parts = []
+        if summary:
+            rollback_parts.append(f"summary=\"{old_summary}\"")
+        if state:
+            rollback_parts.append(f"state=\"{old_state}\"")
+        if assignee:
+            rollback_parts.append(f"assignee=\"{old_assignee}\"")
+        if command:
+            rollback_parts.append(f"(use `rollback_issue` with activity ID for command fields)")
+
+        if rollback_parts:
+            parts.append("")
+            parts.append(f"To restore: `update_issue({issue_id}, {', '.join(rollback_parts)})`")
+
+        return "\n".join(parts)
 
     @mcp.tool()
     async def delete_issue(issue_id: str, permanent: bool = False) -> str:

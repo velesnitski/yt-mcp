@@ -31,7 +31,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `list_templates` | List available issue templates |
 | `create_issue_from_template` | Create an issue using a template (bug, feature, task, daily, spike, release, devops, incident, epic) |
 | `create_issue` | Create a new issue in a project (freeform) |
-| `update_issue` | Update issue fields (summary, description, state, assignee, tags) |
+| `update_issue` | Update any issue field (summary, state, priority, type, deadline, custom fields via command) |
 | `get_issue_history` | View change history of an issue (who changed what, when) |
 | `get_issue_changes_summary` | Get a compact summary of issue changes (state transitions, comments, time logged) |
 | `get_work_items` | Get time tracking work items for an issue |
