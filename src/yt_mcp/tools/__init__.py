@@ -1,5 +1,5 @@
 from yt_mcp.config import YouTrackConfig
-from yt_mcp.tools import issues, templates, history, bulk, projects, translate, impact
+from yt_mcp.tools import issues, templates, history, bulk, projects, translate, impact, users, articles
 
 # Tools that modify data — blocked in read-only mode
 WRITE_TOOLS = frozenset({
@@ -21,12 +21,18 @@ WRITE_TOOLS = frozenset({
     "delete_agile_board",
     "apply_translations",
     "rollback_issue",
+    "create_article",
+    "update_article",
+    "delete_article",
+    "add_article_comment",
+    "update_article_comment",
+    "delete_article_comment",
 })
 
 
 def register_all(mcp, client, config: YouTrackConfig | None = None):
     # Collect all tools first, then filter
-    modules = [issues, templates, history, bulk, projects, translate, impact]
+    modules = [issues, templates, history, bulk, projects, translate, impact, users, articles]
     for module in modules:
         module.register(mcp, client)
 
