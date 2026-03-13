@@ -9,56 +9,96 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 - *"What open issues does the Android team have?"*
 - *"Show me DEVOPS-423"*
 - *"Create a bug in the WordPress project: homepage returns 500"*
+- *"Set priority to Critical and assign to John"*
 - *"List all agile boards"*
 - *"What did the DevOps team close this week?"*
+- *"Log 2 hours of development on BAC-1828"*
+- *"Find articles about deployment"*
 
 ### Available tools (43)
+
+#### Issues (16)
 
 | Tool | Description |
 |---|---|
 | `search_issues` | Search issues using [YouTrack query syntax](https://www.jetbrains.com/help/youtrack/server/Search-and-Command-Attributes.html) |
 | `get_issue` | Get full details of a specific issue (description, comments, fields, links) |
+| `create_issue` | Create a new issue in a project (freeform) |
+| `create_issue_from_template` | Create an issue using a template (bug, feature, task, daily, spike, release, devops, incident, epic) |
+| `update_issue` | Update any issue field — summary, state, priority, type, deadline, assignee, custom fields via [command syntax](https://www.jetbrains.com/help/youtrack/server/Command-Reference.html) |
+| `delete_issue` | Soft-delete (state → Obsolete) or permanently delete an issue |
 | `get_issue_links` | Get all linked issues (parent, subtask, depends on, relates to, duplicates) |
 | `add_issue_link` | Link two issues together (relates, depends on, parent/subtask, duplicates) |
 | `remove_issue_link` | Remove a link between two issues |
 | `add_comment` | Add a comment to an issue (markdown supported) |
 | `update_comment` | Edit an existing comment on an issue |
 | `delete_comment` | Delete a comment from an issue |
-| `list_projects` | List all accessible projects |
+| `get_issue_history` | View change history of an issue (who changed what, when) |
+| `get_issue_changes_summary` | Get a compact summary of issue changes (state transitions, comments, time logged) |
+| `rollback_issue` | Revert a specific change using its activity ID |
+| `list_templates` | List available issue templates |
+
+#### Time tracking (4)
+
+| Tool | Description |
+|---|---|
+| `get_work_items` | Get time tracking work items for an issue |
+| `add_work_item` | Log time to an issue (duration, date, type, description) |
+| `update_work_item` | Update an existing work item (duration, date, description) |
+| `delete_work_item` | Delete a work item from an issue |
+
+#### Agile boards (5)
+
+| Tool | Description |
+|---|---|
 | `get_agiles` | List all agile boards |
 | `get_agile_board` | Search for an agile board by name (partial match) |
 | `get_sprint_board` | Get issues on an agile board grouped by column/state for a sprint |
-| `list_templates` | List available issue templates |
-| `create_issue_from_template` | Create an issue using a template (bug, feature, task, daily, spike, release, devops, incident, epic) |
-| `create_issue` | Create a new issue in a project (freeform) |
-| `update_issue` | Update any issue field (summary, state, priority, type, deadline, custom fields via command) |
-| `get_issue_history` | View change history of an issue (who changed what, when) |
-| `get_issue_changes_summary` | Get a compact summary of issue changes (state transitions, comments, time logged) |
-| `get_work_items` | Get time tracking work items for an issue |
-| `add_work_item` | Log time (add a work item) to an issue |
-| `update_work_item` | Update an existing work item (duration, date, description) |
-| `delete_work_item` | Delete a work item from an issue |
-| `rollback_issue` | Revert a specific change using its activity ID |
-| `delete_issue` | Soft-delete (state → Obsolete) or permanently delete an issue |
-| `bulk_update_preview` | Preview which issues a bulk command would affect (dry run) |
-| `bulk_update_execute` | Apply a command to all issues matching a query (auto-tags for rollback) |
-| `bulk_rollback` | Undo all changes from a bulk update batch using its tag |
 | `create_agile_board` | Create a new agile board for one or more projects |
 | `delete_agile_board` | Delete an agile board (issues are not affected) |
-| `get_issues_for_translation` | Fetch issues with Cyrillic text for LLM-assisted translation |
-| `apply_translations` | Apply translated text to issues with batch tagging for rollback |
-| `get_impact_map` | Build cross-product dependency graph from an issue (links, product overlap, mentions) |
-| `get_deadline_impact` | Analyze what breaks if an issue slips (blocked, at risk, done) |
+
+#### Projects & users (3)
+
+| Tool | Description |
+|---|---|
+| `list_projects` | List all accessible projects |
 | `get_current_user` | Get the authenticated user's profile |
 | `search_users` | Search users by name, login, or email |
+
+#### Knowledge Base (8)
+
+| Tool | Description |
+|---|---|
 | `search_articles` | Search Knowledge Base articles |
 | `get_article` | Get a KB article with full content and comments |
-| `create_article` | Create a new KB article |
+| `create_article` | Create a new KB article (with optional nesting) |
 | `update_article` | Update a KB article (title, content) |
 | `delete_article` | Delete a KB article |
 | `add_article_comment` | Add a comment to a KB article |
 | `update_article_comment` | Edit a comment on a KB article |
 | `delete_article_comment` | Delete a comment from a KB article |
+
+#### Bulk operations (3)
+
+| Tool | Description |
+|---|---|
+| `bulk_update_preview` | Preview which issues a bulk command would affect (dry run) |
+| `bulk_update_execute` | Apply a command to all issues matching a query (auto-tags for rollback) |
+| `bulk_rollback` | Undo all changes from a bulk update batch using its tag |
+
+#### Translation (2)
+
+| Tool | Description |
+|---|---|
+| `get_issues_for_translation` | Fetch issues with Cyrillic text for LLM-assisted translation |
+| `apply_translations` | Apply translated text to issues with batch tagging for rollback |
+
+#### Impact analysis (2)
+
+| Tool | Description |
+|---|---|
+| `get_impact_map` | Build cross-product dependency graph from an issue (links, product overlap, mentions) |
+| `get_deadline_impact` | Analyze what breaks if an issue slips (blocked, at risk, done) |
 
 ## Setup for Claude Code
 
@@ -245,6 +285,27 @@ pip install -e .  # installs mcp and httpx dependencies
 yt-mcp
 ```
 
+## Updating any field
+
+The `update_issue` tool can update **any** YouTrack field — not just summary and state. Use the `command` parameter with [YouTrack command syntax](https://www.jetbrains.com/help/youtrack/server/Command-Reference.html):
+
+```
+Priority Critical                          # set priority
+Type Bug                                   # set issue type
+Deadline 2026-04-01                        # set deadline
+Assignee John, Jane                        # multiple assignees
+Version 2.5.0                              # set version
+Dev Estimate 12                            # set custom numeric field
+State In Progress Priority High Type Task  # multiple fields at once
+project MOBILE                             # move issue to another project
+```
+
+All changes show a before/after diff and return rollback instructions.
+
+> *"Set DEVOPS-423 priority to Critical and assign to John"*
+> *"Move BAC-100 to the MOBILE project and set deadline to April 1st"*
+> *"Set dev estimate to 8 and QA estimate to 3 on iOS-55"*
+
 ## Query syntax examples
 
 The `search_issues` tool accepts standard [YouTrack search queries](https://www.jetbrains.com/help/youtrack/server/Search-and-Command-Attributes.html):
@@ -370,7 +431,7 @@ docker run -d --name youtrack-mcp \
 
 ### Read-only mode
 
-To disable all write operations (create, update, delete, bulk execute):
+To disable all write operations (create, update, delete issues/articles, bulk execute, time tracking):
 
 ```bash
 YOUTRACK_READ_ONLY=true
