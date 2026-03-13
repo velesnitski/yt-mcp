@@ -1,5 +1,5 @@
 from yt_mcp.client import YouTrackClient
-from yt_mcp.formatters import _resolve_state, get_product
+from yt_mcp.formatters import _resolve_state, get_product, parse_issue_id
 
 
 def register(mcp, client: YouTrackClient):
@@ -115,9 +115,10 @@ def register(mcp, client: YouTrackClient):
         - Text mentions (issues referencing this issue ID)
 
         Args:
-            issue_id: Root issue ID (e.g., 'BAC-1828')
+            issue_id: Root issue ID (e.g., 'BAC-1828') or YouTrack issue URL
             depth: How many levels of links to follow (default: 2)
         """
+        issue_id = parse_issue_id(issue_id)
         graph = await _build_impact_graph(client, issue_id, depth)
 
         if len(graph) <= 1:
@@ -199,9 +200,10 @@ def register(mcp, client: YouTrackClient):
         - DONE: already completed, unaffected
 
         Args:
-            issue_id: Root issue ID (e.g., 'BAC-1828')
+            issue_id: Root issue ID (e.g., 'BAC-1828') or YouTrack issue URL
             deadline: Optional deadline date (e.g., '2026-03-14'). For context only.
         """
+        issue_id = parse_issue_id(issue_id)
         graph = await _build_impact_graph(client, issue_id, depth=2)
 
         if len(graph) <= 1:

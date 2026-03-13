@@ -1,5 +1,5 @@
 from yt_mcp.client import YouTrackClient
-from yt_mcp.formatters import format_issue_list, format_issue_detail, _resolve_state, _get_custom_field
+from yt_mcp.formatters import format_issue_list, format_issue_detail, _resolve_state, _get_custom_field, parse_issue_id
 
 
 def register(mcp, client: YouTrackClient):
@@ -44,13 +44,14 @@ def register(mcp, client: YouTrackClient):
 
     @mcp.tool()
     async def get_issue(issue_id: str, include_comments: bool = True) -> str:
-        """Get full details of a specific YouTrack issue by its ID (e.g., 'DEVOPS-423').
+        """Get full details of a specific YouTrack issue.
 
         Args:
-            issue_id: Issue ID (e.g., 'DEVOPS-423')
+            issue_id: Issue ID (e.g., 'DEVOPS-423') or YouTrack issue URL
             include_comments: Whether to include comments in output (default: True).
                              Set to False for long issues where comments aren't needed.
         """
+        issue_id = parse_issue_id(issue_id)
         fields = (
             "idReadable,summary,description,state(name),priority(name),"
             "assignee(name),created,updated,resolved,"
@@ -130,7 +131,7 @@ def register(mcp, client: YouTrackClient):
             "project MOBILE"  (move issue to another project)
 
         Args:
-            issue_id: Issue ID (e.g., 'DEVOPS-423')
+            issue_id: Issue ID (e.g., 'DEVOPS-423') or YouTrack issue URL
             summary: New title (leave empty to keep current)
             description: New description (leave empty to keep current)
             state: New state name (e.g., 'In Progress', 'Done', 'Open')
@@ -140,6 +141,7 @@ def register(mcp, client: YouTrackClient):
             remove_tag: Tag name to remove from the issue (leave empty to skip)
             command: YouTrack command string for any field (e.g., 'Priority High Type Bug')
         """
+        issue_id = parse_issue_id(issue_id)
         has_changes = (
             summary or description or state or assignee
             or product or add_tag or remove_tag or command
@@ -282,9 +284,10 @@ def register(mcp, client: YouTrackClient):
         Use permanent=True only when you need to remove the issue entirely — this cannot be undone.
 
         Args:
-            issue_id: Issue ID (e.g., 'DEVOPS-423')
+            issue_id: Issue ID (e.g., 'DEVOPS-423') or YouTrack issue URL
             permanent: If True, permanently delete the issue. If False (default), set state to Obsolete.
         """
+        issue_id = parse_issue_id(issue_id)
         data = await client.get(
             f"/api/issues/{issue_id}",
             params={
@@ -310,8 +313,9 @@ def register(mcp, client: YouTrackClient):
         """Get all linked issues (parent, subtask, depends on, relates to, duplicates).
 
         Args:
-            issue_id: Issue ID (e.g., 'BAC-1828')
+            issue_id: Issue ID (e.g., 'BAC-1828') or YouTrack issue URL
         """
+        issue_id = parse_issue_id(issue_id)
         data = await client.get(
             f"/api/issues/{issue_id}",
             params={
@@ -367,12 +371,13 @@ def register(mcp, client: YouTrackClient):
         """Link two issues together.
 
         Args:
-            issue_id: Source issue ID (e.g., 'BAC-1828')
-            target_id: Target issue ID to link to (e.g., 'BAC-1234')
+            issue_id: Source issue ID (e.g., 'BAC-1828') or YouTrack issue URL
+            target_id: Target issue ID to link to (e.g., 'BAC-1234') or YouTrack issue URL
             link_type: Relationship type — 'Relates', 'Depends on', 'Is required for',
                        'Duplicates', 'Is duplicated by', 'Parent for', 'Subtask of'
         """
-        # Use YouTrack command API to create the link
+        issue_id = parse_issue_id(issue_id)
+        target_id = parse_issue_id(target_id)
         command = f"{link_type} {target_id}"
         await client.execute_command(issue_id, command)
         return f"Linked **{issue_id}** → **{target_id}** ({link_type})"
@@ -389,12 +394,13 @@ def register(mcp, client: YouTrackClient):
         the original link type used when creating the link.
 
         Args:
-            issue_id: Source issue ID (e.g., 'BAC-1828')
-            target_id: Target issue ID to unlink (e.g., 'BAC-1234')
+            issue_id: Source issue ID (e.g., 'BAC-1828') or YouTrack issue URL
+            target_id: Target issue ID to unlink (e.g., 'BAC-1234') or YouTrack issue URL
             link_type: Relationship type to remove — 'Relates', 'Depends on', 'Is required for',
                        'Duplicates', 'Is duplicated by', 'Parent for', 'Subtask of'
         """
-        # YouTrack command: prefix with "remove" to delete a link
+        issue_id = parse_issue_id(issue_id)
+        target_id = parse_issue_id(target_id)
         command = f"remove {link_type} {target_id}"
         await client.execute_command(issue_id, command)
         return f"Unlinked **{issue_id}** → **{target_id}** ({link_type})"
@@ -404,9 +410,10 @@ def register(mcp, client: YouTrackClient):
         """Add a comment to a YouTrack issue.
 
         Args:
-            issue_id: Issue ID (e.g., 'BAC-1828')
+            issue_id: Issue ID (e.g., 'BAC-1828') or YouTrack issue URL
             text: Comment text (markdown supported)
         """
+        issue_id = parse_issue_id(issue_id)
         data = await client.post(
             f"/api/issues/{issue_id}/comments",
             json={"text": text},
@@ -422,10 +429,11 @@ def register(mcp, client: YouTrackClient):
         Use get_issue with include_comments=True to find comment IDs.
 
         Args:
-            issue_id: Issue ID (e.g., 'BAC-1828')
+            issue_id: Issue ID (e.g., 'BAC-1828') or YouTrack issue URL
             comment_id: Comment ID (e.g., '4-15.91-12345')
             text: New comment text (markdown supported)
         """
+        issue_id = parse_issue_id(issue_id)
         old = await client.get(
             f"/api/issues/{issue_id}/comments/{comment_id}",
             params={"fields": "text"},
@@ -448,9 +456,10 @@ def register(mcp, client: YouTrackClient):
         Use get_issue with include_comments=True to find comment IDs.
 
         Args:
-            issue_id: Issue ID (e.g., 'BAC-1828')
+            issue_id: Issue ID (e.g., 'BAC-1828') or YouTrack issue URL
             comment_id: Comment ID (e.g., '4-15.91-12345')
         """
+        issue_id = parse_issue_id(issue_id)
         old = await client.get(
             f"/api/issues/{issue_id}/comments/{comment_id}",
             params={"fields": "text,author(name)"},

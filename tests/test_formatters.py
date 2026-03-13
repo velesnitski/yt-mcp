@@ -7,7 +7,33 @@ from yt_mcp.formatters import (
     format_issue_list,
     format_issue_detail,
     format_value,
+    parse_issue_id,
 )
+
+
+# --- parse_issue_id ---
+
+class TestParseIssueId:
+    def test_plain_id(self):
+        assert parse_issue_id("iOSP-1238") == "iOSP-1238"
+
+    def test_url_with_slug(self):
+        assert parse_issue_id(
+            "https://company.youtrack.cloud/issue/iOSP-1238/some-slug"
+        ) == "iOSP-1238"
+
+    def test_url_without_slug(self):
+        assert parse_issue_id(
+            "https://company.youtrack.cloud/issue/BAC-42"
+        ) == "BAC-42"
+
+    def test_whitespace_stripped(self):
+        assert parse_issue_id("  DEVOPS-123  ") == "DEVOPS-123"
+
+    def test_url_extracts_before_query(self):
+        assert parse_issue_id(
+            "https://x.youtrack.cloud/issue/AB-1?tab=comments"
+        ) == "AB-1"
 
 
 # --- _get_custom_field ---

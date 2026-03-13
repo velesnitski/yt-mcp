@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from yt_mcp.client import YouTrackClient
-from yt_mcp.formatters import format_value
+from yt_mcp.formatters import format_value, parse_issue_id
 
 
 def register(mcp, client: YouTrackClient):
@@ -14,9 +14,10 @@ def register(mcp, client: YouTrackClient):
         Useful for auditing changes or finding values to rollback.
 
         Args:
-            issue_id: Issue ID (e.g., 'DEVOPS-423')
+            issue_id: Issue ID (e.g., 'DEVOPS-423') or YouTrack issue URL
             max_results: Maximum number of activities to return (default: 20)
         """
+        issue_id = parse_issue_id(issue_id)
         activities = await client.get(
             f"/api/issues/{issue_id}/activities",
             params={
@@ -54,9 +55,10 @@ def register(mcp, client: YouTrackClient):
         Use get_issue_history first to find the activity_id of the change to revert.
 
         Args:
-            issue_id: Issue ID (e.g., 'DEVOPS-423')
+            issue_id: Issue ID (e.g., 'DEVOPS-423') or YouTrack issue URL
             activity_id: Activity ID from get_issue_history (e.g., '0-0.88-598477')
         """
+        issue_id = parse_issue_id(issue_id)
         activities = await client.get(
             f"/api/issues/{issue_id}/activities",
             params={
@@ -120,8 +122,9 @@ def register(mcp, client: YouTrackClient):
         """Get time tracking work items for an issue.
 
         Args:
-            issue_id: Issue ID (e.g., 'BAC-1828')
+            issue_id: Issue ID (e.g., 'BAC-1828') or YouTrack issue URL
         """
+        issue_id = parse_issue_id(issue_id)
         items = await client.get(
             f"/api/issues/{issue_id}/timeTracking/workItems",
             params={
@@ -181,12 +184,13 @@ def register(mcp, client: YouTrackClient):
         """Log time (add a work item) to a YouTrack issue.
 
         Args:
-            issue_id: Issue ID (e.g., 'BAC-1828')
+            issue_id: Issue ID (e.g., 'BAC-1828') or YouTrack issue URL
             duration_minutes: Time spent in minutes (e.g., 90 for 1h 30m)
             date: Date of work in YYYY-MM-DD format (default: today)
             description: Optional description of work done
             work_type: Optional work type (e.g., 'Development', 'Testing', 'Documentation')
         """
+        issue_id = parse_issue_id(issue_id)
         if duration_minutes <= 0:
             return "Duration must be positive."
 
@@ -237,12 +241,13 @@ def register(mcp, client: YouTrackClient):
         Use get_work_items to find work item IDs.
 
         Args:
-            issue_id: Issue ID (e.g., 'BAC-1828')
+            issue_id: Issue ID (e.g., 'BAC-1828') or YouTrack issue URL
             work_item_id: Work item ID (from get_work_items)
             duration_minutes: New duration in minutes (0 = keep current)
             date: New date in YYYY-MM-DD format (empty = keep current)
             description: New description (empty = keep current)
         """
+        issue_id = parse_issue_id(issue_id)
         payload: dict = {}
 
         if duration_minutes > 0:
@@ -309,9 +314,10 @@ def register(mcp, client: YouTrackClient):
         Use get_work_items to find work item IDs.
 
         Args:
-            issue_id: Issue ID (e.g., 'BAC-1828')
+            issue_id: Issue ID (e.g., 'BAC-1828') or YouTrack issue URL
             work_item_id: Work item ID (from get_work_items)
         """
+        issue_id = parse_issue_id(issue_id)
         # Fetch details before deleting
         old = await client.get(
             f"/api/issues/{issue_id}/timeTracking/workItems/{work_item_id}",
@@ -363,9 +369,10 @@ def register(mcp, client: YouTrackClient):
         and comment count. Filters noise (description edits, spent time).
 
         Args:
-            issue_id: Issue ID (e.g., 'MAN-118')
+            issue_id: Issue ID (e.g., 'MAN-118') or YouTrack issue URL
             since: Optional ISO date to filter from (e.g., '2026-03-01'). Empty = all history.
         """
+        issue_id = parse_issue_id(issue_id)
         # Fetch all activities (state, assignee, comments, work items)
         activities = await client.get(
             f"/api/issues/{issue_id}/activities",

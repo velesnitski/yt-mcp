@@ -1,3 +1,21 @@
+import re
+
+_ISSUE_URL_RE = re.compile(r"/issue/([A-Za-z]+-\d+)")
+
+
+def parse_issue_id(issue_id: str) -> str:
+    """Extract issue ID from a string that may be an ID or a YouTrack URL.
+
+    Accepts:
+        - 'iOSP-1238'
+        - 'https://company.youtrack.cloud/issue/iOSP-1238/some-slug'
+    """
+    match = _ISSUE_URL_RE.search(issue_id)
+    if match:
+        return match.group(1)
+    return issue_id.strip()
+
+
 def _get_custom_field(issue: dict, field_name: str) -> str | None:
     """Extract a custom field value by name from an issue's customFields array.
 
