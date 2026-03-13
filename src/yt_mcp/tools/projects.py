@@ -40,25 +40,49 @@ def register(mcp, client: YouTrackClient):
 
     @mcp.tool()
     async def get_agile_board(name: str) -> str:
-        """Search for an agile board by name and return its details.
+        """Search for an agile board by name, ID, or URL.
 
-        Uses case-insensitive partial matching (e.g., 'iOS' matches 'Astro & Mars iOS').
+        Accepts:
+            - Board name (partial match): 'iOS', 'Sprint Board'
+            - Board ID: '98-114'
+            - YouTrack URL: 'https://company.youtrack.cloud/agiles/98-114/current'
 
         Args:
-            name: Full or partial board name to search for
+            name: Board name, ID, or YouTrack agile board URL
         """
-        boards = await client.get(
-            "/api/agiles",
-            params={
-                "fields": "id,name,projects(shortName,name),"
-                "owner(name),currentSprint(name),"
-                "columnSettings(field(name)),"
-                "sprints(name,start,finish,archived)",
-            },
+        import re
+
+        # Extract board ID from URL if provided
+        url_match = re.search(r"/agiles/([\d-]+)", name)
+        board_id = url_match.group(1) if url_match else None
+
+        # If it looks like a board ID (digits and hyphens), try direct fetch
+        if not board_id and re.match(r"^\d+-\d+$", name.strip()):
+            board_id = name.strip()
+
+        fields = (
+            "id,name,projects(shortName,name),"
+            "owner(name),currentSprint(name),"
+            "columnSettings(field(name)),"
+            "sprints(name,start,finish,archived)"
         )
 
-        query_lower = name.lower()
-        matches = [b for b in boards if query_lower in b.get("name", "").lower()]
+        if board_id:
+            try:
+                board = await client.get(
+                    f"/api/agiles/{board_id}",
+                    params={"fields": fields},
+                )
+                matches = [board]
+            except (ValueError, Exception):
+                return f"No agile board found with ID '{board_id}'."
+        else:
+            boards = await client.get(
+                "/api/agiles",
+                params={"fields": fields},
+            )
+            query_lower = name.lower()
+            matches = [b for b in boards if query_lower in b.get("name", "").lower()]
 
         if not matches:
             return f"No agile board found matching '{name}'."
@@ -174,25 +198,39 @@ def register(mcp, client: YouTrackClient):
         """Get issues on an agile board grouped by column (state).
 
         Args:
-            board_name: Full or partial board name
+            board_name: Board name, ID (e.g., '98-114'), or YouTrack URL
             sprint: Sprint name or 'current' for active sprint (default: 'current')
         """
-        # Find the board
-        boards = await client.get(
-            "/api/agiles",
-            params={
-                "fields": "id,name,currentSprint(id,name),"
-                "sprints(id,name,start,finish,archived)",
-            },
-        )
+        import re
 
-        query_lower = board_name.lower()
-        matches = [b for b in boards if query_lower in b.get("name", "").lower()]
+        # Extract board ID from URL if provided
+        url_match = re.search(r"/agiles/([\d-]+)", board_name)
+        resolved_id = url_match.group(1) if url_match else None
 
-        if not matches:
-            return f"No agile board found matching '{board_name}'."
+        if not resolved_id and re.match(r"^\d+-\d+$", board_name.strip()):
+            resolved_id = board_name.strip()
 
-        board = matches[0]
+        fields = "id,name,currentSprint(id,name),sprints(id,name,start,finish,archived)"
+
+        if resolved_id:
+            try:
+                board = await client.get(
+                    f"/api/agiles/{resolved_id}",
+                    params={"fields": fields},
+                )
+            except (ValueError, Exception):
+                return f"No agile board found with ID '{resolved_id}'."
+        else:
+            boards = await client.get(
+                "/api/agiles",
+                params={"fields": fields},
+            )
+            query_lower = board_name.lower()
+            matches = [b for b in boards if query_lower in b.get("name", "").lower()]
+            if not matches:
+                return f"No agile board found matching '{board_name}'."
+            board = matches[0]
+
         board_id = board["id"]
         board_display_name = board.get("name", board_name)
 
