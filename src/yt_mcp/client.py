@@ -24,10 +24,13 @@ class YouTrackClient:
                 error_data = resp.json()
                 error_msg = error_data.get(
                     "error_description",
-                    error_data.get("error", str(resp.text)),
+                    error_data.get("error", "Unknown error"),
                 )
             except Exception:
-                error_msg = resp.text
+                error_msg = "Unknown error"
+            # Truncate to avoid leaking internal details
+            if isinstance(error_msg, str) and len(error_msg) > 200:
+                error_msg = error_msg[:200] + "..."
             raise ValueError(
                 f"YouTrack {'query' if resp.status_code == 400 else 'not found'} error "
                 f"({resp.status_code}): {error_msg}"

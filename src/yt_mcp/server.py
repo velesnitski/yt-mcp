@@ -6,7 +6,7 @@ from yt_mcp.tools import register_all
 mcp = FastMCP("youtrack")
 config = load_config()
 client = YouTrackClient(config)
-register_all(mcp, client)
+register_all(mcp, client, config)
 
 
 def main():
