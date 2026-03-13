@@ -1,8 +1,21 @@
+import re
 import time
 
 import httpx
 
 from yt_mcp.client import YouTrackClient
+
+MAX_BULK_RESULTS = 100
+
+# Only allow safe batch tag format: yt-mcp-{digits} or yt-translate-{digits}
+_BATCH_TAG_RE = re.compile(r"^yt-(mcp|translate)-\d{10,}$")
+
+
+def _validate_batch_tag(tag: str) -> str | None:
+    """Validate batch tag format. Returns error message or None if valid."""
+    if not _BATCH_TAG_RE.match(tag):
+        return f"Invalid batch tag format: `{tag}`. Expected: yt-mcp-{{timestamp}} or yt-translate-{{timestamp}}"
+    return None
 
 
 def register(mcp, client: YouTrackClient):
@@ -16,8 +29,9 @@ def register(mcp, client: YouTrackClient):
         Args:
             query: YouTrack search query to select issues (e.g., 'project: DO state: Open')
             command: YouTrack command to apply (e.g., 'State Done', 'Assignee John', 'tag Important')
-            max_results: Maximum number of issues to preview (default: 50)
+            max_results: Maximum number of issues to preview (default: 50, max: 100)
         """
+        max_results = min(max_results, MAX_BULK_RESULTS)
         issues = await client.get(
             "/api/issues",
             params={
@@ -61,8 +75,9 @@ def register(mcp, client: YouTrackClient):
         Args:
             query: YouTrack search query to select issues (e.g., 'project: DO state: Open')
             command: YouTrack command to apply (e.g., 'State Done', 'Assignee John', 'tag Important')
-            max_results: Maximum number of issues to update (default: 50)
+            max_results: Maximum number of issues to update (default: 50, max: 100)
         """
+        max_results = min(max_results, MAX_BULK_RESULTS)
         batch_tag = f"yt-mcp-{int(time.time())}"
 
         issues = await client.get(
@@ -120,6 +135,10 @@ def register(mcp, client: YouTrackClient):
         Args:
             batch_tag: The batch tag from bulk_update_execute (e.g., 'yt-mcp-1741794000')
         """
+        tag_error = _validate_batch_tag(batch_tag)
+        if tag_error:
+            return tag_error
+
         issues = await client.get(
             "/api/issues",
             params={

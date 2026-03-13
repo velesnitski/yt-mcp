@@ -188,6 +188,10 @@ claude mcp add youtrack `
 |---|---|---|
 | `YOUTRACK_URL` | Yes | Your YouTrack instance URL (e.g., `https://company.youtrack.cloud`) |
 | `YOUTRACK_TOKEN` | Yes | Permanent token (starts with `perm:`) |
+| `YOUTRACK_READ_ONLY` | No | Set to `true` to disable all write operations |
+| `DISABLED_TOOLS` | No | Comma-separated list of tools to disable (e.g., `delete_issue,bulk_update_execute`) |
+| `YOUTRACK_MAX_BULK_RESULTS` | No | Maximum issues per bulk operation (default: `100`) |
+| `YOUTRACK_ALLOW_HTTP` | No | Set to `1` to allow non-HTTPS URLs (not recommended) |
 
 ## Alternative installation methods
 
@@ -342,8 +346,28 @@ docker run -d --name youtrack-mcp \
 - Tokens are passed via environment variables — never hardcoded
 - In **stdio** mode, the server has no network exposure (local pipes only)
 - In **SSE/HTTP** mode, the server listens on a network port — bind to `127.0.0.1` if you don't need external access, or use a reverse proxy with authentication for production
-- YouTrack API calls use HTTPS
+- YouTrack API calls use HTTPS (non-HTTPS URLs are blocked unless `YOUTRACK_ALLOW_HTTP=1`)
 - Consider using a token with minimal required permissions (read-only if you don't need `create_issue`)
+- Bulk operations are capped at 100 issues per batch
+- Error messages are truncated to prevent leaking internal API details
+
+### Read-only mode
+
+To disable all write operations (create, update, delete, bulk execute):
+
+```bash
+YOUTRACK_READ_ONLY=true
+```
+
+### Disable specific tools
+
+Block individual tools by name (comma-separated, case-insensitive):
+
+```bash
+DISABLED_TOOLS=delete_issue,bulk_update_execute,apply_translations
+```
+
+This removes the specified tools from the MCP server entirely — clients won't see them.
 
 ## Requirements
 
