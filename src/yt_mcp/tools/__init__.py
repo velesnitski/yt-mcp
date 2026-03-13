@@ -1,4 +1,4 @@
-from yt_mcp.tools import issues, templates, history, bulk, projects, translate
+from yt_mcp.tools import issues, templates, history, bulk, projects, translate, impact
 
 
 def register_all(mcp, client):
@@ -8,3 +8,4 @@ def register_all(mcp, client):
     bulk.register(mcp, client)
     projects.register(mcp, client)
     translate.register(mcp, client)
+    impact.register(mcp, client)
