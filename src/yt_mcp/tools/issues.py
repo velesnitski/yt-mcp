@@ -270,6 +270,28 @@ def register(mcp, client: YouTrackClient):
         return f"Linked **{issue_id}** → **{target_id}** ({link_type})"
 
     @mcp.tool()
+    async def remove_issue_link(
+        issue_id: str,
+        target_id: str,
+        link_type: str = "Relates",
+    ) -> str:
+        """Remove a link between two issues.
+
+        Use get_issue_links to find existing links. The link_type must match
+        the original link type used when creating the link.
+
+        Args:
+            issue_id: Source issue ID (e.g., 'BAC-1828')
+            target_id: Target issue ID to unlink (e.g., 'BAC-1234')
+            link_type: Relationship type to remove — 'Relates', 'Depends on', 'Is required for',
+                       'Duplicates', 'Is duplicated by', 'Parent for', 'Subtask of'
+        """
+        # YouTrack command: prefix with "remove" to delete a link
+        command = f"remove {link_type} {target_id}"
+        await client.execute_command(issue_id, command)
+        return f"Unlinked **{issue_id}** → **{target_id}** ({link_type})"
+
+    @mcp.tool()
     async def add_comment(issue_id: str, text: str) -> str:
         """Add a comment to a YouTrack issue.
 
@@ -283,3 +305,55 @@ def register(mcp, client: YouTrackClient):
         )
         author = data.get("author", {}).get("name", "?") if data else "?"
         return f"Comment added to **{issue_id}** by {author}:\n> {text[:200]}"
+
+    @mcp.tool()
+    async def update_comment(issue_id: str, comment_id: str, text: str) -> str:
+        """Update an existing comment on a YouTrack issue.
+
+        Returns the previous text so it can be restored if needed.
+        Use get_issue with include_comments=True to find comment IDs.
+
+        Args:
+            issue_id: Issue ID (e.g., 'BAC-1828')
+            comment_id: Comment ID (e.g., '4-15.91-12345')
+            text: New comment text (markdown supported)
+        """
+        old = await client.get(
+            f"/api/issues/{issue_id}/comments/{comment_id}",
+            params={"fields": "text"},
+        )
+        old_text = old.get("text", "") if old else ""
+
+        await client.update_comment(issue_id, comment_id, text)
+        return (
+            f"Comment `{comment_id}` updated on **{issue_id}**:\n"
+            f"**Previous text:** {old_text[:300]}\n"
+            f"**New text:** {text[:300]}\n\n"
+            f"To restore, call `update_comment` with the previous text."
+        )
+
+    @mcp.tool()
+    async def delete_comment(issue_id: str, comment_id: str) -> str:
+        """Delete a comment from a YouTrack issue.
+
+        Returns the comment text so it can be re-added with add_comment if needed.
+        Use get_issue with include_comments=True to find comment IDs.
+
+        Args:
+            issue_id: Issue ID (e.g., 'BAC-1828')
+            comment_id: Comment ID (e.g., '4-15.91-12345')
+        """
+        old = await client.get(
+            f"/api/issues/{issue_id}/comments/{comment_id}",
+            params={"fields": "text,author(name)"},
+        )
+        old_text = old.get("text", "") if old else ""
+        old_author = old.get("author", {}).get("name", "?") if old else "?"
+
+        await client.delete(f"/api/issues/{issue_id}/comments/{comment_id}")
+        return (
+            f"Comment `{comment_id}` deleted from **{issue_id}**.\n"
+            f"**Author:** {old_author}\n"
+            f"**Deleted text:** {old_text[:500]}\n\n"
+            f"To restore, call `add_comment` with the text above."
+        )

@@ -12,7 +12,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 - *"List all agile boards"*
 - *"What did the DevOps team close this week?"*
 
-### Available tools (26)
+### Available tools (33)
 
 | Tool | Description |
 |---|---|
@@ -20,7 +20,10 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `get_issue` | Get full details of a specific issue (description, comments, fields, links) |
 | `get_issue_links` | Get all linked issues (parent, subtask, depends on, relates to, duplicates) |
 | `add_issue_link` | Link two issues together (relates, depends on, parent/subtask, duplicates) |
+| `remove_issue_link` | Remove a link between two issues |
 | `add_comment` | Add a comment to an issue (markdown supported) |
+| `update_comment` | Edit an existing comment on an issue |
+| `delete_comment` | Delete a comment from an issue |
 | `list_projects` | List all accessible projects |
 | `get_agiles` | List all agile boards |
 | `get_agile_board` | Search for an agile board by name (partial match) |
@@ -32,12 +35,16 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `get_issue_history` | View change history of an issue (who changed what, when) |
 | `get_issue_changes_summary` | Get a compact summary of issue changes (state transitions, comments, time logged) |
 | `get_work_items` | Get time tracking work items for an issue |
+| `add_work_item` | Log time (add a work item) to an issue |
+| `update_work_item` | Update an existing work item (duration, date, description) |
+| `delete_work_item` | Delete a work item from an issue |
 | `rollback_issue` | Revert a specific change using its activity ID |
 | `delete_issue` | Soft-delete (state → Obsolete) or permanently delete an issue |
 | `bulk_update_preview` | Preview which issues a bulk command would affect (dry run) |
 | `bulk_update_execute` | Apply a command to all issues matching a query (auto-tags for rollback) |
 | `bulk_rollback` | Undo all changes from a bulk update batch using its tag |
 | `create_agile_board` | Create a new agile board for one or more projects |
+| `delete_agile_board` | Delete an agile board (issues are not affected) |
 | `get_issues_for_translation` | Fetch issues with Cyrillic text for LLM-assisted translation |
 | `apply_translations` | Apply translated text to issues with batch tagging for rollback |
 | `get_impact_map` | Build cross-product dependency graph from an issue (links, product overlap, mentions) |
@@ -153,7 +160,7 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{
     uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
 ```
 
-You should see all 26 tools listed.
+You should see all 33 tools listed.
 
 ## Setup for Windows
 

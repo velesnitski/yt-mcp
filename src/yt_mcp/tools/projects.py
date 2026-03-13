@@ -132,6 +132,44 @@ def register(mcp, client: YouTrackClient):
         )
 
     @mcp.tool()
+    async def delete_agile_board(board_name: str) -> str:
+        """Delete an agile board from YouTrack. The board's issues are NOT deleted.
+
+        Uses case-insensitive partial matching to find the board.
+
+        Args:
+            board_name: Full or partial board name to delete
+        """
+        boards = await client.get(
+            "/api/agiles",
+            params={"fields": "id,name,projects(shortName)"},
+        )
+
+        query_lower = board_name.lower()
+        matches = [b for b in boards if query_lower in b.get("name", "").lower()]
+
+        if not matches:
+            return f"No agile board found matching '{board_name}'."
+
+        if len(matches) > 1:
+            names = ", ".join(f"'{b.get('name', '?')}'" for b in matches)
+            return f"Multiple boards match '{board_name}': {names}. Be more specific."
+
+        board = matches[0]
+        board_id = board["id"]
+        board_display_name = board.get("name", board_name)
+        proj_names = ", ".join(
+            p.get("shortName", "?") for p in board.get("projects", [])
+        )
+
+        await client.delete(f"/api/agiles/{board_id}")
+        return (
+            f"Deleted agile board: **{board_display_name}**\n"
+            f"**Projects:** {proj_names}\n\n"
+            f"Issues are not affected. To restore, call `create_agile_board`."
+        )
+
+    @mcp.tool()
     async def get_sprint_board(board_name: str, sprint: str = "current") -> str:
         """Get issues on an agile board grouped by column (state).
 
