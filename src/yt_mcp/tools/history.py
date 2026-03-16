@@ -1,13 +1,13 @@
 from datetime import datetime, timezone
 
-from yt_mcp.client import YouTrackClient
+from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import format_value, parse_issue_id
 
 
-def register(mcp, client: YouTrackClient):
+def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()
-    async def get_issue_history(issue_id: str, max_results: int = 20) -> str:
+    async def get_issue_history(issue_id: str, max_results: int = 20, instance: str = "") -> str:
         """Get the change history of a YouTrack issue from the activity log.
 
         Shows who changed what field, when, and the old/new values.
@@ -16,7 +16,9 @@ def register(mcp, client: YouTrackClient):
         Args:
             issue_id: Issue ID (e.g., 'DEVOPS-423') or YouTrack issue URL
             max_results: Maximum number of activities to return (default: 20)
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
         activities = await client.get(
             f"/api/issues/{issue_id}/activities",
@@ -49,7 +51,7 @@ def register(mcp, client: YouTrackClient):
         return "\n".join(lines)
 
     @mcp.tool()
-    async def rollback_issue(issue_id: str, activity_id: str) -> str:
+    async def rollback_issue(issue_id: str, activity_id: str, instance: str = "") -> str:
         """Rollback a specific change on a YouTrack issue by restoring the previous value.
 
         Use get_issue_history first to find the activity_id of the change to revert.
@@ -57,7 +59,9 @@ def register(mcp, client: YouTrackClient):
         Args:
             issue_id: Issue ID (e.g., 'DEVOPS-423') or YouTrack issue URL
             activity_id: Activity ID from get_issue_history (e.g., '0-0.88-598477')
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
         activities = await client.get(
             f"/api/issues/{issue_id}/activities",
@@ -118,12 +122,14 @@ def register(mcp, client: YouTrackClient):
         )
 
     @mcp.tool()
-    async def get_work_items(issue_id: str) -> str:
+    async def get_work_items(issue_id: str, instance: str = "") -> str:
         """Get time tracking work items for an issue.
 
         Args:
             issue_id: Issue ID (e.g., 'BAC-1828') or YouTrack issue URL
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
         items = await client.get(
             f"/api/issues/{issue_id}/timeTracking/workItems",
@@ -180,6 +186,7 @@ def register(mcp, client: YouTrackClient):
         date: str = "",
         description: str = "",
         work_type: str = "",
+        instance: str = "",
     ) -> str:
         """Log time (add a work item) to a YouTrack issue.
 
@@ -189,7 +196,9 @@ def register(mcp, client: YouTrackClient):
             date: Date of work in YYYY-MM-DD format (default: today)
             description: Optional description of work done
             work_type: Optional work type (e.g., 'Development', 'Testing', 'Documentation')
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
         if duration_minutes <= 0:
             return "Duration must be positive."
@@ -234,6 +243,7 @@ def register(mcp, client: YouTrackClient):
         duration_minutes: int = 0,
         date: str = "",
         description: str = "",
+        instance: str = "",
     ) -> str:
         """Update an existing work item (time log entry) on a YouTrack issue.
 
@@ -246,7 +256,9 @@ def register(mcp, client: YouTrackClient):
             duration_minutes: New duration in minutes (0 = keep current)
             date: New date in YYYY-MM-DD format (empty = keep current)
             description: New description (empty = keep current)
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
         payload: dict = {}
 
@@ -307,7 +319,7 @@ def register(mcp, client: YouTrackClient):
         return "\n".join(parts)
 
     @mcp.tool()
-    async def delete_work_item(issue_id: str, work_item_id: str) -> str:
+    async def delete_work_item(issue_id: str, work_item_id: str, instance: str = "") -> str:
         """Delete a work item (time log entry) from a YouTrack issue.
 
         Returns the deleted work item details so it can be re-added with add_work_item if needed.
@@ -316,7 +328,9 @@ def register(mcp, client: YouTrackClient):
         Args:
             issue_id: Issue ID (e.g., 'BAC-1828') or YouTrack issue URL
             work_item_id: Work item ID (from get_work_items)
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
         # Fetch details before deleting
         old = await client.get(
@@ -364,6 +378,7 @@ def register(mcp, client: YouTrackClient):
     async def get_issue_changes_summary(
         issue_id: str,
         since: str = "",
+        instance: str = "",
     ) -> str:
         """Get a compact summary of issue changes: state transitions, assignee changes,
         and comment count. Filters noise (description edits, spent time).
@@ -371,7 +386,9 @@ def register(mcp, client: YouTrackClient):
         Args:
             issue_id: Issue ID (e.g., 'MAN-118') or YouTrack issue URL
             since: Optional ISO date to filter from (e.g., '2026-03-01'). Empty = all history.
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
         # Fetch all activities (state, assignee, comments, work items)
         activities = await client.get(

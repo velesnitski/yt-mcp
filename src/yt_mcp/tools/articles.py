@@ -1,18 +1,20 @@
 from datetime import datetime, timezone
 
-from yt_mcp.client import YouTrackClient
+from yt_mcp.resolver import InstanceResolver
 
 
-def register(mcp, client: YouTrackClient):
+def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()
-    async def search_articles(query: str, max_results: int = 20) -> str:
+    async def search_articles(query: str, max_results: int = 20, instance: str = "") -> str:
         """Search YouTrack Knowledge Base articles.
 
         Args:
             query: Search string (matches article titles and content)
             max_results: Maximum results (default: 20)
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance)
         articles = await client.get(
             "/api/articles",
             params={
@@ -41,13 +43,15 @@ def register(mcp, client: YouTrackClient):
         return "\n".join(lines)
 
     @mcp.tool()
-    async def get_article(article_id: str, include_comments: bool = True) -> str:
+    async def get_article(article_id: str, include_comments: bool = True, instance: str = "") -> str:
         """Get a Knowledge Base article by ID with full content.
 
         Args:
             article_id: Article ID (e.g., 'PROJ-A-1') or database ID
             include_comments: Whether to include comments (default: True)
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance)
         comment_fields = (
             ",comments(id,text,author(fullName),created,pinned)"
             if include_comments else ""
@@ -126,6 +130,7 @@ def register(mcp, client: YouTrackClient):
         summary: str,
         content: str = "",
         parent_article_id: str = "",
+        instance: str = "",
     ) -> str:
         """Create a new Knowledge Base article.
 
@@ -134,7 +139,9 @@ def register(mcp, client: YouTrackClient):
             summary: Article title
             content: Article body (markdown supported)
             parent_article_id: Optional parent article ID for nesting (e.g., 'PROJ-A-1')
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance)
         project_id = await client.resolve_project_id(project)
         if not project_id:
             return f"Project '{project}' not found."
@@ -159,6 +166,7 @@ def register(mcp, client: YouTrackClient):
         article_id: str,
         summary: str = "",
         content: str = "",
+        instance: str = "",
     ) -> str:
         """Update a Knowledge Base article. Returns previous values for rollback.
 
@@ -166,7 +174,9 @@ def register(mcp, client: YouTrackClient):
             article_id: Article ID (e.g., 'PROJ-A-1') or database ID
             summary: New title (empty = keep current)
             content: New content (empty = keep current)
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance)
         if not summary and not content:
             return "Nothing to update — provide summary or content."
 
@@ -194,12 +204,14 @@ def register(mcp, client: YouTrackClient):
         return "\n".join(parts)
 
     @mcp.tool()
-    async def delete_article(article_id: str) -> str:
+    async def delete_article(article_id: str, instance: str = "") -> str:
         """Delete a Knowledge Base article. Returns article details for restoration.
 
         Args:
             article_id: Article ID (e.g., 'PROJ-A-1') or database ID
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance)
         old = await client.get(
             f"/api/articles/{article_id}",
             params={
@@ -220,13 +232,15 @@ def register(mcp, client: YouTrackClient):
         )
 
     @mcp.tool()
-    async def add_article_comment(article_id: str, text: str) -> str:
+    async def add_article_comment(article_id: str, text: str, instance: str = "") -> str:
         """Add a comment to a Knowledge Base article.
 
         Args:
             article_id: Article ID (e.g., 'PROJ-A-1') or database ID
             text: Comment text (markdown supported)
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance)
         data = await client.post(
             f"/api/articles/{article_id}/comments",
             json={"text": text},
@@ -240,7 +254,7 @@ def register(mcp, client: YouTrackClient):
 
     @mcp.tool()
     async def update_article_comment(
-        article_id: str, comment_id: str, text: str
+        article_id: str, comment_id: str, text: str, instance: str = "",
     ) -> str:
         """Update a comment on a Knowledge Base article. Returns previous text for rollback.
 
@@ -248,7 +262,9 @@ def register(mcp, client: YouTrackClient):
             article_id: Article ID (e.g., 'PROJ-A-1') or database ID
             comment_id: Comment ID (from get_article)
             text: New comment text (markdown supported)
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance)
         old = await client.get(
             f"/api/articles/{article_id}/comments/{comment_id}",
             params={"fields": "text"},
@@ -267,13 +283,15 @@ def register(mcp, client: YouTrackClient):
         )
 
     @mcp.tool()
-    async def delete_article_comment(article_id: str, comment_id: str) -> str:
+    async def delete_article_comment(article_id: str, comment_id: str, instance: str = "") -> str:
         """Delete a comment from a Knowledge Base article. Returns text for restoration.
 
         Args:
             article_id: Article ID (e.g., 'PROJ-A-1') or database ID
             comment_id: Comment ID (from get_article)
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance)
         old = await client.get(
             f"/api/articles/{article_id}/comments/{comment_id}",
             params={"fields": "text,author(fullName)"},

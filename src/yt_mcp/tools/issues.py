@@ -1,11 +1,11 @@
-from yt_mcp.client import YouTrackClient
+from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import format_issue_list, format_issue_detail, _resolve_state, _get_custom_field, parse_issue_id
 
 
-def register(mcp, client: YouTrackClient):
+def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()
-    async def search_issues(query: str, max_results: int = 50) -> str:
+    async def search_issues(query: str, max_results: int = 50, instance: str = "") -> str:
         """Search YouTrack issues using YouTrack query syntax.
 
         Date syntax notes:
@@ -22,7 +22,9 @@ def register(mcp, client: YouTrackClient):
         Args:
             query: YouTrack search query string
             max_results: Maximum number of results to return (default: 50)
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance)
         data = await client.get(
             "/api/issues",
             params={
@@ -43,14 +45,16 @@ def register(mcp, client: YouTrackClient):
         return f"{header}\n\n{result}"
 
     @mcp.tool()
-    async def get_issue(issue_id: str, include_comments: bool = True) -> str:
+    async def get_issue(issue_id: str, include_comments: bool = True, instance: str = "") -> str:
         """Get full details of a specific YouTrack issue.
 
         Args:
             issue_id: Issue ID (e.g., 'DEVOPS-423') or YouTrack issue URL
             include_comments: Whether to include comments in output (default: True).
                              Set to False for long issues where comments aren't needed.
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
         fields = (
             "idReadable,summary,description,state(name),priority(name),"
@@ -70,7 +74,8 @@ def register(mcp, client: YouTrackClient):
 
     @mcp.tool()
     async def create_issue(
-        project: str, summary: str, description: str = "", product: str = ""
+        project: str, summary: str, description: str = "", product: str = "",
+        instance: str = "",
     ) -> str:
         """Create a new issue in a YouTrack project.
 
@@ -79,7 +84,9 @@ def register(mcp, client: YouTrackClient):
             summary: Issue title
             description: Issue description (markdown supported)
             product: Product name for the Product custom field (leave empty to skip)
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance)
         project_id = await client.resolve_project_id(project)
         if not project_id:
             return f"Project '{project}' not found."
@@ -112,6 +119,7 @@ def register(mcp, client: YouTrackClient):
         add_tag: str = "",
         remove_tag: str = "",
         command: str = "",
+        instance: str = "",
     ) -> str:
         """Update fields of an existing YouTrack issue.
 
@@ -140,7 +148,9 @@ def register(mcp, client: YouTrackClient):
             add_tag: Tag name to add to the issue (leave empty to skip)
             remove_tag: Tag name to remove from the issue (leave empty to skip)
             command: YouTrack command string for any field (e.g., 'Priority High Type Bug')
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
         has_changes = (
             summary or description or state or assignee
@@ -279,14 +289,16 @@ def register(mcp, client: YouTrackClient):
         return "\n".join(parts)
 
     @mcp.tool()
-    async def delete_issue(issue_id: str, permanent: bool = False) -> str:
+    async def delete_issue(issue_id: str, permanent: bool = False, instance: str = "") -> str:
         """Delete a YouTrack issue. By default performs a soft delete (sets state to Obsolete).
         Use permanent=True only when you need to remove the issue entirely — this cannot be undone.
 
         Args:
             issue_id: Issue ID (e.g., 'DEVOPS-423') or YouTrack issue URL
             permanent: If True, permanently delete the issue. If False (default), set state to Obsolete.
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
         data = await client.get(
             f"/api/issues/{issue_id}",
@@ -309,12 +321,14 @@ def register(mcp, client: YouTrackClient):
         )
 
     @mcp.tool()
-    async def get_issue_links(issue_id: str) -> str:
+    async def get_issue_links(issue_id: str, instance: str = "") -> str:
         """Get all linked issues (parent, subtask, depends on, relates to, duplicates).
 
         Args:
             issue_id: Issue ID (e.g., 'BAC-1828') or YouTrack issue URL
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
         data = await client.get(
             f"/api/issues/{issue_id}",
@@ -367,6 +381,7 @@ def register(mcp, client: YouTrackClient):
         issue_id: str,
         target_id: str,
         link_type: str = "Relates",
+        instance: str = "",
     ) -> str:
         """Link two issues together.
 
@@ -375,7 +390,9 @@ def register(mcp, client: YouTrackClient):
             target_id: Target issue ID to link to (e.g., 'BAC-1234') or YouTrack issue URL
             link_type: Relationship type — 'Relates', 'Depends on', 'Is required for',
                        'Duplicates', 'Is duplicated by', 'Parent for', 'Subtask of'
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
         target_id = parse_issue_id(target_id)
         command = f"{link_type} {target_id}"
@@ -387,6 +404,7 @@ def register(mcp, client: YouTrackClient):
         issue_id: str,
         target_id: str,
         link_type: str = "Relates",
+        instance: str = "",
     ) -> str:
         """Remove a link between two issues.
 
@@ -398,7 +416,9 @@ def register(mcp, client: YouTrackClient):
             target_id: Target issue ID to unlink (e.g., 'BAC-1234') or YouTrack issue URL
             link_type: Relationship type to remove — 'Relates', 'Depends on', 'Is required for',
                        'Duplicates', 'Is duplicated by', 'Parent for', 'Subtask of'
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
         target_id = parse_issue_id(target_id)
         command = f"remove {link_type} {target_id}"
@@ -406,13 +426,15 @@ def register(mcp, client: YouTrackClient):
         return f"Unlinked **{issue_id}** → **{target_id}** ({link_type})"
 
     @mcp.tool()
-    async def add_comment(issue_id: str, text: str) -> str:
+    async def add_comment(issue_id: str, text: str, instance: str = "") -> str:
         """Add a comment to a YouTrack issue.
 
         Args:
             issue_id: Issue ID (e.g., 'BAC-1828') or YouTrack issue URL
             text: Comment text (markdown supported)
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
         data = await client.post(
             f"/api/issues/{issue_id}/comments",
@@ -422,7 +444,7 @@ def register(mcp, client: YouTrackClient):
         return f"Comment added to **{issue_id}** by {author}:\n> {text[:200]}"
 
     @mcp.tool()
-    async def update_comment(issue_id: str, comment_id: str, text: str) -> str:
+    async def update_comment(issue_id: str, comment_id: str, text: str, instance: str = "") -> str:
         """Update an existing comment on a YouTrack issue.
 
         Returns the previous text so it can be restored if needed.
@@ -432,7 +454,9 @@ def register(mcp, client: YouTrackClient):
             issue_id: Issue ID (e.g., 'BAC-1828') or YouTrack issue URL
             comment_id: Comment ID (e.g., '4-15.91-12345')
             text: New comment text (markdown supported)
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
         old = await client.get(
             f"/api/issues/{issue_id}/comments/{comment_id}",
@@ -449,7 +473,7 @@ def register(mcp, client: YouTrackClient):
         )
 
     @mcp.tool()
-    async def delete_comment(issue_id: str, comment_id: str) -> str:
+    async def delete_comment(issue_id: str, comment_id: str, instance: str = "") -> str:
         """Delete a comment from a YouTrack issue.
 
         Returns the comment text so it can be re-added with add_comment if needed.
@@ -458,7 +482,9 @@ def register(mcp, client: YouTrackClient):
         Args:
             issue_id: Issue ID (e.g., 'BAC-1828') or YouTrack issue URL
             comment_id: Comment ID (e.g., '4-15.91-12345')
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
         old = await client.get(
             f"/api/issues/{issue_id}/comments/{comment_id}",

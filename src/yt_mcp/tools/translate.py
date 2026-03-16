@@ -3,7 +3,7 @@ import time
 
 import httpx
 
-from yt_mcp.client import YouTrackClient
+from yt_mcp.resolver import InstanceResolver
 
 
 def _has_cyrillic(text: str) -> bool:
@@ -11,13 +11,14 @@ def _has_cyrillic(text: str) -> bool:
     return bool(re.search(r"[\u0400-\u04FF]", text))
 
 
-def register(mcp, client: YouTrackClient):
+def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()
     async def get_issues_for_translation(
         query: str,
         include_comments: bool = True,
         max_results: int = 10,
+        instance: str = "",
     ) -> str:
         """Fetch issues that need translation, returning their raw text content.
 
@@ -30,7 +31,9 @@ def register(mcp, client: YouTrackClient):
             query: YouTrack search query (e.g., 'project: AP state: Open')
             include_comments: Whether to include comments for translation (default: True)
             max_results: Batch size (default: 10, keep small to fit in context)
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance)
         comment_fields = ",comments(id,text,author(name))" if include_comments else ""
         issues = await client.get(
             "/api/issues",
@@ -97,6 +100,7 @@ def register(mcp, client: YouTrackClient):
     async def apply_translations(
         translations: str,
         batch_tag: str = "",
+        instance: str = "",
     ) -> str:
         """Apply translated text to YouTrack issues. Tags issues for rollback.
 
@@ -114,7 +118,9 @@ def register(mcp, client: YouTrackClient):
         Args:
             translations: Structured translation block (see format above)
             batch_tag: Optional batch tag for rollback. Auto-generated if empty.
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance)
         if not batch_tag:
             batch_tag = f"yt-translate-{int(time.time())}"
 

@@ -1,8 +1,9 @@
 from yt_mcp.client import YouTrackClient
+from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import _resolve_state, get_product, parse_issue_id
 
 
-def register(mcp, client: YouTrackClient):
+def register(mcp, resolver: InstanceResolver):
 
     async def _build_impact_graph(
         client: YouTrackClient, root_id: str, depth: int
@@ -106,7 +107,7 @@ def register(mcp, client: YouTrackClient):
         return visited
 
     @mcp.tool()
-    async def get_impact_map(issue_id: str, depth: int = 2) -> str:
+    async def get_impact_map(issue_id: str, depth: int = 2, instance: str = "") -> str:
         """Build a cross-product dependency graph starting from an issue.
 
         Finds all related issues by following:
@@ -117,7 +118,9 @@ def register(mcp, client: YouTrackClient):
         Args:
             issue_id: Root issue ID (e.g., 'BAC-1828') or YouTrack issue URL
             depth: How many levels of links to follow (default: 2)
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
         graph = await _build_impact_graph(client, issue_id, depth)
 
@@ -191,7 +194,7 @@ def register(mcp, client: YouTrackClient):
         return "\n".join(lines)
 
     @mcp.tool()
-    async def get_deadline_impact(issue_id: str, deadline: str = "") -> str:
+    async def get_deadline_impact(issue_id: str, deadline: str = "", instance: str = "") -> str:
         """Analyze what breaks if an issue slips past a deadline.
 
         Finds all dependent/related issues and categorizes them as:
@@ -202,7 +205,9 @@ def register(mcp, client: YouTrackClient):
         Args:
             issue_id: Root issue ID (e.g., 'BAC-1828') or YouTrack issue URL
             deadline: Optional deadline date (e.g., '2026-03-14'). For context only.
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
         graph = await _build_impact_graph(client, issue_id, depth=2)
 

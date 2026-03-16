@@ -4,6 +4,7 @@ from unittest.mock import patch, AsyncMock, MagicMock
 from mcp.server.fastmcp import FastMCP
 
 from yt_mcp.config import YouTrackConfig
+from yt_mcp.resolver import InstanceResolver
 from yt_mcp.tools import register_all, WRITE_TOOLS
 
 
@@ -21,6 +22,13 @@ def _make_client():
     return mock
 
 
+def _make_resolver(clients=None):
+    """Create a resolver with mock client(s)."""
+    if clients is None:
+        clients = {"default": _make_client()}
+    return InstanceResolver(clients)
+
+
 def _get_tool_names(mcp: FastMCP) -> set[str]:
     """Extract registered tool names from MCP server."""
     if hasattr(mcp, "_tool_manager") and hasattr(mcp._tool_manager, "_tools"):
@@ -31,18 +39,18 @@ def _get_tool_names(mcp: FastMCP) -> set[str]:
 class TestToolRegistration:
     def test_all_tools_registered(self):
         mcp = FastMCP("test")
-        client = _make_client()
+        resolver = _make_resolver()
         config = YouTrackConfig(url="https://test.youtrack.cloud", token="perm:test")
-        register_all(mcp, client, config)
+        register_all(mcp, resolver, config)
 
         tools = _get_tool_names(mcp)
         assert len(tools) == 43, f"Expected 43 tools, got {len(tools)}: {sorted(tools)}"
 
     def test_expected_tools_present(self):
         mcp = FastMCP("test")
-        client = _make_client()
+        resolver = _make_resolver()
         config = YouTrackConfig(url="https://test.youtrack.cloud", token="perm:test")
-        register_all(mcp, client, config)
+        register_all(mcp, resolver, config)
 
         tools = _get_tool_names(mcp)
         expected = {
@@ -70,13 +78,13 @@ class TestToolRegistration:
 
     def test_read_only_removes_write_tools(self):
         mcp = FastMCP("test")
-        client = _make_client()
+        resolver = _make_resolver()
         config = YouTrackConfig(
             url="https://test.youtrack.cloud",
             token="perm:test",
             read_only=True,
         )
-        register_all(mcp, client, config)
+        register_all(mcp, resolver, config)
 
         tools = _get_tool_names(mcp)
         for wt in WRITE_TOOLS:
@@ -84,13 +92,13 @@ class TestToolRegistration:
 
     def test_read_only_keeps_read_tools(self):
         mcp = FastMCP("test")
-        client = _make_client()
+        resolver = _make_resolver()
         config = YouTrackConfig(
             url="https://test.youtrack.cloud",
             token="perm:test",
             read_only=True,
         )
-        register_all(mcp, client, config)
+        register_all(mcp, resolver, config)
 
         tools = _get_tool_names(mcp)
         read_tools = {"search_issues", "get_issue", "list_projects", "get_agiles",
@@ -101,13 +109,13 @@ class TestToolRegistration:
 
     def test_disabled_tools_removed(self):
         mcp = FastMCP("test")
-        client = _make_client()
+        resolver = _make_resolver()
         config = YouTrackConfig(
             url="https://test.youtrack.cloud",
             token="perm:test",
             disabled_tools=frozenset({"delete_issue", "bulk_update_execute"}),
         )
-        register_all(mcp, client, config)
+        register_all(mcp, resolver, config)
 
         tools = _get_tool_names(mcp)
         assert "delete_issue" not in tools
@@ -116,13 +124,13 @@ class TestToolRegistration:
 
     def test_disabled_tools_can_remove_read_tools(self):
         mcp = FastMCP("test")
-        client = _make_client()
+        resolver = _make_resolver()
         config = YouTrackConfig(
             url="https://test.youtrack.cloud",
             token="perm:test",
             disabled_tools=frozenset({"search_issues", "get_impact_map"}),
         )
-        register_all(mcp, client, config)
+        register_all(mcp, resolver, config)
 
         tools = _get_tool_names(mcp)
         assert "search_issues" not in tools
@@ -148,8 +156,8 @@ class TestToolRegistration:
 
     def test_no_config_registers_all(self):
         mcp = FastMCP("test")
-        client = _make_client()
-        register_all(mcp, client, config=None)
+        resolver = _make_resolver()
+        register_all(mcp, resolver, config=None)
 
         tools = _get_tool_names(mcp)
         assert len(tools) == 43

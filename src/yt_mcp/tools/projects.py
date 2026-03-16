@@ -1,12 +1,17 @@
-from yt_mcp.client import YouTrackClient
+from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import _resolve_state, _resolve_assignee, _get_custom_field
 
 
-def register(mcp, client: YouTrackClient):
+def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()
-    async def list_projects() -> str:
-        """List all accessible YouTrack projects."""
+    async def list_projects(instance: str = "") -> str:
+        """List all accessible YouTrack projects.
+
+        Args:
+            instance: YouTrack instance name (optional, for multi-instance setups)
+        """
+        client = resolver.resolve(instance)
         projects = await client.get(
             "/api/admin/projects",
             params={"fields": "shortName,name,archived,leader(name)"},
@@ -22,8 +27,13 @@ def register(mcp, client: YouTrackClient):
         return "\n".join(lines) if lines else "No projects found."
 
     @mcp.tool()
-    async def get_agiles() -> str:
-        """List all agile boards in YouTrack."""
+    async def get_agiles(instance: str = "") -> str:
+        """List all agile boards in YouTrack.
+
+        Args:
+            instance: YouTrack instance name (optional, for multi-instance setups)
+        """
+        client = resolver.resolve(instance)
         boards = await client.get(
             "/api/agiles",
             params={"fields": "id,name,projects(shortName,name),owner(name)"},
@@ -39,7 +49,7 @@ def register(mcp, client: YouTrackClient):
         return "\n".join(lines) if lines else "No agile boards found."
 
     @mcp.tool()
-    async def get_agile_board(name: str) -> str:
+    async def get_agile_board(name: str, instance: str = "") -> str:
         """Search for an agile board by name, ID, or URL.
 
         Accepts:
@@ -49,8 +59,11 @@ def register(mcp, client: YouTrackClient):
 
         Args:
             name: Board name, ID, or YouTrack agile board URL
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
         import re
+
+        client = resolver.resolve(instance, name)
 
         # Extract board ID from URL if provided
         url_match = re.search(r"/agiles/([\d-]+)", name)
@@ -121,6 +134,7 @@ def register(mcp, client: YouTrackClient):
         name: str,
         projects: str,
         column_field: str = "State",
+        instance: str = "",
     ) -> str:
         """Create a new agile board in YouTrack.
 
@@ -128,7 +142,9 @@ def register(mcp, client: YouTrackClient):
             name: Board name (e.g., 'My Sprint Board')
             projects: Comma-separated project short names (e.g., 'DO,BAC')
             column_field: Field to use for columns (default: 'State')
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance)
         project_list = [p.strip() for p in projects.split(",")]
 
         project_ids = []
@@ -156,14 +172,16 @@ def register(mcp, client: YouTrackClient):
         )
 
     @mcp.tool()
-    async def delete_agile_board(board_name: str) -> str:
+    async def delete_agile_board(board_name: str, instance: str = "") -> str:
         """Delete an agile board from YouTrack. The board's issues are NOT deleted.
 
         Uses case-insensitive partial matching to find the board.
 
         Args:
             board_name: Full or partial board name to delete
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance)
         boards = await client.get(
             "/api/agiles",
             params={"fields": "id,name,projects(shortName)"},
@@ -194,14 +212,17 @@ def register(mcp, client: YouTrackClient):
         )
 
     @mcp.tool()
-    async def get_sprint_board(board_name: str, sprint: str = "current") -> str:
+    async def get_sprint_board(board_name: str, sprint: str = "current", instance: str = "") -> str:
         """Get issues on an agile board grouped by column (state).
 
         Args:
             board_name: Board name, ID (e.g., '98-114'), or YouTrack URL
             sprint: Sprint name or 'current' for active sprint (default: 'current')
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
         import re
+
+        client = resolver.resolve(instance, board_name)
 
         # Extract board ID from URL if provided
         url_match = re.search(r"/agiles/([\d-]+)", board_name)
