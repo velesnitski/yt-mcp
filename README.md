@@ -2,6 +2,118 @@
 
 YouTrack MCP server for [Claude Code](https://claude.com/claude-code), [n8n](https://n8n.io), and any MCP-compatible client. Talk to your YouTrack instance in natural language.
 
+## Quick start
+
+### 1. Get a YouTrack permanent token
+
+1. Open YouTrack → **Profile** → **Account Security** → **Tokens** → **New token**
+2. Set scope: `YouTrack`
+3. Grant permissions: **Read Issue**, **Write Issue**, **Read Project** (or just use admin token for full access)
+4. Copy the token — it starts with `perm:`
+
+### 2. Install in Claude Code
+
+**Option A — via CLI** (recommended):
+
+> **Prerequisite:** [uv](https://docs.astral.sh/uv/) is required. Install with: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+
+```bash
+claude mcp add youtrack \
+  -e YOUTRACK_URL=https://your-instance.youtrack.cloud \
+  -e YOUTRACK_TOKEN=perm:your-token-here \
+  -- uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
+```
+
+**Option B — manually edit settings:**
+
+Edit `~/.claude/settings.json` (global) or `.claude/settings.json` in your project root (per-project):
+
+```json
+{
+  "mcpServers": {
+    "youtrack": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/velesnitski/yt-mcp", "yt-mcp"],
+      "env": {
+        "YOUTRACK_URL": "https://your-instance.youtrack.cloud",
+        "YOUTRACK_TOKEN": "perm:your-token-here"
+      }
+    }
+  }
+}
+```
+
+> **Troubleshooting: MCP server not found**
+>
+> If Claude Code can't find `uvx` at startup (e.g., `/mcp` doesn't show the server), use the full path instead:
+>
+> ```json
+> "command": "/full/path/to/uvx"
+> ```
+>
+> Find the full path with `which uvx` (typically `~/.local/bin/uvx` or `/opt/homebrew/bin/uvx`).
+
+### 3. Restart Claude Code
+
+```bash
+claude
+```
+
+You should see `youtrack` listed when Claude starts. Try asking: *"List my YouTrack projects"*
+
+## Multi-instance setup
+
+Connect multiple YouTrack instances to a single MCP server. Each tool gets an optional `instance` parameter — the LLM picks the right instance from context, or auto-detects it when you paste a YouTrack URL.
+
+### Configuration
+
+Set `YOUTRACK_INSTANCES` to a comma-separated list of instance names, then provide `YOUTRACK_{NAME}_URL` and `YOUTRACK_{NAME}_TOKEN` for each:
+
+```bash
+YOUTRACK_INSTANCES=main,second
+YOUTRACK_MAIN_URL=https://main.youtrack.cloud
+YOUTRACK_MAIN_TOKEN=perm:xxx
+YOUTRACK_SECOND_URL=https://second.youtrack.cloud
+YOUTRACK_SECOND_TOKEN=perm:yyy
+```
+
+Adding more instances follows the same pattern:
+
+```bash
+YOUTRACK_INSTANCES=main,second,third,fourth
+YOUTRACK_MAIN_URL=https://main.youtrack.cloud
+YOUTRACK_MAIN_TOKEN=perm:xxx
+YOUTRACK_SECOND_URL=https://second.youtrack.cloud
+YOUTRACK_SECOND_TOKEN=perm:yyy
+YOUTRACK_THIRD_URL=https://third.youtrack.cloud
+YOUTRACK_THIRD_TOKEN=perm:zzz
+YOUTRACK_FOURTH_URL=https://fourth.youtrack.cloud
+YOUTRACK_FOURTH_TOKEN=perm:www
+```
+
+Instance names are arbitrary — use whatever makes sense: `prod,staging,dev`, `team1,team2`, etc. The name is uppercased to form the env var prefix (`dev` → `YOUTRACK_DEV_URL`).
+
+### How it works
+
+- **No `YOUTRACK_INSTANCES`** — single-instance mode, fully backward compatible. Uses `YOUTRACK_URL` / `YOUTRACK_TOKEN` as before.
+- **First instance** falls back to unprefixed `YOUTRACK_URL` / `YOUTRACK_TOKEN` if its prefixed vars are not set.
+- **URL auto-detection** — when you paste a YouTrack URL (e.g., `https://second.youtrack.cloud/issue/PROJ-123`), the server matches the domain to the right instance automatically.
+- **Explicit `instance` parameter** — every tool accepts an optional `instance` param to target a specific instance.
+- **Default** — if no instance is specified and no URL is provided, the first configured instance is used.
+- **Global settings** — `YOUTRACK_READ_ONLY`, `DISABLED_TOOLS`, and `YOUTRACK_MAX_BULK_RESULTS` apply to all instances.
+
+### Claude Code example
+
+```bash
+claude mcp add youtrack \
+  -e YOUTRACK_INSTANCES=main,second \
+  -e YOUTRACK_MAIN_URL=https://main.youtrack.cloud \
+  -e YOUTRACK_MAIN_TOKEN=perm:xxx \
+  -e YOUTRACK_SECOND_URL=https://second.youtrack.cloud \
+  -e YOUTRACK_SECOND_TOKEN=perm:yyy \
+  -- uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
+```
+
 ## What it does
 
 Gives MCP clients live access to your YouTrack instance. Instead of opening the YouTrack UI, just ask:
@@ -100,66 +212,19 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `get_impact_map` | Build cross-product dependency graph from an issue (links, product overlap, mentions) |
 | `get_deadline_impact` | Analyze what breaks if an issue slips (blocked, at risk, done) |
 
-## Setup for Claude Code
+## Environment variables
 
-### 1. Get a YouTrack permanent token
+| Variable | Required | Description |
+|---|---|---|
+| `YOUTRACK_URL` | Yes | Your YouTrack instance URL (e.g., `https://company.youtrack.cloud`) |
+| `YOUTRACK_TOKEN` | Yes | Permanent token (starts with `perm:`) |
+| `YOUTRACK_INSTANCES` | No | Comma-separated instance names for multi-instance setup (e.g., `main,second`) |
+| `YOUTRACK_READ_ONLY` | No | Set to `true` to disable all write operations |
+| `DISABLED_TOOLS` | No | Comma-separated list of tools to disable (e.g., `delete_issue,bulk_update_execute`) |
+| `YOUTRACK_MAX_BULK_RESULTS` | No | Maximum issues per bulk operation (default: `100`) |
+| `YOUTRACK_ALLOW_HTTP` | No | Set to `1` to allow non-HTTPS URLs (not recommended) |
 
-1. Open YouTrack → **Profile** → **Account Security** → **Tokens** → **New token**
-2. Set scope: `YouTrack`
-3. Grant permissions: **Read Issue**, **Write Issue**, **Read Project** (or just use admin token for full access)
-4. Copy the token — it starts with `perm:`
-
-### 2. Install in Claude Code
-
-**Option A — via CLI** (recommended):
-
-> **Prerequisite:** [uv](https://docs.astral.sh/uv/) is required. Install with: `curl -LsSf https://astral.sh/uv/install.sh | sh`
-
-```bash
-claude mcp add youtrack \
-  -e YOUTRACK_URL=https://your-instance.youtrack.cloud \
-  -e YOUTRACK_TOKEN=perm:your-token-here \
-  -- uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
-```
-
-**Option B — manually edit settings:**
-
-Edit `~/.claude/settings.json` (global) or `.claude/settings.json` in your project root (per-project):
-
-```json
-{
-  "mcpServers": {
-    "youtrack": {
-      "command": "uvx",
-      "args": ["--from", "git+https://github.com/velesnitski/yt-mcp", "yt-mcp"],
-      "env": {
-        "YOUTRACK_URL": "https://your-instance.youtrack.cloud",
-        "YOUTRACK_TOKEN": "perm:your-token-here"
-      }
-    }
-  }
-}
-```
-
-> **Troubleshooting: MCP server not found**
->
-> If Claude Code can't find `uvx` at startup (e.g., `/mcp` doesn't show the server), use the full path instead:
->
-> ```json
-> "command": "/full/path/to/uvx"
-> ```
->
-> Find the full path with `which uvx` (typically `~/.local/bin/uvx` or `/opt/homebrew/bin/uvx`).
-
-### 3. Restart Claude Code
-
-```bash
-claude
-```
-
-You should see `youtrack` listed when Claude starts. Try asking: *"List my YouTrack projects"*
-
-### 4. Verify the server works
+## Verify the server works
 
 **Check that `uv` is installed** (required for the `uvx` command):
 
@@ -238,17 +303,6 @@ claude mcp add youtrack `
 > **Note:** If Claude Code can't find `uvx`, use the full path. Find it with `where uvx` (typically `%USERPROFILE%\.local\bin\uvx.exe`) and set `"command"` to that path in your settings.
 
 **4. Restart Claude Code** and try: *"List my YouTrack projects"*
-
-## Environment variables
-
-| Variable | Required | Description |
-|---|---|---|
-| `YOUTRACK_URL` | Yes | Your YouTrack instance URL (e.g., `https://company.youtrack.cloud`) |
-| `YOUTRACK_TOKEN` | Yes | Permanent token (starts with `perm:`) |
-| `YOUTRACK_READ_ONLY` | No | Set to `true` to disable all write operations |
-| `DISABLED_TOOLS` | No | Comma-separated list of tools to disable (e.g., `delete_issue,bulk_update_execute`) |
-| `YOUTRACK_MAX_BULK_RESULTS` | No | Maximum issues per bulk operation (default: `100`) |
-| `YOUTRACK_ALLOW_HTTP` | No | Set to `1` to allow non-HTTPS URLs (not recommended) |
 
 ## Alternative installation methods
 

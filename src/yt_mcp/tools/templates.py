@@ -1,8 +1,8 @@
-from yt_mcp.client import YouTrackClient
+from yt_mcp.resolver import InstanceResolver
 from yt_mcp.templates import ISSUE_TEMPLATES, build_description
 
 
-def register(mcp, client: YouTrackClient):
+def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()
     async def list_templates() -> str:
@@ -22,6 +22,7 @@ def register(mcp, client: YouTrackClient):
         summary: str,
         fields: str = "",
         product: str = "",
+        instance: str = "",
     ) -> str:
         """Create a YouTrack issue using a predefined template.
 
@@ -36,7 +37,9 @@ def register(mcp, client: YouTrackClient):
                     Example: 'Steps to Reproduce: 1. Open app 2. Click X|||Expected Result: Page loads|||Severity: Major'
                     Sections not provided will keep placeholder text.
             product: Product name for the Product custom field (leave empty to skip)
+            instance: YouTrack instance name (optional, for multi-instance setups)
         """
+        client = resolver.resolve(instance)
         result = build_description(template, fields)
         if not result:
             available = ", ".join(ISSUE_TEMPLATES.keys())

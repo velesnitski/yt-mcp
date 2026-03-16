@@ -1,4 +1,5 @@
 from yt_mcp.config import YouTrackConfig
+from yt_mcp.resolver import InstanceResolver
 from yt_mcp.tools import issues, templates, history, bulk, projects, translate, impact, users, articles
 
 # Tools that modify data — blocked in read-only mode
@@ -30,11 +31,11 @@ WRITE_TOOLS = frozenset({
 })
 
 
-def register_all(mcp, client, config: YouTrackConfig | None = None):
+def register_all(mcp, resolver: InstanceResolver, config: YouTrackConfig | None = None):
     # Collect all tools first, then filter
     modules = [issues, templates, history, bulk, projects, translate, impact, users, articles]
     for module in modules:
-        module.register(mcp, client)
+        module.register(mcp, resolver)
 
     if config is None:
         return

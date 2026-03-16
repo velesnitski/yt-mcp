@@ -1,12 +1,18 @@
 from mcp.server.fastmcp import FastMCP
-from yt_mcp.config import load_config
+from yt_mcp.config import load_all_configs
 from yt_mcp.client import YouTrackClient
+from yt_mcp.resolver import InstanceResolver
 from yt_mcp.tools import register_all
 
 mcp = FastMCP("youtrack")
-config = load_config()
-client = YouTrackClient(config)
-register_all(mcp, client, config)
+
+configs = load_all_configs()
+clients = {name: YouTrackClient(cfg) for name, cfg in configs.items()}
+resolver = InstanceResolver(clients)
+
+# Use the first instance's config for server-level settings (read_only, disabled_tools)
+server_config = next(iter(configs.values()))
+register_all(mcp, resolver, server_config)
 
 
 def main():
