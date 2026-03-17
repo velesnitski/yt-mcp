@@ -202,7 +202,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 
 | Tool | Description |
 |---|---|
-| `get_issues_for_translation` | Fetch issues with Cyrillic text for LLM-assisted translation |
+| `get_issues_for_translation` | Fetch issues with non-English text for LLM-assisted translation |
 | `apply_translations` | Apply translated text to issues with batch tagging for rollback |
 
 #### Impact analysis (2)

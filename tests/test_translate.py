@@ -1,27 +1,39 @@
-from yt_mcp.tools.translate import _has_cyrillic, _save_field
+from yt_mcp.tools.translate import _has_non_ascii, _save_field
 
 
-class TestHasCyrillic:
+class TestHasNonAscii:
     def test_russian_text(self):
-        assert _has_cyrillic("Привет мир") is True
+        assert _has_non_ascii("Привет мир") is True
 
     def test_english_text(self):
-        assert _has_cyrillic("Hello world") is False
+        assert _has_non_ascii("Hello world") is False
 
     def test_mixed_text(self):
-        assert _has_cyrillic("Hello Привет") is True
+        assert _has_non_ascii("Hello Привет") is True
 
     def test_empty_string(self):
-        assert _has_cyrillic("") is False
+        assert _has_non_ascii("") is False
 
     def test_ukrainian(self):
-        assert _has_cyrillic("Київ") is True
+        assert _has_non_ascii("Київ") is True
 
     def test_numbers_only(self):
-        assert _has_cyrillic("12345") is False
+        assert _has_non_ascii("12345") is False
 
     def test_special_chars(self):
-        assert _has_cyrillic("!@#$%") is False
+        assert _has_non_ascii("!@#$%") is False
+
+    def test_chinese(self):
+        assert _has_non_ascii("你好世界") is True
+
+    def test_japanese(self):
+        assert _has_non_ascii("こんにちは") is True
+
+    def test_arabic(self):
+        assert _has_non_ascii("مرحبا") is True
+
+    def test_accented_latin(self):
+        assert _has_non_ascii("café résumé") is True
 
 
 class TestSaveField:
