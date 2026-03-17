@@ -1,5 +1,5 @@
 from yt_mcp.resolver import InstanceResolver
-from yt_mcp.formatters import format_issue_list, format_issue_detail, _resolve_state, _get_custom_field, parse_issue_id
+from yt_mcp.formatters import format_issue_list, format_issue_detail, _resolve_state, _resolve_assignee, _get_custom_field, parse_issue_id
 
 
 def register(mcp, resolver: InstanceResolver):
@@ -169,7 +169,6 @@ def register(mcp, resolver: InstanceResolver):
             },
         )
 
-        from yt_mcp.formatters import _resolve_state, _resolve_assignee
         old_summary = before.get("summary", "?")
         old_state = _resolve_state(before)
         old_assignee = _resolve_assignee(before)

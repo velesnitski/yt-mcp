@@ -1,5 +1,11 @@
+import re
+from datetime import datetime, timezone
+
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import _resolve_state, _resolve_assignee, _get_custom_field
+
+_AGILE_URL_RE = re.compile(r"/agiles/([\d-]+)")
+_BOARD_ID_RE = re.compile(r"^\d+-\d+$")
 
 
 def register(mcp, resolver: InstanceResolver):
@@ -61,16 +67,14 @@ def register(mcp, resolver: InstanceResolver):
             name: Board name, ID, or YouTrack agile board URL
             instance: YouTrack instance name (optional, for multi-instance setups)
         """
-        import re
-
         client = resolver.resolve(instance, name)
 
         # Extract board ID from URL if provided
-        url_match = re.search(r"/agiles/([\d-]+)", name)
+        url_match = _AGILE_URL_RE.search(name)
         board_id = url_match.group(1) if url_match else None
 
         # If it looks like a board ID (digits and hyphens), try direct fetch
-        if not board_id and re.match(r"^\d+-\d+$", name.strip()):
+        if not board_id and _BOARD_ID_RE.match(name.strip()):
             board_id = name.strip()
 
         fields = (
@@ -220,15 +224,13 @@ def register(mcp, resolver: InstanceResolver):
             sprint: Sprint name or 'current' for active sprint (default: 'current')
             instance: YouTrack instance name (optional, for multi-instance setups)
         """
-        import re
-
         client = resolver.resolve(instance, board_name)
 
         # Extract board ID from URL if provided
-        url_match = re.search(r"/agiles/([\d-]+)", board_name)
+        url_match = _AGILE_URL_RE.search(board_name)
         resolved_id = url_match.group(1) if url_match else None
 
-        if not resolved_id and re.match(r"^\d+-\d+$", board_name.strip()):
+        if not resolved_id and _BOARD_ID_RE.match(board_name.strip()):
             resolved_id = board_name.strip()
 
         fields = "id,name,currentSprint(id,name),sprints(id,name,start,finish,archived)"
@@ -297,7 +299,6 @@ def register(mcp, resolver: InstanceResolver):
         finish = sprint_data.get("finish")
         date_range = ""
         if start and finish:
-            from datetime import datetime, timezone
             start_str = datetime.fromtimestamp(start / 1000, tz=timezone.utc).strftime("%b %d")
             finish_str = datetime.fromtimestamp(finish / 1000, tz=timezone.utc).strftime("%b %d")
             date_range = f" ({start_str} - {finish_str})"
