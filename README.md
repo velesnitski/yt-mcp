@@ -127,9 +127,9 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 - *"Log 2 hours of development on BAC-1828"*
 - *"Find articles about deployment"*
 
-### Available tools (43)
+### Available tools (44)
 
-#### Issues (16)
+#### Issues (17)
 
 | Tool | Description |
 |---|---|
@@ -148,6 +148,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `get_issue_history` | View change history of an issue (who changed what, when) |
 | `get_issue_changes_summary` | Get a compact summary of issue changes (state transitions, comments, time logged) |
 | `rollback_issue` | Revert a specific change using its activity ID |
+| `poll_changes` | Poll for recently changed issues (for automation triggers — Make.com, n8n, cron) |
 | `list_templates` | List available issue templates |
 
 #### Time tracking (4)
@@ -275,7 +276,7 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{
     uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
 ```
 
-You should see all 43 tools listed.
+You should see all 44 tools listed.
 
 ## Setup for Windows
 
@@ -460,6 +461,15 @@ The server will be available at `http://localhost:8000/mcp`.
 2. In n8n, add an **MCP Client** node (or use the HTTP Request node)
 3. Set the MCP server URL to `http://localhost:8000/sse`
 4. The YouTrack tools will be available as actions in your n8n workflows
+
+### Make.com setup
+
+1. Start the server in SSE mode (see above)
+2. In Make.com, use an **HTTP** or **MCP** module to connect to `http://localhost:8000/sse`
+3. Use the `poll_changes` tool on a schedule to detect new activity:
+   - Set `query` to filter issues (e.g., `project: DO`)
+   - Set `since_minutes` to match your polling interval (e.g., `5`)
+4. Route changed issues to other Make.com modules (Slack, email, Jira, etc.)
 
 ### Docker (for remote / always-on deployments)
 
