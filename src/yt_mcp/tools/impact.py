@@ -1,3 +1,5 @@
+import asyncio
+
 from yt_mcp.client import YouTrackClient
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import _resolve_state, get_product, parse_issue_id
@@ -53,10 +55,15 @@ def register(mcp, resolver: InstanceResolver):
                         rel = f"{link_type} ({direction})"
                         queue.append((linked_id, current_depth + 1, rel, issue_id))
 
-        # Search for issues mentioning root_id in text
-        if root_id not in ("", "?"):
+        # Search for mentions and same-product issues in parallel
+        root_product = get_product(visited[root_id]["data"])
+        first_product = root_product.split(",")[0].strip() if root_product else ""
+
+        async def _fetch_mentions():
+            if root_id in ("", "?"):
+                return []
             try:
-                mentions = await client.get(
+                return await client.get(
                     "/api/issues",
                     params={
                         "query": root_id,
@@ -65,25 +72,14 @@ def register(mcp, resolver: InstanceResolver):
                         "$top": "20",
                     },
                 )
-                for m in mentions:
-                    m_id = m.get("idReadable", "")
-                    if m_id and m_id not in visited and m_id != root_id:
-                        visited[m_id] = {
-                            "data": m,
-                            "relation": f"mentions {root_id}",
-                            "source": root_id,
-                            "depth": 1,
-                        }
             except (ValueError, Exception):
-                pass
+                return []
 
-        # Search for issues with same product
-        root_product = get_product(visited[root_id]["data"])
-        if root_product:
-            # Take first product if multiple
-            first_product = root_product.split(",")[0].strip()
+        async def _fetch_same_product():
+            if not first_product:
+                return []
             try:
-                same_product = await client.get(
+                return await client.get(
                     "/api/issues",
                     params={
                         "query": f"Product: {{{first_product}}} #Unresolved",
@@ -92,17 +88,32 @@ def register(mcp, resolver: InstanceResolver):
                         "$top": "20",
                     },
                 )
-                for sp in same_product:
-                    sp_id = sp.get("idReadable", "")
-                    if sp_id and sp_id not in visited and sp_id != root_id:
-                        visited[sp_id] = {
-                            "data": sp,
-                            "relation": f"same product ({first_product})",
-                            "source": root_id,
-                            "depth": 1,
-                        }
             except (ValueError, Exception):
-                pass
+                return []
+
+        mentions, same_product = await asyncio.gather(
+            _fetch_mentions(), _fetch_same_product()
+        )
+
+        for m in mentions:
+            m_id = m.get("idReadable", "")
+            if m_id and m_id not in visited and m_id != root_id:
+                visited[m_id] = {
+                    "data": m,
+                    "relation": f"mentions {root_id}",
+                    "source": root_id,
+                    "depth": 1,
+                }
+
+        for sp in same_product:
+            sp_id = sp.get("idReadable", "")
+            if sp_id and sp_id not in visited and sp_id != root_id:
+                visited[sp_id] = {
+                    "data": sp,
+                    "relation": f"same product ({first_product})",
+                    "source": root_id,
+                    "depth": 1,
+                }
 
         return visited
 

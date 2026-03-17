@@ -179,10 +179,10 @@ def register(mcp, resolver: InstanceResolver):
                     },
                 )
 
+                batch_end_ts = batch_ts + 60000
                 batch_changes = [
                     a for a in activities
-                    if a.get("timestamp", 0) >= batch_ts
-                    and a.get("timestamp", 0) <= batch_ts + 60000
+                    if batch_ts <= (ts := a.get("timestamp", 0)) <= batch_end_ts
                     and a.get("field", {}).get("name", "").lower() != "tag"
                 ]
 

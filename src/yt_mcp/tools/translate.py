@@ -6,9 +6,14 @@ import httpx
 from yt_mcp.resolver import InstanceResolver
 
 
+_NON_ASCII_RE = re.compile(r"[^\x00-\x7F]")
+_COMMENT_ID_RE = re.compile(r"COMMENT\s+([\w\-.]+)")
+_COMMENT_REST_RE = re.compile(r":\s*(.*)")
+
+
 def _has_non_ascii(text: str) -> bool:
     """Check if text contains non-ASCII characters (non-English text)."""
-    return bool(re.search(r"[^\x00-\x7F]", text))
+    return bool(_NON_ASCII_RE.search(text))
 
 
 def register(mcp, resolver: InstanceResolver):
@@ -158,10 +163,10 @@ def register(mcp, resolver: InstanceResolver):
                     if current_field and current_lines:
                         _save_field(entry, current_field, current_lines)
                     # Extract comment ID: "COMMENT 4-15.91-12345:" or "COMMENT 4-15.91-12345 (by Author):"
-                    match = re.match(r"COMMENT\s+([\w\-.]+)", line)
+                    match = _COMMENT_ID_RE.match(line)
                     if match:
                         current_field = f"comment:{match.group(1)}"
-                        rest_match = re.search(r":\s*(.*)", line)
+                        rest_match = _COMMENT_REST_RE.search(line)
                         rest = rest_match.group(1).strip() if rest_match else ""
                         current_lines = [rest] if rest else []
                     else:

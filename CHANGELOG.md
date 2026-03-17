@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-03-17
+
+### Changed
+- Precompile regex patterns at module level in `projects.py` and `translate.py` instead of recompiling per function call
+- Move `import re` and `from datetime` to module level in `projects.py` (was inside async functions)
+- Remove redundant inline import in `issues.py` (`_resolve_state`, `_resolve_assignee` already imported at top)
+- Parallelize independent API calls in `impact.py` using `asyncio.gather` (mentions + same-product searches)
+- Cache timestamp lookup in `bulk.py` list comprehension (walrus operator) to avoid double `.get()`
+
 ## [1.0.0] - 2026-03-17
 
 ### Added
@@ -26,4 +35,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Transport options** — stdio (default), SSE, and streamable-http
 - **106 tests** with GitHub Actions CI (Python 3.10–3.13)
 
+[1.0.1]: https://github.com/velesnitski/yt-mcp/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/velesnitski/yt-mcp/releases/tag/v1.0.0
