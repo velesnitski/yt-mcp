@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import format_issue_list, format_issue_detail, _resolve_state, _resolve_assignee, _get_custom_field, parse_issue_id
 
@@ -499,3 +501,71 @@ def register(mcp, resolver: InstanceResolver):
             f"**Deleted text:** {old_text[:500]}\n\n"
             f"To restore, call `add_comment` with the text above."
         )
+
+    @mcp.tool()
+    async def poll_changes(
+        query: str = "",
+        since_minutes: int = 5,
+        max_results: int = 50,
+        instance: str = "",
+    ) -> str:
+        """Poll for recently changed issues. Useful for automation triggers (Make.com, n8n, cron).
+
+        Returns issues updated within the last N minutes, with a summary of what changed.
+        Call on a schedule (e.g., every 5 minutes) to detect new activity.
+
+        Args:
+            query: Optional YouTrack query to filter issues (e.g., 'project: DO'). Combined with the time filter.
+            since_minutes: How far back to look for changes (default: 5 minutes)
+            max_results: Maximum number of changed issues to return (default: 50)
+            instance: YouTrack instance name (optional, for multi-instance setups)
+        """
+        client = resolver.resolve(instance)
+
+        now = datetime.now(tz=timezone.utc)
+        since_ts = int((now.timestamp() - since_minutes * 60) * 1000)
+
+        # Build query: combine user query with time filter
+        time_filter = f"updated: {{{since_minutes}m ago}} .. {{Now}}"
+        full_query = f"{query} {time_filter}".strip() if query else time_filter
+
+        data = await client.get(
+            "/api/issues",
+            params={
+                "query": full_query,
+                "fields": "idReadable,summary,state(name),assignee(name),"
+                "customFields(name,value(name)),updated",
+                "$top": str(max_results),
+            },
+        )
+
+        if not data:
+            return f"No changes in the last {since_minutes} minutes."
+
+        lines = [
+            f"## Changes in the last {since_minutes} minutes",
+            f"**Query:** `{full_query}`",
+            f"**Issues changed:** {len(data)}",
+            "",
+        ]
+
+        for issue in data:
+            issue_id = issue.get("idReadable", "?")
+            summary = issue.get("summary", "?")
+            state = _resolve_state(issue)
+            assignee = _resolve_assignee(issue)
+            updated_ms = issue.get("updated")
+            updated_str = ""
+            if updated_ms:
+                updated_str = datetime.fromtimestamp(
+                    updated_ms / 1000, tz=timezone.utc
+                ).strftime("%H:%M UTC")
+
+            lines.append(
+                f"- **{issue_id}** [{state}] {summary} → {assignee} ({updated_str})"
+            )
+
+        if len(data) >= max_results:
+            lines.append(f"\n*Showing first {max_results}, more may exist.*")
+
+        return "\n".join(lines)
