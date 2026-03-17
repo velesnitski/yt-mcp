@@ -6,9 +6,9 @@ import httpx
 from yt_mcp.resolver import InstanceResolver
 
 
-def _has_cyrillic(text: str) -> bool:
-    """Check if text contains Cyrillic characters."""
-    return bool(re.search(r"[\u0400-\u04FF]", text))
+def _has_non_ascii(text: str) -> bool:
+    """Check if text contains non-ASCII characters (non-English text)."""
+    return bool(re.search(r"[^\x00-\x7F]", text))
 
 
 def register(mcp, resolver: InstanceResolver):
@@ -25,7 +25,8 @@ def register(mcp, resolver: InstanceResolver):
         Returns issue IDs, summaries, descriptions, and comments as structured text.
         The LLM should translate the text and then call apply_translations to write it back.
 
-        Only includes issues where summary contains Cyrillic characters (likely Russian).
+        Only includes issues where summary or description contains non-ASCII characters
+        (i.e., text in a non-English language).
 
         Args:
             query: YouTrack search query (e.g., 'project: AP state: Open')
@@ -47,13 +48,13 @@ def register(mcp, resolver: InstanceResolver):
         if not issues:
             return f"No issues match query: `{query}`"
 
-        # Filter to issues with Cyrillic text
+        # Filter to issues with non-ASCII text
         to_translate = []
         skipped = 0
         for issue in issues:
             summary = issue.get("summary", "")
             desc = issue.get("description", "") or ""
-            if _has_cyrillic(summary) or _has_cyrillic(desc):
+            if _has_non_ascii(summary) or _has_non_ascii(desc):
                 to_translate.append(issue)
             else:
                 skipped += 1
@@ -65,7 +66,7 @@ def register(mcp, resolver: InstanceResolver):
         lines = [
             "## Issues for translation",
             f"**Query:** `{query}`",
-            f"**Issues to translate:** {len(to_translate)} (skipped {skipped} already in English)",
+            f"**Issues to translate:** {len(to_translate)} (skipped {skipped} already in target language)",
             "",
             "Translate the text below and call `apply_translations` with the results.",
             "Preserve: markdown, URLs, image refs, code blocks, @mentions, issue IDs, product names.",
@@ -88,7 +89,7 @@ def register(mcp, resolver: InstanceResolver):
                     c_id = c.get("id", "?")
                     c_text = c.get("text", "")
                     c_author = c.get("author", {}).get("name", "?")
-                    if c_text and _has_cyrillic(c_text):
+                    if c_text and _has_non_ascii(c_text):
                         lines.append(f"COMMENT {c_id} (by {c_author}):\n{c_text}")
 
             lines.append("---")
@@ -211,7 +212,7 @@ def register(mcp, resolver: InstanceResolver):
                 # Add audit comment
                 await client.post(
                     f"/api/issues/{issue_id}/comments",
-                    json={"text": f"[yt-mcp] Translated to en-US. Batch: {batch_tag}"},
+                    json={"text": f"[yt-mcp] Translated. Batch: {batch_tag}"},
                 )
 
                 updated_issues.append(issue_id)
