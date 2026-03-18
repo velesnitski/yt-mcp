@@ -59,7 +59,13 @@ class YouTrackClient:
         await self._handle_error(resp)
 
     async def execute_command(self, issue_id: str, command: str) -> None:
-        await self.post(f"/api/issues/{issue_id}/execute", json={"query": command})
+        await self.post(
+            "/api/commands",
+            json={
+                "query": command,
+                "issues": [{"idReadable": issue_id}],
+            },
+        )
 
     async def update_comment(self, issue_id: str, comment_id: str, text: str) -> dict:
         """Update an existing comment's text."""
