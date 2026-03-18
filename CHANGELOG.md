@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-03-18
+
+### Fixed
+- Fix `execute_command` 404 error on some YouTrack versions — switch from `/api/issues/{id}/execute` to standard `/api/commands` endpoint
+
+### Changed
+- Enable HTTP/2 for YouTrack API connections (`httpx[http2]`) — multiplexed requests over single TCP connection
+- Configure connection pooling (20 max connections, 10 keepalive, 30s expiry)
+- Parallelize activities + issue info fetches in `get_issue_changes_summary` with `asyncio.gather`
+- Content-Type header moved to module-level constant
+
 ## [1.1.0] - 2026-03-18
 
 ### Added
@@ -51,6 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Transport options** — stdio (default), SSE, and streamable-http
 - **106 tests** with GitHub Actions CI (Python 3.10–3.13)
 
+[1.1.1]: https://github.com/velesnitski/yt-mcp/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/velesnitski/yt-mcp/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/velesnitski/yt-mcp/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/velesnitski/yt-mcp/compare/v1.0.0...v1.0.1
