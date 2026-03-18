@@ -1,21 +1,26 @@
 import httpx
 from yt_mcp.config import YouTrackConfig
 
+_JSON_HEADERS = {"Content-Type": "application/json"}
+
 
 class YouTrackClient:
     def __init__(self, config: YouTrackConfig):
         self._config = config
         self._client = httpx.AsyncClient(
             timeout=30,
+            http2=True,
+            limits=httpx.Limits(
+                max_connections=20,
+                max_keepalive_connections=10,
+                keepalive_expiry=30,
+            ),
             headers={
                 "Authorization": f"Bearer {config.token}",
                 "Accept": "application/json",
             },
             base_url=config.url,
         )
-
-    def _content_type_headers(self) -> dict:
-        return {"Content-Type": "application/json"}
 
     async def _handle_error(self, resp: httpx.Response) -> None:
         """Extract YouTrack error message for 400/404 responses, raise for other errors."""
@@ -44,7 +49,7 @@ class YouTrackClient:
 
     async def post(self, path: str, json: dict | None = None):
         resp = await self._client.post(
-            path, json=json, headers=self._content_type_headers()
+            path, json=json, headers=_JSON_HEADERS
         )
         await self._handle_error(resp)
         return resp.json() if resp.content else {}
