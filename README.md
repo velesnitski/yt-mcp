@@ -129,7 +129,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 
 ### Available tools (44)
 
-#### Issues (17)
+#### Issues (18)
 
 | Tool | Description |
 |---|---|
@@ -206,6 +206,14 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `get_issues_for_translation` | Fetch issues with non-English text for LLM-assisted translation |
 | `apply_translations` | Apply translated text to issues with batch tagging for rollback |
 
+#### Priority dashboard (3)
+
+| Tool | Description |
+|---|---|
+| `get_top_active_issues` | Get top N active issues ranked by weighted scoring (priority, type, staleness, blockers) |
+| `get_top_blocked_issues` | Get top N blocked issues ranked by scoring (priority, duration blocked, blockers) |
+| `get_team_dashboard` | Combined project brief — top active + top blocked + summary stats |
+
 #### Impact analysis (2)
 
 | Tool | Description |
@@ -276,7 +284,7 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{
     uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
 ```
 
-You should see all 44 tools listed.
+You should see all 47 tools listed.
 
 ## Setup for Windows
 

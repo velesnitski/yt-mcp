@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-03-18
+
+### Added
+- **Scoring module** (`scoring.py`) with configurable weighted models for active and blocked issues
+- `get_top_active_issues` — rank active issues by priority, type, state, tags, staleness, and blocker count
+- `get_top_blocked_issues` — rank blocked issues by priority, type, tags, blocked duration, and blocker count
+- `get_team_dashboard` — combined project brief with top active, top blocked, and summary stats
+- Noise filtering via `exclude_patterns` parameter (regex, e.g., exclude daily reports)
+- 31 unit tests for scoring logic (helpers, active model, blocked model, edge cases)
+
 ## [1.0.2] - 2026-03-17
 
 ### Added
@@ -41,6 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Transport options** — stdio (default), SSE, and streamable-http
 - **106 tests** with GitHub Actions CI (Python 3.10–3.13)
 
+[1.1.0]: https://github.com/velesnitski/yt-mcp/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/velesnitski/yt-mcp/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/velesnitski/yt-mcp/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/velesnitski/yt-mcp/releases/tag/v1.0.0
