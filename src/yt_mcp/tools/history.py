@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 
 from yt_mcp.resolver import InstanceResolver
@@ -390,25 +391,25 @@ def register(mcp, resolver: InstanceResolver):
         """
         client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
-        # Fetch all activities (state, assignee, comments, work items)
-        activities = await client.get(
-            f"/api/issues/{issue_id}/activities",
-            params={
-                "fields": "id,timestamp,author(name),field(name),"
-                "added(name,text),removed(name,text)",
-                "categories": "CustomFieldCategory,SummaryCategory,"
-                "DescriptionCategory,CommentsCategory,SpentTimeCategory",
-                "$top": 500,
-            },
-        )
-
-        # Also get basic issue info
-        issue_data = await client.get(
-            f"/api/issues/{issue_id}",
-            params={
-                "fields": "idReadable,summary,created,reporter(name),"
-                "customFields(name,value(name))",
-            },
+        # Fetch activities and issue info in parallel
+        activities, issue_data = await asyncio.gather(
+            client.get(
+                f"/api/issues/{issue_id}/activities",
+                params={
+                    "fields": "id,timestamp,author(name),field(name),"
+                    "added(name,text),removed(name,text)",
+                    "categories": "CustomFieldCategory,SummaryCategory,"
+                    "DescriptionCategory,CommentsCategory,SpentTimeCategory",
+                    "$top": 500,
+                },
+            ),
+            client.get(
+                f"/api/issues/{issue_id}",
+                params={
+                    "fields": "idReadable,summary,created,reporter(name),"
+                    "customFields(name,value(name))",
+                },
+            ),
         )
 
         # Parse since filter
