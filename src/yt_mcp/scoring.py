@@ -30,6 +30,7 @@ STATE_BONUSES: dict[str, int] = {
     "in review": 5,
     "ready for test": 5,
     "submitted": 0,
+    "pause": 0,
 }
 
 # --- Tag bonuses ---
