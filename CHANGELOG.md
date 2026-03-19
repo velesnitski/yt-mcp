@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `check_task_creation` — verify a requested task was created, with quality score (assignee, description, priority, state, subtasks)
 - `get_creation_activity` — report of recently created issues by project/creator with quality summary stats (% with assignee, description, priority)
+- `Dockerfile`, `docker-compose.yml`, `.dockerignore` for SSE/HTTP deployments
 
 ## [1.2.2] - 2026-03-19
 
