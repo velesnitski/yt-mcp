@@ -1,0 +1,17 @@
+services:
+  youtrack-mcp:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - YOUTRACK_URL=https://your-instance.youtrack.cloud
+      - YOUTRACK_TOKEN=perm:your-token-here
+      # Optional:
+      # - YOUTRACK_INSTANCES=main,second
+      # - YOUTRACK_MAIN_URL=https://main.youtrack.cloud
+      # - YOUTRACK_MAIN_TOKEN=perm:xxx
+      # - YOUTRACK_SECOND_URL=https://second.youtrack.cloud
+      # - YOUTRACK_SECOND_TOKEN=perm:yyy
+      # - YOUTRACK_READ_ONLY=true
+      # - DISABLED_TOOLS=delete_issue,bulk_update_execute
+    restart: unless-stopped
