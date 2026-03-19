@@ -6,14 +6,19 @@ from yt_mcp.client import YouTrackClient
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.tools import register_all
 
+_oauth_provider = None
+
 
 def _build_mcp() -> FastMCP:
     """Build the MCP server, optionally with OAuth for claude.ai connectors."""
+    global _oauth_provider
     oauth_url = os.environ.get("YOUTRACK_OAUTH_URL", "")
 
     if oauth_url:
         from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
         from yt_mcp.auth import SimpleOAuthProvider
+
+        access_code = os.environ.get("YOUTRACK_ACCESS_CODE", "")
 
         auth_settings = AuthSettings(
             issuer_url=oauth_url,
@@ -25,8 +30,11 @@ def _build_mcp() -> FastMCP:
             ),
             revocation_options=RevocationOptions(enabled=True),
         )
-        provider = SimpleOAuthProvider()
-        return FastMCP("youtrack", auth=auth_settings, auth_server_provider=provider)
+        _oauth_provider = SimpleOAuthProvider(
+            access_code=access_code,
+            server_url=oauth_url,
+        )
+        return FastMCP("youtrack", auth=auth_settings, auth_server_provider=_oauth_provider)
 
     return FastMCP("youtrack")
 
@@ -62,6 +70,25 @@ def main():
 
     if args.transport == "stdio":
         mcp.run(transport="stdio")
+        return
+
+    # For HTTP transports: add verify route if access code is configured
+    if _oauth_provider and os.environ.get("YOUTRACK_ACCESS_CODE"):
+        import uvicorn
+        from starlette.applications import Starlette
+        from starlette.routing import Route, Mount
+        from yt_mcp.auth import create_verify_handler
+
+        if args.transport == "sse":
+            mcp_app = mcp.sse_app()
+        else:
+            mcp_app = mcp.streamable_http_app()
+
+        app = Starlette(routes=[
+            Route("/auth/verify", create_verify_handler(_oauth_provider), methods=["GET", "POST"]),
+            Mount("/", mcp_app),
+        ])
+        uvicorn.run(app, host=args.host, port=args.port)
     else:
         mcp.run(transport=args.transport, host=args.host, port=args.port)
 
