@@ -519,21 +519,28 @@ def register(mcp, resolver: InstanceResolver):
     async def get_at_risk_issues(
         project: str,
         stale_days: int = 7,
+        forgotten_days: int = 30,
+        limit_per_category: int = 10,
         deadline_warning_days: int = 7,
         exclude_patterns: str = "",
         instance: str = "",
     ) -> str:
-        """Find issues at risk: stalled (no activity), overdue deadlines, or over estimate.
+        """Find issues at risk: stalled, forgotten, overdue deadlines, or over estimate.
 
-        Detects issues that need attention by checking:
-        - Stalled: In Progress/Submitted with no updates in N days
+        Categories (ordered by urgency):
         - Overdue: past their Deadline date (if Deadline field is used)
-        - Approaching deadline: within N days of Deadline (if Deadline field is used)
+        - Approaching deadline: within N days of Deadline (if field is used)
+        - Stalled: In Progress / In Review / Ready for Test with no updates in N days
+          (actively worked on but went silent — high urgency)
         - Over estimate: spent time exceeds estimate (if time tracking is used)
+        - Forgotten: Submitted / Pause / To Do with no updates in 30+ days
+          (filed but never started or intentionally paused — lower urgency)
 
         Args:
             project: Project short name (e.g., 'DO', 'AP', 'BAC')
-            stale_days: Days without updates to consider stalled (default: 7)
+            stale_days: Days without updates to flag In Progress issues (default: 7)
+            forgotten_days: Days without updates to flag Submitted/Pause issues (default: 30)
+            limit_per_category: Max issues shown per category (default: 10)
             deadline_warning_days: Days before deadline to flag as approaching (default: 7)
             exclude_patterns: Comma-separated regex patterns to exclude (e.g., 'DevOps Daily,Report')
             instance: YouTrack instance name (optional, for multi-instance setups)
@@ -565,28 +572,40 @@ def register(mcp, resolver: InstanceResolver):
             all_issues = [i for i in all_issues if not _should_exclude(i, patterns)]
 
         now = datetime.now(tz=timezone.utc)
-        active_states = {"in progress", "submitted", "in review", "ready for test", "pause"}
 
-        overdue: list[tuple[int, str]] = []       # (days_overdue, formatted)
-        approaching: list[tuple[int, str]] = []   # (days_left, formatted)
-        stalled: list[tuple[int, str]] = []       # (days_idle, formatted)
-        over_estimate: list[tuple[float, str]] = []  # (ratio, formatted)
+        # Active = being worked on; stall here is high urgency
+        working_states = {"in progress", "in review", "ready for test"}
+        # Waiting = filed but not started; stall here is lower urgency
+        waiting_states = {"submitted", "pause", "to do", "reopen"}
+
+        overdue: list[tuple[int, str]] = []
+        approaching: list[tuple[int, str]] = []
+        stalled: list[tuple[int, str]] = []
+        forgotten: list[tuple[int, str]] = []
+        over_estimate: list[tuple[float, str]] = []
 
         for issue in all_issues:
             issue_id = issue.get("idReadable", "?")
             summary = issue.get("summary", "?")
             state = _resolve_state(issue)
+            state_lower = state.lower()
             assignee = _resolve_assignee(issue)
             priority = _get_priority_name(issue)
             days_idle = _days_since_update(issue)
 
-            # --- Stalled check ---
-            if state.lower() in active_states and days_idle >= stale_days:
-                line = (
+            def _fmt_line(extra: str) -> str:
+                return (
                     f"- **{issue_id}** [{state}] {summary}\n"
-                    f"  {assignee} | {priority} | **{days_idle}d without updates**"
+                    f"  {assignee} | {priority} | {extra}"
                 )
-                stalled.append((days_idle, line))
+
+            # --- Stalled: actively worked on but went silent ---
+            if state_lower in working_states and days_idle >= stale_days:
+                stalled.append((days_idle, _fmt_line(f"**{days_idle}d without updates**")))
+
+            # --- Forgotten: filed/paused but idle for a long time ---
+            elif state_lower in waiting_states and days_idle >= forgotten_days:
+                forgotten.append((days_idle, _fmt_line(f"**{days_idle}d without updates**")))
 
             # --- Deadline checks ---
             for cf in issue.get("customFields", []):
@@ -594,7 +613,6 @@ def register(mcp, resolver: InstanceResolver):
                 if cf_name in ("deadline", "due date", "due"):
                     val = cf.get("value")
                     if val is not None:
-                        # Value can be timestamp (ms) or presentation string
                         deadline_ts = None
                         if isinstance(val, (int, float)):
                             deadline_ts = val
@@ -617,19 +635,15 @@ def register(mcp, resolver: InstanceResolver):
                             deadline_str = deadline_dt.strftime("%Y-%m-%d")
 
                             if days_left < 0:
-                                line = (
-                                    f"- **{issue_id}** [{state}] {summary}\n"
-                                    f"  {assignee} | {priority} | "
-                                    f"Deadline: {deadline_str} (**{abs(days_left)}d overdue**)"
-                                )
-                                overdue.append((abs(days_left), line))
+                                overdue.append((
+                                    abs(days_left),
+                                    _fmt_line(f"Deadline: {deadline_str} (**{abs(days_left)}d overdue**)"),
+                                ))
                             elif days_left <= deadline_warning_days:
-                                line = (
-                                    f"- **{issue_id}** [{state}] {summary}\n"
-                                    f"  {assignee} | {priority} | "
-                                    f"Deadline: {deadline_str} (**{days_left}d left**)"
-                                )
-                                approaching.append((days_left, line))
+                                approaching.append((
+                                    days_left,
+                                    _fmt_line(f"Deadline: {deadline_str} (**{days_left}d left**)"),
+                                ))
 
             # --- Over estimate check ---
             estimate_minutes = 0
@@ -654,23 +668,22 @@ def register(mcp, resolver: InstanceResolver):
                 ratio = spent_minutes / estimate_minutes
                 est_str = f"{estimate_minutes // 60}h" if estimate_minutes >= 60 else f"{estimate_minutes}m"
                 spent_str = f"{spent_minutes // 60}h" if spent_minutes >= 60 else f"{spent_minutes}m"
-                line = (
-                    f"- **{issue_id}** [{state}] {summary}\n"
-                    f"  {assignee} | {priority} | "
-                    f"Estimate: {est_str}, Spent: {spent_str} (**{ratio:.0%}**)"
-                )
-                over_estimate.append((ratio, line))
+                over_estimate.append((
+                    ratio,
+                    _fmt_line(f"Estimate: {est_str}, Spent: {spent_str} (**{ratio:.0%}**)"),
+                ))
 
         # Sort each category by severity (worst first)
         overdue.sort(key=lambda x: x[0], reverse=True)
-        approaching.sort(key=lambda x: x[0])  # least days left first
+        approaching.sort(key=lambda x: x[0])
         stalled.sort(key=lambda x: x[0], reverse=True)
+        forgotten.sort(key=lambda x: x[0], reverse=True)
         over_estimate.sort(key=lambda x: x[0], reverse=True)
 
-        total_risks = len(overdue) + len(approaching) + len(stalled) + len(over_estimate)
+        total_risks = len(overdue) + len(approaching) + len(stalled) + len(forgotten) + len(over_estimate)
 
         if total_risks == 0:
-            return f"No at-risk issues found in **{project}** (stale threshold: {stale_days}d)."
+            return f"No at-risk issues found in **{project}** (stale: {stale_days}d, forgotten: {forgotten_days}d)."
 
         lines = [
             f"# At Risk Issues — {project}",
@@ -678,28 +691,21 @@ def register(mcp, resolver: InstanceResolver):
             "",
         ]
 
-        if overdue:
-            lines.append(f"## Overdue ({len(overdue)})")
-            for _, line in overdue:
+        def _append_category(title: str, items: list[tuple], limit: int) -> None:
+            if not items:
+                return
+            showing = min(limit, len(items))
+            lines.append(f"## {title} ({len(items)})")
+            for _, line in items[:limit]:
                 lines.append(line)
+            if len(items) > limit:
+                lines.append(f"_...and {len(items) - limit} more_")
             lines.append("")
 
-        if approaching:
-            lines.append(f"## Deadline approaching ({len(approaching)})")
-            for _, line in approaching:
-                lines.append(line)
-            lines.append("")
-
-        if stalled:
-            lines.append(f"## Stalled ({len(stalled)})")
-            for _, line in stalled:
-                lines.append(line)
-            lines.append("")
-
-        if over_estimate:
-            lines.append(f"## Over estimate ({len(over_estimate)})")
-            for _, line in over_estimate:
-                lines.append(line)
-            lines.append("")
+        _append_category("Overdue", overdue, limit_per_category)
+        _append_category("Deadline approaching", approaching, limit_per_category)
+        _append_category("Stalled — actively worked on but went silent", stalled, limit_per_category)
+        _append_category("Over estimate", over_estimate, limit_per_category)
+        _append_category("Forgotten — filed/paused but idle", forgotten, limit_per_category)
 
         return "\n".join(lines)
