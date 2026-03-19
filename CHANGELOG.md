@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-03-19
+
+### Added
+- `get_issues_digest` tool — shows recent changes (state, comments, fields, links) for any set of issues since a given time
+- Supports duration (`24h`, `7d`, `30m`) and date (`2026-03-18`) for the `since` parameter
+- Fetches activity for all matching issues in parallel with `asyncio.gather`
+- Multi-product scoring factor: +10 per additional product (cap +30)
+- Blocking-others scoring factor: +20 per inward Depend link (cap +80)
+
+### Fixed
+- `get_top_active_issues` query compatibility — now uses `#Unresolved` with client-side state filtering
+
 ## [1.1.2] - 2026-03-19
 
 ### Fixed
@@ -70,6 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Transport options** — stdio (default), SSE, and streamable-http
 - **106 tests** with GitHub Actions CI (Python 3.10–3.13)
 
+[1.2.0]: https://github.com/velesnitski/yt-mcp/compare/v1.1.2...v1.2.0
 [1.1.2]: https://github.com/velesnitski/yt-mcp/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/velesnitski/yt-mcp/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/velesnitski/yt-mcp/compare/v1.0.2...v1.1.0
