@@ -236,6 +236,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `DISABLED_TOOLS` | No | Comma-separated list of tools to disable (e.g., `delete_issue,bulk_update_execute`) |
 | `YOUTRACK_MAX_BULK_RESULTS` | No | Maximum issues per bulk operation (default: `100`) |
 | `YOUTRACK_ALLOW_HTTP` | No | Set to `1` to allow non-HTTPS URLs (not recommended) |
+| `YOUTRACK_OAUTH_URL` | No | Public HTTPS URL of this server — enables OAuth for claude.ai connectors |
 
 ## Verify the server works
 
@@ -434,6 +435,38 @@ The server includes built-in templates for creating structured issues. Ask Claud
 > *"Create a release task in MOBILE: version 2.5.0. Changes: new auth flow, config updates, purchase module. Rollback: revert to 2.4.9 via app store."*
 
 Claude will automatically use the matching template and fill in the sections from your description.
+
+## Setup for claude.ai (web connector)
+
+Use your YouTrack MCP as a custom connector in claude.ai (requires Pro, Max, Team, or Enterprise plan).
+
+### 1. Deploy the server with OAuth enabled
+
+Set `YOUTRACK_OAUTH_URL` to your server's public HTTPS URL:
+
+```bash
+docker run -d -p 8000:8000 \
+  -e YOUTRACK_URL="https://your-instance.youtrack.cloud" \
+  -e YOUTRACK_TOKEN="perm:your-token-here" \
+  -e YOUTRACK_OAUTH_URL="https://your-server.example.com" \
+  yt-mcp --transport sse
+```
+
+Put it behind a reverse proxy (Caddy, nginx, Cloudflare Tunnel) for HTTPS.
+
+### 2. Add connector in claude.ai
+
+1. Go to [claude.ai](https://claude.ai) → **Settings** → **Connectors**
+2. Click **"+ Add custom connector"**
+3. Enter a name: `YouTrack`
+4. Enter your server URL: `https://your-server.example.com`
+5. Complete the OAuth flow (auto-approved, no user interaction needed)
+
+### 3. Use it
+
+Start a conversation in claude.ai and ask about your YouTrack issues. All 51 tools are available.
+
+> Without `YOUTRACK_OAUTH_URL`, OAuth is disabled and the server works in standard mode (stdio/SSE without auth) — no changes to existing setups.
 
 ## Using with n8n, Langchain, and other HTTP clients
 
