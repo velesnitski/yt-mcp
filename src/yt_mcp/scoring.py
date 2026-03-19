@@ -43,6 +43,14 @@ TAG_BONUSES: dict[str, int] = {
 BLOCKER_BONUS = 25
 BLOCKER_CAP = 100
 
+# --- Multi-product scoring ---
+MULTI_PRODUCT_BONUS = 10  # per additional product beyond the first
+MULTI_PRODUCT_CAP = 30
+
+# --- Blocking others (inward Depend links) ---
+BLOCKING_OTHERS_BONUS = 20  # per issue waiting on this one
+BLOCKING_OTHERS_CAP = 80
+
 # --- Staleness thresholds (active model) ---
 STALENESS_THRESHOLDS: list[tuple[int, int]] = [
     (14, 15),  # >14 days = +15
@@ -83,6 +91,25 @@ def _count_blockers(issue: dict) -> int:
         ):
             count += len(link.get("issues", []))
     return count
+
+
+def _count_blocking_others(issue: dict) -> int:
+    """Count issues waiting on this one (inward Depend links)."""
+    count = 0
+    for link in issue.get("links", []):
+        direction = link.get("direction", "")
+        link_type = link.get("linkType", {}).get("name", "").lower()
+        if direction == "INWARD" and "depend" in link_type:
+            count += len(link.get("issues", []))
+    return count
+
+
+def _count_products(issue: dict) -> int:
+    """Count number of products assigned to this issue."""
+    product = _get_custom_field(issue, "Product") or ""
+    if not product:
+        return 0
+    return len([p.strip() for p in product.split(",") if p.strip()])
 
 
 def _days_since_update(issue: dict) -> int:
@@ -129,9 +156,18 @@ def compute_active_score(issue: dict) -> tuple[int, dict[str, int]]:
             break
     breakdown["staleness"] = staleness
 
-    # Blockers
+    # Blockers (outward subtasks/depends — scope)
     blocker_count = _count_blockers(issue)
     breakdown["blockers"] = min(blocker_count * BLOCKER_BONUS, BLOCKER_CAP)
+
+    # Blocking others (inward depends — other issues waiting on this)
+    blocking_count = _count_blocking_others(issue)
+    breakdown["blocking_others"] = min(blocking_count * BLOCKING_OTHERS_BONUS, BLOCKING_OTHERS_CAP)
+
+    # Multi-product impact
+    product_count = _count_products(issue)
+    extra_products = max(0, product_count - 1)
+    breakdown["multi_product"] = min(extra_products * MULTI_PRODUCT_BONUS, MULTI_PRODUCT_CAP)
 
     total = sum(breakdown.values())
     return total, breakdown
@@ -168,9 +204,18 @@ def compute_blocked_score(issue: dict) -> tuple[int, dict[str, int]]:
             break
     breakdown["duration"] = duration
 
-    # Blockers
+    # Blockers (outward subtasks/depends — scope)
     blocker_count = _count_blockers(issue)
     breakdown["blockers"] = min(blocker_count * BLOCKER_BONUS, BLOCKER_CAP)
+
+    # Blocking others (inward depends — other issues waiting on this)
+    blocking_count = _count_blocking_others(issue)
+    breakdown["blocking_others"] = min(blocking_count * BLOCKING_OTHERS_BONUS, BLOCKING_OTHERS_CAP)
+
+    # Multi-product impact
+    product_count = _count_products(issue)
+    extra_products = max(0, product_count - 1)
+    breakdown["multi_product"] = min(extra_products * MULTI_PRODUCT_BONUS, MULTI_PRODUCT_CAP)
 
     total = sum(breakdown.values())
     return total, breakdown
