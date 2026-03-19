@@ -206,13 +206,14 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `get_issues_for_translation` | Fetch issues with non-English text for LLM-assisted translation |
 | `apply_translations` | Apply translated text to issues with batch tagging for rollback |
 
-#### Priority dashboard & monitoring (7)
+#### Priority dashboard & monitoring (8)
 
 | Tool | Description |
 |---|---|
 | `get_top_active_issues` | Get top N active issues ranked by weighted scoring (priority, type, staleness, blockers) |
 | `get_top_blocked_issues` | Get top N blocked issues ranked by scoring (priority, duration blocked, blockers) |
 | `get_team_dashboard` | Combined project brief — top active + top blocked + summary stats |
+| `get_multi_team_dashboard` | Cross-team dashboard for multiple projects in one call (parallel fetch) |
 | `get_issues_digest` | Digest of recent changes for any issues — state changes, comments, field updates |
 | `get_at_risk_issues` | Find at-risk issues: stalled (active but silent), forgotten (filed but idle 30d+), overdue, over estimate |
 | `check_task_creation` | Verify a requested task was created with proper fields (priority, assignee, description) + quality score |
@@ -290,7 +291,7 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{
     uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
 ```
 
-You should see all 51 tools listed.
+You should see all 52 tools listed.
 
 ## Setup for Windows
 
@@ -468,7 +469,7 @@ Put it behind a reverse proxy (Caddy, nginx, Cloudflare Tunnel) for HTTPS.
 
 ### 3. Use it
 
-Start a conversation in claude.ai and ask about your YouTrack issues. All 51 tools are available.
+Start a conversation in claude.ai and ask about your YouTrack issues. All 52 tools are available.
 
 > Without `YOUTRACK_OAUTH_URL`, OAuth is disabled and the server works in standard mode (stdio/SSE without auth) — no changes to existing setups.
 
