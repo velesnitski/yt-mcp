@@ -206,7 +206,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `get_issues_for_translation` | Fetch issues with non-English text for LLM-assisted translation |
 | `apply_translations` | Apply translated text to issues with batch tagging for rollback |
 
-#### Priority dashboard (5)
+#### Priority dashboard & monitoring (7)
 
 | Tool | Description |
 |---|---|
@@ -215,6 +215,8 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `get_team_dashboard` | Combined project brief — top active + top blocked + summary stats |
 | `get_issues_digest` | Digest of recent changes for any issues — state changes, comments, field updates |
 | `get_at_risk_issues` | Find at-risk issues: stalled (active but silent), forgotten (filed but idle 30d+), overdue, over estimate |
+| `check_task_creation` | Verify a requested task was created with proper fields (priority, assignee, description) + quality score |
+| `get_creation_activity` | Report of recently created issues with quality indicators and PM follow-through stats |
 
 #### Impact analysis (2)
 
@@ -286,7 +288,7 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{
     uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
 ```
 
-You should see all 49 tools listed.
+You should see all 51 tools listed.
 
 ## Setup for Windows
 
