@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-03-19
+
+### Changed
+- `get_at_risk_issues` — separate "Stalled" (In Progress/In Review/Ready for Test, high urgency) from "Forgotten" (Submitted/Pause/To Do idle 30d+, lower urgency)
+- Add `limit_per_category` param (default: 10) and `forgotten_days` param (default: 30)
+- Show "...and N more" when categories are truncated
+
 ## [1.2.0] - 2026-03-19
 
 ### Added
@@ -83,6 +90,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Transport options** — stdio (default), SSE, and streamable-http
 - **106 tests** with GitHub Actions CI (Python 3.10–3.13)
 
+[1.2.1]: https://github.com/velesnitski/yt-mcp/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/velesnitski/yt-mcp/compare/v1.1.2...v1.2.0
 [1.1.2]: https://github.com/velesnitski/yt-mcp/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/velesnitski/yt-mcp/compare/v1.1.0...v1.1.1
