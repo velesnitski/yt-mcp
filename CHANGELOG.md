@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **OAuth 2.0 for claude.ai connectors** — set `YOUTRACK_OAUTH_URL` to enable. Auto-approve flow, in-memory token store, dynamic client registration. Uses FastMCP's built-in OAuth middleware.
+- **Access code gate** — set `YOUTRACK_ACCESS_CODE` to require a code before OAuth approval. Users see a simple form; wrong code = retry, correct code = auto-connect.
 - claude.ai connector setup guide in README
 
 ## [1.3.0] - 2026-03-19
