@@ -8,6 +8,8 @@ from yt_mcp.scoring import (
     format_score_breakdown,
     _get_priority_name,
     _count_blockers,
+    _count_blocking_others,
+    _count_products,
     _days_since_update,
 )
 
@@ -47,9 +49,18 @@ def _format_scored_issue(issue: dict, score: int, breakdown: dict[str, int]) -> 
     priority = _get_priority_name(issue)
     days = _days_since_update(issue)
     blockers = _count_blockers(issue)
+    blocking_others = _count_blocking_others(issue)
+    products = _count_products(issue)
 
     parts = [f"- **{issue_id}** (score: **{score}**) [{state}] {summary}"]
-    parts.append(f"  {assignee} | {priority} | {days}d idle | {blockers} blocked")
+    detail = f"  {assignee} | {priority} | {days}d idle"
+    if blockers:
+        detail += f" | {blockers} subtasks"
+    if blocking_others:
+        detail += f" | blocking {blocking_others}"
+    if products > 1:
+        detail += f" | {products} products"
+    parts.append(detail)
     parts.append(f"  _{format_score_breakdown(breakdown)}_")
     return "\n".join(parts)
 
