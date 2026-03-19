@@ -1,4 +1,6 @@
+import asyncio
 import re
+from datetime import datetime, timezone
 
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import _resolve_state, _resolve_assignee, _get_custom_field
@@ -63,6 +65,37 @@ def _format_scored_issue(issue: dict, score: int, breakdown: dict[str, int]) -> 
     parts.append(detail)
     parts.append(f"  _{format_score_breakdown(breakdown)}_")
     return "\n".join(parts)
+
+
+_SINCE_RE = re.compile(r"^(\d+)\s*(h|d|m)$", re.IGNORECASE)
+
+
+def _parse_since(since: str) -> int:
+    """Parse since string to epoch milliseconds.
+
+    Accepts:
+        - Duration: '24h', '7d', '30m'
+        - ISO date: '2026-03-18'
+    Returns timestamp in milliseconds.
+    """
+    since = since.strip()
+    match = _SINCE_RE.match(since)
+    if match:
+        value = int(match.group(1))
+        unit = match.group(2).lower()
+        multipliers = {"m": 60, "h": 3600, "d": 86400}
+        seconds_ago = value * multipliers[unit]
+        return int((datetime.now(tz=timezone.utc).timestamp() - seconds_ago) * 1000)
+
+    # Try ISO date
+    try:
+        dt = datetime.strptime(since, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        return int(dt.timestamp() * 1000)
+    except ValueError:
+        pass
+
+    # Default: 24h ago
+    return int((datetime.now(tz=timezone.utc).timestamp() - 86400) * 1000)
 
 
 def register(mcp, resolver: InstanceResolver):
@@ -304,5 +337,180 @@ def register(mcp, resolver: InstanceResolver):
 
         if not scored_blocked:
             lines.append("No blocked issues.\n")
+
+        return "\n".join(lines)
+
+    @mcp.tool()
+    async def get_issues_digest(
+        query: str,
+        since: str = "24h",
+        limit: int = 10,
+        instance: str = "",
+    ) -> str:
+        """Get a digest of recent changes for issues matching a query.
+
+        For each issue, shows state changes, new comments, and link updates
+        since the specified time. Useful for daily standups, status checks,
+        and automated reports.
+
+        Args:
+            query: YouTrack search query (e.g., 'project: DO State: {In Progress}', 'issue id: BAC-1828')
+            since: How far back to look — duration ('24h', '7d', '30m') or date ('2026-03-18'). Default: 24h.
+            limit: Maximum number of issues (default: 10)
+            instance: YouTrack instance name (optional, for multi-instance setups)
+        """
+        client = resolver.resolve(instance)
+        since_ts = _parse_since(since)
+
+        issues = await client.get(
+            "/api/issues",
+            params={
+                "query": query,
+                "fields": "idReadable,summary,state(name),assignee(name),"
+                "customFields(name,value(name)),updated",
+                "$top": str(limit),
+            },
+        )
+
+        if not issues:
+            return f"No issues match query: `{query}`"
+
+        # Fetch activities for all issues in parallel
+        async def _fetch_activities(issue_id: str):
+            try:
+                return await client.get(
+                    f"/api/issues/{issue_id}/activities",
+                    params={
+                        "fields": "id,timestamp,author(name),field(name),"
+                        "added(name,text,idReadable),removed(name,text,idReadable)",
+                        "categories": "CustomFieldCategory,SummaryCategory,"
+                        "CommentsCategory,LinksCategory",
+                        "$top": 100,
+                    },
+                )
+            except (ValueError, Exception):
+                return []
+
+        issue_ids = [i.get("idReadable", "?") for i in issues]
+        all_activities = await asyncio.gather(
+            *[_fetch_activities(iid) for iid in issue_ids]
+        )
+
+        lines = [
+            f"## Issues digest (since {since})",
+            f"**Query:** `{query}`",
+            f"**Issues:** {len(issues)}",
+            "",
+        ]
+
+        has_any_changes = False
+
+        for issue, activities in zip(issues, all_activities):
+            issue_id = issue.get("idReadable", "?")
+            summary = issue.get("summary", "?")
+            state = _resolve_state(issue)
+            assignee = _resolve_assignee(issue)
+
+            # Filter activities to since window
+            recent = [a for a in activities if a.get("timestamp", 0) >= since_ts]
+
+            # Categorize changes
+            state_changes = []
+            comments_added = []
+            field_changes = []
+            link_changes = []
+
+            for a in recent:
+                field_name = a.get("field", {}).get("name", "")
+                author = a.get("author", {}).get("name", "?")
+                added = a.get("added")
+                removed = a.get("removed")
+                ts = a.get("timestamp", 0)
+                time_str = datetime.fromtimestamp(
+                    ts / 1000, tz=timezone.utc
+                ).strftime("%H:%M") if ts else ""
+
+                if field_name == "State":
+                    old_state = ""
+                    new_state = ""
+                    if isinstance(removed, list) and removed:
+                        old_state = removed[0].get("name", "?")
+                    if isinstance(added, list) and added:
+                        new_state = added[0].get("name", "?")
+                    if old_state and new_state:
+                        state_changes.append(f"{old_state} → {new_state} (by {author}, {time_str})")
+                elif field_name == "comments":
+                    if added:
+                        count = 1 if not isinstance(added, list) else len(added)
+                        comments_added.append(author)
+                elif field_name == "links":
+                    if isinstance(added, list):
+                        for lnk in added:
+                            lid = lnk.get("idReadable", "?")
+                            link_changes.append(f"+ {lid}")
+                    if isinstance(removed, list):
+                        for lnk in removed:
+                            lid = lnk.get("idReadable", "?")
+                            link_changes.append(f"- {lid}")
+                elif field_name not in ("", "description"):
+                    # Other field changes (priority, assignee, etc.)
+                    old_val = ""
+                    new_val = ""
+                    if isinstance(removed, list) and removed:
+                        old_val = removed[0].get("name", str(removed))
+                    elif isinstance(removed, str):
+                        old_val = removed
+                    if isinstance(added, list) and added:
+                        new_val = added[0].get("name", str(added))
+                    elif isinstance(added, str):
+                        new_val = added
+                    if old_val or new_val:
+                        field_changes.append(f"{field_name}: {old_val or '(empty)'} → {new_val or '(empty)'}")
+
+            # Build issue section
+            lines.append(f"### {issue_id} [{state}] — {summary}")
+            lines.append(f"**Assignee:** {assignee}")
+
+            if not recent:
+                lines.append("_No changes in this period._")
+            else:
+                has_any_changes = True
+                if state_changes:
+                    for sc in state_changes:
+                        lines.append(f"- **State:** {sc}")
+                if comments_added:
+                    # Deduplicate and count
+                    author_counts: dict[str, int] = {}
+                    for a in comments_added:
+                        author_counts[a] = author_counts.get(a, 0) + 1
+                    authors_str = ", ".join(
+                        f"{name} ({c})" if c > 1 else name
+                        for name, c in author_counts.items()
+                    )
+                    total_comments = sum(author_counts.values())
+                    lines.append(f"- **Comments:** {total_comments} added (by {authors_str})")
+                if field_changes:
+                    for fc in field_changes:
+                        lines.append(f"- **{fc}**")
+                if link_changes:
+                    lines.append(f"- **Links:** {', '.join(link_changes)}")
+
+                # Last activity timestamp
+                last_ts = max(a.get("timestamp", 0) for a in recent)
+                if last_ts:
+                    last_dt = datetime.fromtimestamp(last_ts / 1000, tz=timezone.utc)
+                    now = datetime.now(tz=timezone.utc)
+                    hours_ago = int((now - last_dt).total_seconds() / 3600)
+                    if hours_ago < 1:
+                        lines.append("- _Last active: <1h ago_")
+                    elif hours_ago < 24:
+                        lines.append(f"- _Last active: {hours_ago}h ago_")
+                    else:
+                        lines.append(f"- _Last active: {hours_ago // 24}d ago_")
+
+            lines.append("")
+
+        if not has_any_changes:
+            lines.append("_No changes found for any issue in this period._")
 
         return "\n".join(lines)
