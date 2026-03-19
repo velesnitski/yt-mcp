@@ -5,6 +5,7 @@ Two modes:
 - Access code gate (YOUTRACK_ACCESS_CODE set): user must enter a code before approval
 """
 
+import html
 import secrets
 import time
 
@@ -26,6 +27,8 @@ from mcp.server.auth.provider import (
 _TOKEN_EXPIRY = 86400
 # Auth code lifetime: 5 minutes
 _CODE_EXPIRY = 300
+# Pending session lifetime: 5 minutes
+_SESSION_EXPIRY = 300
 
 _VERIFY_HTML = """<!DOCTYPE html>
 <html>
@@ -56,6 +59,7 @@ _VERIFY_HTML = """<!DOCTYPE html>
         {error}
         <form method="POST">
             <input type="hidden" name="session" value="{session}">
+            <input type="hidden" name="csrf" value="{csrf}">
             <input type="password" name="code" placeholder="Access code" autofocus required>
             <button type="submit">Connect</button>
         </form>
@@ -74,8 +78,8 @@ class SimpleOAuthProvider(OAuthAuthorizationServerProvider):
         self._auth_codes: dict[str, AuthorizationCode] = {}
         self._access_tokens: dict[str, AccessToken] = {}
         self._refresh_tokens: dict[str, RefreshToken] = {}
-        # Pending auth requests waiting for access code verification
-        self._pending: dict[str, tuple[OAuthClientInformationFull, AuthorizationParams]] = {}
+        # Pending auth requests: session -> (client, params, csrf_token, created_at)
+        self._pending: dict[str, tuple[OAuthClientInformationFull, AuthorizationParams, str, float]] = {}
 
     async def get_client(self, client_id: str) -> OAuthClientInformationFull | None:
         return self._clients.get(client_id)
@@ -113,17 +117,38 @@ class SimpleOAuthProvider(OAuthAuthorizationServerProvider):
 
         # Access code mode: store pending request, redirect to verify page
         session = secrets.token_urlsafe(16)
-        self._pending[session] = (client, params)
+        csrf = secrets.token_urlsafe(16)
+        self._pending[session] = (client, params, csrf, time.time())
         return f"{self._server_url}/auth/verify?session={session}"
 
-    def verify_and_complete(self, session: str, code: str) -> str | None:
-        """Verify access code and return redirect URL, or None if invalid."""
-        if code != self._access_code:
-            return None
-        pending = self._pending.pop(session, None)
+    def get_csrf_for_session(self, session: str) -> str | None:
+        """Get the CSRF token for a pending session, or None if invalid/expired."""
+        pending = self._pending.get(session)
         if not pending:
             return None
-        client, params = pending
+        _, _, csrf, created_at = pending
+        if time.time() - created_at > _SESSION_EXPIRY:
+            self._pending.pop(session, None)
+            return None
+        return csrf
+
+    def verify_and_complete(self, session: str, code: str, csrf: str) -> str | None:
+        """Verify access code + CSRF and return redirect URL, or None if invalid."""
+        pending = self._pending.get(session)
+        if not pending:
+            return None
+        client, params, expected_csrf, created_at = pending
+        # Check session expiry
+        if time.time() - created_at > _SESSION_EXPIRY:
+            self._pending.pop(session, None)
+            return None
+        # Timing-safe CSRF check
+        if not secrets.compare_digest(csrf, expected_csrf):
+            return None
+        # Timing-safe access code check
+        if not secrets.compare_digest(code, self._access_code):
+            return None
+        self._pending.pop(session, None)
         return self._create_auth_code(client, params)
 
     async def load_authorization_code(
@@ -229,20 +254,32 @@ def create_verify_handler(provider: SimpleOAuthProvider):
     async def verify_handler(request: Request):
         if request.method == "GET":
             session = request.query_params.get("session", "")
-            return HTMLResponse(_VERIFY_HTML.format(session=session, error=""))
+            csrf = provider.get_csrf_for_session(session)
+            if not csrf:
+                return HTMLResponse("<h3>Session expired or invalid. Please try connecting again.</h3>", status_code=400)
+            return HTMLResponse(_VERIFY_HTML.format(
+                session=html.escape(session),
+                csrf=html.escape(csrf),
+                error="",
+            ))
 
         # POST
         form = await request.form()
         session = str(form.get("session", ""))
         code = str(form.get("code", ""))
+        csrf = str(form.get("csrf", ""))
 
-        redirect_url = provider.verify_and_complete(session, code)
+        redirect_url = provider.verify_and_complete(session, code, csrf)
         if redirect_url:
             return RedirectResponse(url=redirect_url, status_code=302)
 
-        # Wrong code — show form again with error
+        # Wrong code — get fresh CSRF for retry
+        new_csrf = provider.get_csrf_for_session(session)
+        if not new_csrf:
+            return HTMLResponse("<h3>Session expired. Please try connecting again.</h3>", status_code=400)
         return HTMLResponse(_VERIFY_HTML.format(
-            session=session,
+            session=html.escape(session),
+            csrf=html.escape(new_csrf),
             error='<p class="error">Invalid access code. Try again.</p>',
         ))
 
