@@ -237,6 +237,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `YOUTRACK_MAX_BULK_RESULTS` | No | Maximum issues per bulk operation (default: `100`) |
 | `YOUTRACK_ALLOW_HTTP` | No | Set to `1` to allow non-HTTPS URLs (not recommended) |
 | `YOUTRACK_OAUTH_URL` | No | Public HTTPS URL of this server — enables OAuth for claude.ai connectors |
+| `YOUTRACK_ACCESS_CODE` | No | Access code for OAuth gate — users must enter this code to connect (requires `YOUTRACK_OAUTH_URL`) |
 
 ## Verify the server works
 
@@ -442,17 +443,20 @@ Use your YouTrack MCP as a custom connector in claude.ai (requires Pro, Max, Tea
 
 ### 1. Deploy the server with OAuth enabled
 
-Set `YOUTRACK_OAUTH_URL` to your server's public HTTPS URL:
+Set `YOUTRACK_OAUTH_URL` to your server's public HTTPS URL. Optionally set `YOUTRACK_ACCESS_CODE` to require a code before connecting:
 
 ```bash
 docker run -d -p 8000:8000 \
   -e YOUTRACK_URL="https://your-instance.youtrack.cloud" \
   -e YOUTRACK_TOKEN="perm:your-token-here" \
   -e YOUTRACK_OAUTH_URL="https://your-server.example.com" \
+  -e YOUTRACK_ACCESS_CODE="your-secret-code" \
   yt-mcp --transport sse
 ```
 
 Put it behind a reverse proxy (Caddy, nginx, Cloudflare Tunnel) for HTTPS.
+
+> Without `YOUTRACK_ACCESS_CODE`, OAuth auto-approves (no user interaction). With it, users see a simple form to enter the access code before connecting.
 
 ### 2. Add connector in claude.ai
 
