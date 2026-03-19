@@ -214,7 +214,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `get_top_blocked_issues` | Get top N blocked issues ranked by scoring (priority, duration blocked, blockers) |
 | `get_team_dashboard` | Combined project brief — top active + top blocked + summary stats |
 | `get_issues_digest` | Digest of recent changes for any issues — state changes, comments, field updates |
-| `get_at_risk_issues` | Find at-risk issues: stalled, overdue deadlines, over estimate |
+| `get_at_risk_issues` | Find at-risk issues: stalled (active but silent), forgotten (filed but idle 30d+), overdue, over estimate |
 
 #### Impact analysis (2)
 
