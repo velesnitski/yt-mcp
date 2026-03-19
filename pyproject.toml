@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yt-mcp"
-version = "1.1.2"
+version = "1.2.0"
 description = "YouTrack MCP server for Claude Code, n8n, and any MCP-compatible client"
 readme = "README.md"
 license = "MIT"
