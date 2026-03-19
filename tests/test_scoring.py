@@ -6,6 +6,8 @@ from yt_mcp.scoring import (
     _get_priority_name,
     _get_type_name,
     _count_blockers,
+    _count_blocking_others,
+    _count_products,
     _days_since_update,
 )
 
@@ -17,6 +19,8 @@ def _make_issue(
     tags=None,
     updated_days_ago=0,
     blocker_count=0,
+    inward_depend_count=0,
+    products=None,
 ):
     """Build a minimal issue dict for scoring tests."""
     now_ms = int(time.time() * 1000)
@@ -29,6 +33,21 @@ def _make_issue(
             "linkType": {"name": "Subtask"},
             "issues": [{"idReadable": f"X-{i}"} for i in range(blocker_count)],
         })
+    if inward_depend_count > 0:
+        links.append({
+            "direction": "INWARD",
+            "linkType": {"name": "Depend"},
+            "issues": [{"idReadable": f"D-{i}"} for i in range(inward_depend_count)],
+        })
+
+    custom_fields = [
+        {"name": "Priority", "value": {"name": priority}},
+        {"name": "Type", "value": {"name": issue_type}},
+    ]
+    if products:
+        custom_fields.append(
+            {"name": "Product", "value": [{"name": p} for p in products]}
+        )
 
     return {
         "idReadable": "TEST-1",
@@ -39,10 +58,7 @@ def _make_issue(
         "priority": {"name": priority},
         "assignee": {"name": "Tester"},
         "tags": [{"name": t} for t in (tags or [])],
-        "customFields": [
-            {"name": "Priority", "value": {"name": priority}},
-            {"name": "Type", "value": {"name": issue_type}},
-        ],
+        "customFields": custom_fields,
         "links": links,
     }
 
@@ -123,6 +139,55 @@ class TestCountBlockers:
         assert _count_blockers({}) == 0
 
 
+class TestCountBlockingOthers:
+    def test_inward_depend(self):
+        issue = {
+            "links": [{
+                "direction": "INWARD",
+                "linkType": {"name": "Depend"},
+                "issues": [{"idReadable": "A-1"}, {"idReadable": "A-2"}],
+            }]
+        }
+        assert _count_blocking_others(issue) == 2
+
+    def test_outward_depend_not_counted(self):
+        issue = {
+            "links": [{
+                "direction": "OUTWARD",
+                "linkType": {"name": "Depend"},
+                "issues": [{"idReadable": "A-1"}],
+            }]
+        }
+        assert _count_blocking_others(issue) == 0
+
+    def test_inward_subtask_not_counted(self):
+        issue = {
+            "links": [{
+                "direction": "INWARD",
+                "linkType": {"name": "Subtask"},
+                "issues": [{"idReadable": "A-1"}],
+            }]
+        }
+        assert _count_blocking_others(issue) == 0
+
+    def test_no_links(self):
+        assert _count_blocking_others({}) == 0
+
+
+class TestCountProducts:
+    def test_single_product(self):
+        issue = {"customFields": [{"name": "Product", "value": [{"name": "Planet VPN"}]}]}
+        assert _count_products(issue) == 1
+
+    def test_multi_product(self):
+        issue = {"customFields": [{"name": "Product", "value": [{"name": "Planet VPN"}, {"name": "VPNLY"}, {"name": "Personal VPN"}]}]}
+        assert _count_products(issue) == 3
+
+    def test_no_product(self):
+        issue = {"customFields": []}
+        assert _count_products(issue) == 0
+
+
 class TestDaysSinceUpdate:
     def test_recently_updated(self):
         now_ms = int(time.time() * 1000)
@@ -196,6 +261,45 @@ class TestComputeActiveScore:
         score, breakdown = compute_active_score(issue)
         assert score == 0
         assert all(v == 0 for v in breakdown.values())
+
+    def test_multi_product_bonus(self):
+        issue = _make_issue(products=["Planet VPN", "VPNLY", "Personal VPN"])
+        _, breakdown = compute_active_score(issue)
+        assert breakdown["multi_product"] == 20  # 2 extra * 10
+
+    def test_multi_product_cap(self):
+        issue = _make_issue(products=["A", "B", "C", "D", "E"])
+        _, breakdown = compute_active_score(issue)
+        assert breakdown["multi_product"] == 30  # capped
+
+    def test_single_product_no_bonus(self):
+        issue = _make_issue(products=["Planet VPN"])
+        _, breakdown = compute_active_score(issue)
+        assert breakdown["multi_product"] == 0
+
+    def test_blocking_others_bonus(self):
+        issue = _make_issue(inward_depend_count=2)
+        _, breakdown = compute_active_score(issue)
+        assert breakdown["blocking_others"] == 40  # 2 * 20
+
+    def test_blocking_others_cap(self):
+        issue = _make_issue(inward_depend_count=5)
+        _, breakdown = compute_active_score(issue)
+        assert breakdown["blocking_others"] == 80  # capped
+
+    def test_do_1485_scenario(self):
+        """DO-1485: High priority, 3 products, 2 subtasks, 1 inward depend."""
+        issue = _make_issue(
+            priority="High", issue_type="Task", state="In Progress",
+            blocker_count=2, inward_depend_count=1,
+            products=["Planet VPN", "VPNLY", "Personal VPN"],
+        )
+        score, breakdown = compute_active_score(issue)
+        assert breakdown["priority"] == 60
+        assert breakdown["blockers"] == 50
+        assert breakdown["blocking_others"] == 20
+        assert breakdown["multi_product"] == 20
+        assert score >= 165
 
     def test_submitted_state_no_bonus(self):
         issue = _make_issue(state="Submitted")
