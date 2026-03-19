@@ -380,3 +380,278 @@ def register(mcp, resolver: InstanceResolver):
         _append_category("Forgotten — filed/paused but idle", forgotten)
 
         return "\n".join(lines)
+
+    @mcp.tool()
+    async def check_task_creation(
+        keywords: str,
+        project: str = "",
+        created_since: str = "7d",
+        expected_priority: str = "",
+        instance: str = "",
+    ) -> str:
+        """Check if a task matching keywords was created, and assess its quality.
+
+        Useful for verifying that a requested task was actually created with
+        proper fields (priority, assignee, description, subtasks).
+
+        Args:
+            keywords: Search keywords for the task (e.g., 'SOCKS proxy', 'server audit')
+            project: Project short name to narrow search (optional)
+            created_since: How far back to look — duration ('7d', '24h') or date ('2026-03-18'). Default: 7d.
+            expected_priority: Expected priority level to verify (e.g., 'Critical'). Empty = don't check.
+            instance: YouTrack instance name (optional, for multi-instance setups)
+        """
+        client = resolver.resolve(instance)
+        since_ts = _parse_since(created_since)
+
+        query = keywords
+        if project:
+            query = f"project: {project} {keywords}"
+
+        issues = await client.get(
+            "/api/issues",
+            params={
+                "query": query,
+                "fields": "idReadable,summary,created,updated,state(name),"
+                "priority(name),assignee(name),description,"
+                "reporter(name),tags(name),"
+                "customFields(name,value(name)),"
+                "links(direction,linkType(name),issues(idReadable))",
+                "$top": "20",
+            },
+        )
+
+        if not issues:
+            return (
+                f"## Task creation check: \"{keywords}\"\n\n"
+                f"**No matching issues found** in the last {created_since}.\n"
+                f"The task may not have been created yet."
+            )
+
+        # Filter by creation date
+        matches = [
+            i for i in issues
+            if i.get("created", 0) >= since_ts
+        ]
+
+        if not matches:
+            # Issues exist but were created before the time window
+            older = issues[:3]
+            lines = [
+                f"## Task creation check: \"{keywords}\"",
+                "",
+                f"No issues created in the last {created_since}, but found older matches:",
+                "",
+            ]
+            for issue in older:
+                issue_id = issue.get("idReadable", "?")
+                summary = issue.get("summary", "?")
+                created_ms = issue.get("created", 0)
+                created_str = datetime.fromtimestamp(
+                    created_ms / 1000, tz=timezone.utc
+                ).strftime("%Y-%m-%d") if created_ms else "?"
+                lines.append(f"- **{issue_id}** — {summary} (created {created_str})")
+            return "\n".join(lines)
+
+        lines = [
+            f"## Task creation check: \"{keywords}\"",
+            f"**Found: {len(matches)} matching issues**",
+            "",
+        ]
+
+        for issue in matches:
+            issue_id = issue.get("idReadable", "?")
+            summary = issue.get("summary", "?")
+            state = _resolve_state(issue)
+            assignee = _resolve_assignee(issue)
+            priority = _get_priority_name(issue)
+            description = issue.get("description", "") or ""
+            reporter = issue.get("reporter", {})
+            reporter_name = reporter.get("name", "?") if reporter else "?"
+            created_ms = issue.get("created", 0)
+            created_str = datetime.fromtimestamp(
+                created_ms / 1000, tz=timezone.utc
+            ).strftime("%Y-%m-%d") if created_ms else "?"
+
+            # Count subtasks
+            subtask_count = 0
+            for link in issue.get("links", []):
+                if link.get("direction") == "OUTWARD" and "subtask" in link.get("linkType", {}).get("name", "").lower():
+                    subtask_count += len(link.get("issues", []))
+
+            # Quality checks
+            quality_score = 0
+            quality_max = 10
+            checks: list[str] = []
+
+            # Has assignee? (+2)
+            if assignee != "Unassigned":
+                quality_score += 2
+                checks.append("Assignee: **assigned**")
+            else:
+                checks.append("Assignee: **missing**")
+
+            # Has description? (+2)
+            if len(description) > 20:
+                quality_score += 2
+                checks.append("Description: **present**")
+            elif description:
+                quality_score += 1
+                checks.append("Description: **short**")
+            else:
+                checks.append("Description: **missing**")
+
+            # Has priority? (+2)
+            if priority and priority != "?":
+                quality_score += 2
+                if expected_priority and priority.lower() != expected_priority.lower():
+                    checks.append(f"Priority: **{priority}** (expected: {expected_priority})")
+                else:
+                    checks.append(f"Priority: **{priority}**")
+            else:
+                checks.append("Priority: **not set**")
+
+            # State moved beyond Submitted? (+2)
+            if state.lower() not in ("submitted", "open", ""):
+                quality_score += 2
+                checks.append(f"State: **{state}** (progressing)")
+            else:
+                checks.append(f"State: **{state}**")
+
+            # Has subtasks? (+2)
+            if subtask_count > 0:
+                quality_score += 2
+                checks.append(f"Subtasks: **{subtask_count}**")
+            else:
+                checks.append("Subtasks: **none**")
+
+            lines.append(f"### {issue_id} — {summary}")
+            lines.append(f"**Created:** {created_str} by {reporter_name}")
+            lines.append(f"**Quality: {quality_score}/{quality_max}**")
+            lines.append("")
+            for check in checks:
+                lines.append(f"- {check}")
+            lines.append("")
+
+        return "\n".join(lines)
+
+    @mcp.tool()
+    async def get_creation_activity(
+        project: str,
+        since: str = "7d",
+        creator: str = "",
+        limit: int = 20,
+        instance: str = "",
+    ) -> str:
+        """Get a report of recently created issues with quality indicators.
+
+        Shows all issues created in a project within a time window, with checks for
+        whether each has an assignee, description, priority, and has progressed beyond Submitted.
+        Useful for tracking PM/lead follow-through on task creation.
+
+        Args:
+            project: Project short name (e.g., 'DO', 'AP', 'BAC')
+            since: How far back to look — duration ('7d', '24h', '30d') or date ('2026-03-18'). Default: 7d.
+            creator: Filter by creator name (optional, partial match)
+            limit: Maximum number of issues (default: 20)
+            instance: YouTrack instance name (optional, for multi-instance setups)
+        """
+        client = resolver.resolve(instance)
+        since_ts = _parse_since(since)
+
+        issues = await client.get(
+            "/api/issues",
+            params={
+                "query": f"project: {project} created: {{-1000d}} .. {{Now}}",
+                "fields": "idReadable,summary,created,state(name),"
+                "priority(name),assignee(name),description,"
+                "reporter(name),"
+                "customFields(name,value(name)),"
+                "links(direction,linkType(name),issues(idReadable))",
+                "$top": "200",
+            },
+        )
+
+        if not issues:
+            return f"No issues found in **{project}**."
+
+        # Filter by creation date
+        recent = [i for i in issues if i.get("created", 0) >= since_ts]
+
+        # Filter by creator if specified
+        if creator:
+            creator_lower = creator.lower()
+            recent = [
+                i for i in recent
+                if creator_lower in (i.get("reporter", {}) or {}).get("name", "").lower()
+            ]
+
+        if not recent:
+            creator_str = f" by {creator}" if creator else ""
+            return f"No issues created in **{project}**{creator_str} since {since}."
+
+        # Sort by created date descending
+        recent.sort(key=lambda x: x.get("created", 0), reverse=True)
+        recent = recent[:limit]
+
+        # Compute stats
+        total = len(recent)
+        has_assignee = sum(1 for i in recent if _resolve_assignee(i) != "Unassigned")
+        has_description = sum(1 for i in recent if len(i.get("description", "") or "") > 20)
+        has_priority = sum(1 for i in recent if _get_priority_name(i) not in ("", "?"))
+        progressed = sum(
+            1 for i in recent
+            if _resolve_state(i).lower() not in ("submitted", "open", "")
+        )
+
+        creator_str = f" by {creator}" if creator else ""
+        lines = [
+            f"# Creation activity — {project}{creator_str}",
+            f"**Period:** since {since}",
+            f"**Issues created:** {total}",
+            "",
+            "## Quality summary",
+            f"- Assignee set: **{has_assignee}/{total}** ({has_assignee * 100 // total}%)" if total else "",
+            f"- Description present: **{has_description}/{total}** ({has_description * 100 // total}%)" if total else "",
+            f"- Priority set: **{has_priority}/{total}** ({has_priority * 100 // total}%)" if total else "",
+            f"- Progressed beyond Submitted: **{progressed}/{total}** ({progressed * 100 // total}%)" if total else "",
+            "",
+            "## Issues",
+            "",
+        ]
+        # Remove empty lines from conditional stats
+        lines = [l for l in lines if l is not None]
+
+        for issue in recent:
+            issue_id = issue.get("idReadable", "?")
+            summary = issue.get("summary", "?")
+            state = _resolve_state(issue)
+            assignee = _resolve_assignee(issue)
+            priority = _get_priority_name(issue)
+            description = issue.get("description", "") or ""
+            reporter = issue.get("reporter", {})
+            reporter_name = reporter.get("name", "?") if reporter else "?"
+            created_ms = issue.get("created", 0)
+            created_str = datetime.fromtimestamp(
+                created_ms / 1000, tz=timezone.utc
+            ).strftime("%Y-%m-%d") if created_ms else "?"
+
+            # Quality indicators
+            flags: list[str] = []
+            if assignee == "Unassigned":
+                flags.append("no assignee")
+            if not description:
+                flags.append("no description")
+            if priority in ("", "?"):
+                flags.append("no priority")
+            if state.lower() in ("submitted", "open"):
+                flags.append("not started")
+
+            flag_str = f" — {', '.join(flags)}" if flags else ""
+
+            lines.append(
+                f"- **{issue_id}** [{state}] {summary}\n"
+                f"  {reporter_name} → {assignee} | {priority} | {created_str}{flag_str}"
+            )
+
+        return "\n".join(lines)
