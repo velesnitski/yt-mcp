@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `get_issues_digest` tool — shows recent changes (state, comments, fields, links) for any set of issues since a given time
+- `get_at_risk_issues` tool — finds stalled issues (no activity in N days), overdue deadlines, approaching deadlines, and over-estimate issues
 - Supports duration (`24h`, `7d`, `30m`) and date (`2026-03-18`) for the `since` parameter
 - Fetches activity for all matching issues in parallel with `asyncio.gather`
 - Multi-product scoring factor: +10 per additional product (cap +30)

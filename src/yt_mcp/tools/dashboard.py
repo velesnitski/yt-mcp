@@ -514,3 +514,192 @@ def register(mcp, resolver: InstanceResolver):
             lines.append("_No changes found for any issue in this period._")
 
         return "\n".join(lines)
+
+    @mcp.tool()
+    async def get_at_risk_issues(
+        project: str,
+        stale_days: int = 7,
+        deadline_warning_days: int = 7,
+        exclude_patterns: str = "",
+        instance: str = "",
+    ) -> str:
+        """Find issues at risk: stalled (no activity), overdue deadlines, or over estimate.
+
+        Detects issues that need attention by checking:
+        - Stalled: In Progress/Submitted with no updates in N days
+        - Overdue: past their Deadline date (if Deadline field is used)
+        - Approaching deadline: within N days of Deadline (if Deadline field is used)
+        - Over estimate: spent time exceeds estimate (if time tracking is used)
+
+        Args:
+            project: Project short name (e.g., 'DO', 'AP', 'BAC')
+            stale_days: Days without updates to consider stalled (default: 7)
+            deadline_warning_days: Days before deadline to flag as approaching (default: 7)
+            exclude_patterns: Comma-separated regex patterns to exclude (e.g., 'DevOps Daily,Report')
+            instance: YouTrack instance name (optional, for multi-instance setups)
+        """
+        client = resolver.resolve(instance)
+        patterns = _compile_patterns(exclude_patterns)
+
+        # Fetch all unresolved issues with extended fields
+        at_risk_fields = (
+            "idReadable,summary,updated,created,state(name),priority(name),"
+            "assignee(name),tags(name),"
+            "customFields(name,value(name,presentation,minutes)),"
+            "links(direction,linkType(name),issues(idReadable))"
+        )
+
+        all_issues = await client.get(
+            "/api/issues",
+            params={
+                "query": f"project: {project} #Unresolved",
+                "fields": at_risk_fields,
+                "$top": "500",
+            },
+        )
+
+        if not all_issues:
+            return f"No unresolved issues found in **{project}**."
+
+        if patterns:
+            all_issues = [i for i in all_issues if not _should_exclude(i, patterns)]
+
+        now = datetime.now(tz=timezone.utc)
+        active_states = {"in progress", "submitted", "in review", "ready for test", "pause"}
+
+        overdue: list[tuple[int, str]] = []       # (days_overdue, formatted)
+        approaching: list[tuple[int, str]] = []   # (days_left, formatted)
+        stalled: list[tuple[int, str]] = []       # (days_idle, formatted)
+        over_estimate: list[tuple[float, str]] = []  # (ratio, formatted)
+
+        for issue in all_issues:
+            issue_id = issue.get("idReadable", "?")
+            summary = issue.get("summary", "?")
+            state = _resolve_state(issue)
+            assignee = _resolve_assignee(issue)
+            priority = _get_priority_name(issue)
+            days_idle = _days_since_update(issue)
+
+            # --- Stalled check ---
+            if state.lower() in active_states and days_idle >= stale_days:
+                line = (
+                    f"- **{issue_id}** [{state}] {summary}\n"
+                    f"  {assignee} | {priority} | **{days_idle}d without updates**"
+                )
+                stalled.append((days_idle, line))
+
+            # --- Deadline checks ---
+            for cf in issue.get("customFields", []):
+                cf_name = cf.get("name", "").lower()
+                if cf_name in ("deadline", "due date", "due"):
+                    val = cf.get("value")
+                    if val is not None:
+                        # Value can be timestamp (ms) or presentation string
+                        deadline_ts = None
+                        if isinstance(val, (int, float)):
+                            deadline_ts = val
+                        elif isinstance(val, dict):
+                            pres = val.get("presentation", "")
+                            if pres:
+                                try:
+                                    deadline_ts = int(
+                                        datetime.strptime(pres, "%Y-%m-%d")
+                                        .replace(tzinfo=timezone.utc)
+                                        .timestamp() * 1000
+                                    )
+                                except ValueError:
+                                    pass
+                        if deadline_ts:
+                            deadline_dt = datetime.fromtimestamp(
+                                deadline_ts / 1000, tz=timezone.utc
+                            )
+                            days_left = (deadline_dt - now).days
+                            deadline_str = deadline_dt.strftime("%Y-%m-%d")
+
+                            if days_left < 0:
+                                line = (
+                                    f"- **{issue_id}** [{state}] {summary}\n"
+                                    f"  {assignee} | {priority} | "
+                                    f"Deadline: {deadline_str} (**{abs(days_left)}d overdue**)"
+                                )
+                                overdue.append((abs(days_left), line))
+                            elif days_left <= deadline_warning_days:
+                                line = (
+                                    f"- **{issue_id}** [{state}] {summary}\n"
+                                    f"  {assignee} | {priority} | "
+                                    f"Deadline: {deadline_str} (**{days_left}d left**)"
+                                )
+                                approaching.append((days_left, line))
+
+            # --- Over estimate check ---
+            estimate_minutes = 0
+            spent_minutes = 0
+            for cf in issue.get("customFields", []):
+                cf_name = cf.get("name", "").lower()
+                val = cf.get("value")
+                if val is None:
+                    continue
+                if cf_name in ("estimation", "estimate", "dev estimate", "dev estimation"):
+                    if isinstance(val, dict):
+                        estimate_minutes = val.get("minutes", 0) or 0
+                    elif isinstance(val, (int, float)):
+                        estimate_minutes = int(val)
+                elif cf_name in ("spent time", "spent"):
+                    if isinstance(val, dict):
+                        spent_minutes = val.get("minutes", 0) or 0
+                    elif isinstance(val, (int, float)):
+                        spent_minutes = int(val)
+
+            if estimate_minutes > 0 and spent_minutes > estimate_minutes:
+                ratio = spent_minutes / estimate_minutes
+                est_str = f"{estimate_minutes // 60}h" if estimate_minutes >= 60 else f"{estimate_minutes}m"
+                spent_str = f"{spent_minutes // 60}h" if spent_minutes >= 60 else f"{spent_minutes}m"
+                line = (
+                    f"- **{issue_id}** [{state}] {summary}\n"
+                    f"  {assignee} | {priority} | "
+                    f"Estimate: {est_str}, Spent: {spent_str} (**{ratio:.0%}**)"
+                )
+                over_estimate.append((ratio, line))
+
+        # Sort each category by severity (worst first)
+        overdue.sort(key=lambda x: x[0], reverse=True)
+        approaching.sort(key=lambda x: x[0])  # least days left first
+        stalled.sort(key=lambda x: x[0], reverse=True)
+        over_estimate.sort(key=lambda x: x[0], reverse=True)
+
+        total_risks = len(overdue) + len(approaching) + len(stalled) + len(over_estimate)
+
+        if total_risks == 0:
+            return f"No at-risk issues found in **{project}** (stale threshold: {stale_days}d)."
+
+        lines = [
+            f"# At Risk Issues — {project}",
+            f"**Total at risk:** {total_risks}",
+            "",
+        ]
+
+        if overdue:
+            lines.append(f"## Overdue ({len(overdue)})")
+            for _, line in overdue:
+                lines.append(line)
+            lines.append("")
+
+        if approaching:
+            lines.append(f"## Deadline approaching ({len(approaching)})")
+            for _, line in approaching:
+                lines.append(line)
+            lines.append("")
+
+        if stalled:
+            lines.append(f"## Stalled ({len(stalled)})")
+            for _, line in stalled:
+                lines.append(line)
+            lines.append("")
+
+        if over_estimate:
+            lines.append(f"## Over estimate ({len(over_estimate)})")
+            for _, line in over_estimate:
+                lines.append(line)
+            lines.append("")
+
+        return "\n".join(lines)
