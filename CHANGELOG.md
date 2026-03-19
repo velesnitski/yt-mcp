@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] - 2026-03-19
+
+### Fixed
+- Fix `get_top_active_issues` query failure on some YouTrack instances — now fetches all unresolved issues and filters by state client-side
+
+### Added
+- "Pause" state support in scoring model and dashboard (treated as active, state bonus = 0)
+
 ## [1.1.1] - 2026-03-18
 
 ### Fixed
@@ -62,6 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Transport options** — stdio (default), SSE, and streamable-http
 - **106 tests** with GitHub Actions CI (Python 3.10–3.13)
 
+[1.1.2]: https://github.com/velesnitski/yt-mcp/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/velesnitski/yt-mcp/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/velesnitski/yt-mcp/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/velesnitski/yt-mcp/compare/v1.0.1...v1.0.2
