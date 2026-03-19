@@ -485,15 +485,37 @@ The server will be available at `http://localhost:8000/mcp`.
 
 ### Docker (for remote / always-on deployments)
 
+**Using docker-compose** (recommended):
+
 ```bash
+git clone https://github.com/velesnitski/yt-mcp.git
+cd yt-mcp
+# Edit docker-compose.yml with your YOUTRACK_URL and YOUTRACK_TOKEN
+docker compose up -d
+```
+
+The server will be available at `http://localhost:8000/sse`.
+
+**Using docker build directly:**
+
+```bash
+git clone https://github.com/velesnitski/yt-mcp.git
+cd yt-mcp
+docker build -t yt-mcp .
 docker run -d --name youtrack-mcp \
   -e YOUTRACK_URL="https://your-instance.youtrack.cloud" \
   -e YOUTRACK_TOKEN="perm:your-token-here" \
   -p 8000:8000 \
-  ghcr.io/velesnitski/yt-mcp --transport sse
+  yt-mcp
 ```
 
-> **Note:** Docker image is not yet published. For now, use the local install method with `uvx` or `pip`.
+**Override transport and port:**
+
+```bash
+docker run -d -p 9000:9000 \
+  -e YOUTRACK_URL="..." -e YOUTRACK_TOKEN="..." \
+  yt-mcp --transport streamable-http --port 9000
+```
 
 ## Security
 
