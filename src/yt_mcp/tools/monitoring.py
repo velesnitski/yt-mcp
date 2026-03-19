@@ -562,7 +562,7 @@ def register(mcp, resolver: InstanceResolver):
         issues = await client.get(
             "/api/issues",
             params={
-                "query": f"project: {project} created: {{-1000d}} .. {{Now}}",
+                "query": f"project: {project}",
                 "fields": "idReadable,summary,created,state(name),"
                 "priority(name),assignee(name),description,"
                 "reporter(name),"
