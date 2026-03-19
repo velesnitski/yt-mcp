@@ -78,27 +78,28 @@ def register(mcp, resolver: InstanceResolver):
         """
         client = resolver.resolve(instance)
         patterns = _compile_patterns(exclude_patterns)
+        state_set = {s.strip().lower() for s in states.split(",")}
 
-        # Build state filter
-        state_list = [s.strip() for s in states.split(",")]
-        state_query = " ".join(f"State: {{{s}}}" for s in state_list)
-        query = f"project: {project} ({' or '.join(f'State: {{{s}}}' for s in state_list)})"
-
-        issues = await client.get(
+        # Fetch all unresolved issues and filter by state client-side
+        # (avoids YouTrack query syntax compatibility issues across versions)
+        all_issues = await client.get(
             "/api/issues",
             params={
-                "query": query,
+                "query": f"project: {project} #Unresolved",
                 "fields": _ISSUE_FIELDS,
-                "$top": "200",
+                "$top": "500",
             },
         )
 
-        if not issues:
+        if not all_issues:
             return f"No active issues found in **{project}**."
 
-        # Filter exclusions
-        if patterns:
-            issues = [i for i in issues if not _should_exclude(i, patterns)]
+        # Filter by state and exclusion patterns
+        issues = [
+            i for i in all_issues
+            if _resolve_state(i).lower() in state_set
+            and not (patterns and _should_exclude(i, patterns))
+        ]
 
         # Score and sort
         scored = []
