@@ -18,7 +18,7 @@ _ISSUE_FIELDS = (
     "links(direction,linkType(name),issues(idReadable))"
 )
 
-_DEFAULT_ACTIVE_STATES = "In Progress, Submitted, In Review, Ready for Test"
+_DEFAULT_ACTIVE_STATES = "In Progress, Submitted, In Review, Ready for Test, Pause"
 
 
 def _should_exclude(issue: dict, patterns: list[re.Pattern]) -> bool:
@@ -221,7 +221,7 @@ def register(mcp, resolver: InstanceResolver):
             all_issues = [i for i in all_issues if not _should_exclude(i, patterns)]
 
         # Categorize by state
-        active_states = {"in progress", "submitted", "in review", "ready for test"}
+        active_states = {"in progress", "submitted", "in review", "ready for test", "pause"}
         active_issues = []
         blocked_issues = []
         state_counts: dict[str, int] = {}
@@ -254,7 +254,7 @@ def register(mcp, resolver: InstanceResolver):
         # Summary stats
         lines.append("## Summary")
         lines.append(f"**Total unresolved:** {len(all_issues)}")
-        for state_name in ["in progress", "submitted", "in review", "ready for test", "blocked", "open"]:
+        for state_name in ["in progress", "submitted", "in review", "ready for test", "pause", "blocked", "open"]:
             count = state_counts.get(state_name, 0)
             if count:
                 lines.append(f"**{state_name.title()}:** {count}")
