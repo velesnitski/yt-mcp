@@ -152,6 +152,35 @@ def format_issue_detail(data: dict) -> str:
     return "\n".join(parts)
 
 
+# --- Shared constants for dashboard/monitoring tools ---
+
+ISSUE_FIELDS = (
+    "idReadable,summary,updated,created,state(name),priority(name),"
+    "assignee(name),tags(name),"
+    "customFields(name,value(name)),"
+    "links(direction,linkType(name),issues(idReadable))"
+)
+
+ACTIVE_STATES = frozenset({"in progress", "submitted", "in review", "ready for test", "pause"})
+
+
+def compile_exclude_patterns(exclude_patterns: str) -> list[re.Pattern]:
+    """Compile comma-separated regex patterns for issue exclusion."""
+    if not exclude_patterns:
+        return []
+    return [
+        re.compile(p.strip(), re.IGNORECASE)
+        for p in exclude_patterns.split(",")
+        if p.strip()
+    ]
+
+
+def should_exclude(issue: dict, patterns: list[re.Pattern]) -> bool:
+    """Check if issue summary matches any exclusion pattern."""
+    summary = issue.get("summary", "")
+    return any(p.search(summary) for p in patterns)
+
+
 def format_value(val) -> str:
     if val is None:
         return "(empty)"
