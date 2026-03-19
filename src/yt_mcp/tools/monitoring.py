@@ -285,54 +285,51 @@ def register(mcp, resolver: InstanceResolver):
                     f"**{days_idle}d without updates**",
                 )))
 
-            # Deadline checks
-            for cf in issue.get("customFields", []):
-                cf_name = cf.get("name", "").lower()
-                if cf_name not in ("deadline", "due date", "due"):
-                    continue
-                val = cf.get("value")
-                if val is None:
-                    continue
-                deadline_ts = None
-                if isinstance(val, (int, float)):
-                    deadline_ts = val
-                elif isinstance(val, dict):
-                    pres = val.get("presentation", "")
-                    if pres:
-                        try:
-                            deadline_ts = int(
-                                datetime.strptime(pres, "%Y-%m-%d")
-                                .replace(tzinfo=timezone.utc)
-                                .timestamp() * 1000
-                            )
-                        except ValueError:
-                            pass
-                if not deadline_ts:
-                    continue
-                deadline_dt = datetime.fromtimestamp(deadline_ts / 1000, tz=timezone.utc)
-                days_left = (deadline_dt - now).days
-                deadline_str = deadline_dt.strftime("%Y-%m-%d")
-
-                if days_left < 0:
-                    overdue.append((abs(days_left), _format_at_risk_line(
-                        issue_id, state, summary, assignee, priority,
-                        f"Deadline: {deadline_str} (**{abs(days_left)}d overdue**)",
-                    )))
-                elif days_left <= deadline_warning_days:
-                    approaching.append((days_left, _format_at_risk_line(
-                        issue_id, state, summary, assignee, priority,
-                        f"Deadline: {deadline_str} (**{days_left}d left**)",
-                    )))
-
-            # Over estimate check
+            # Scan custom fields once for deadline and estimate data
+            custom_fields = issue.get("customFields", [])
             estimate_minutes = 0
             spent_minutes = 0
-            for cf in issue.get("customFields", []):
+
+            for cf in custom_fields:
                 cf_name = cf.get("name", "").lower()
                 val = cf.get("value")
                 if val is None:
                     continue
-                if cf_name in ("estimation", "estimate", "dev estimate", "dev estimation"):
+
+                # Deadline check
+                if cf_name in ("deadline", "due date", "due"):
+                    deadline_ts = None
+                    if isinstance(val, (int, float)):
+                        deadline_ts = val
+                    elif isinstance(val, dict):
+                        pres = val.get("presentation", "")
+                        if pres:
+                            try:
+                                deadline_ts = int(
+                                    datetime.strptime(pres, "%Y-%m-%d")
+                                    .replace(tzinfo=timezone.utc)
+                                    .timestamp() * 1000
+                                )
+                            except ValueError:
+                                pass
+                    if deadline_ts:
+                        deadline_dt = datetime.fromtimestamp(deadline_ts / 1000, tz=timezone.utc)
+                        days_left = (deadline_dt - now).days
+                        deadline_str = deadline_dt.strftime("%Y-%m-%d")
+
+                        if days_left < 0:
+                            overdue.append((abs(days_left), _format_at_risk_line(
+                                issue_id, state, summary, assignee, priority,
+                                f"Deadline: {deadline_str} (**{abs(days_left)}d overdue**)",
+                            )))
+                        elif days_left <= deadline_warning_days:
+                            approaching.append((days_left, _format_at_risk_line(
+                                issue_id, state, summary, assignee, priority,
+                                f"Deadline: {deadline_str} (**{days_left}d left**)",
+                            )))
+
+                # Estimate check
+                elif cf_name in ("estimation", "estimate", "dev estimate", "dev estimation"):
                     estimate_minutes = val.get("minutes", 0) or 0 if isinstance(val, dict) else int(val) if isinstance(val, (int, float)) else 0
                 elif cf_name in ("spent time", "spent"):
                     spent_minutes = val.get("minutes", 0) or 0 if isinstance(val, dict) else int(val) if isinstance(val, (int, float)) else 0
