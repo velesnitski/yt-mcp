@@ -522,12 +522,11 @@ def register(mcp, resolver: InstanceResolver):
         """
         client = resolver.resolve(instance)
 
-        now = datetime.now(tz=timezone.utc)
-        since_ts = int((now.timestamp() - since_minutes * 60) * 1000)
+        since_ts = int((datetime.now(tz=timezone.utc).timestamp() - since_minutes * 60) * 1000)
 
-        # Build query: combine user query with time filter
-        time_filter = f"updated: {{{since_minutes}m ago}} .. {{Now}}"
-        full_query = f"{query} {time_filter}".strip() if query else time_filter
+        # Fetch issues and filter by updated timestamp client-side
+        # (avoids YouTrack query syntax compatibility issues)
+        full_query = query if query else "#Unresolved"
 
         data = await client.get(
             "/api/issues",
@@ -535,9 +534,13 @@ def register(mcp, resolver: InstanceResolver):
                 "query": full_query,
                 "fields": "idReadable,summary,state(name),assignee(name),"
                 "customFields(name,value(name)),updated",
-                "$top": str(max_results),
+                "$top": "200",
             },
         )
+
+        # Filter to issues updated since the cutoff
+        data = [i for i in data if i.get("updated", 0) >= since_ts]
+        data = data[:max_results]
 
         if not data:
             return f"No changes in the last {since_minutes} minutes."
