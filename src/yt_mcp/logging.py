@@ -167,15 +167,23 @@ def _extract_params(kwargs: dict) -> dict:
     return {k: v for k, v in kwargs.items() if k in _ANALYTICS_KEYS and v}
 
 
-def _add_sentry_breadcrumb(tool: str, params: dict, duration_ms: int, status: str) -> None:
+def _add_sentry_breadcrumb(
+    tool: str, params: dict, duration_ms: int, status: str,
+    response_size: int = 0, error_detail: str = "",
+) -> None:
     """Add tool call as Sentry breadcrumb (visible in error context)."""
     if not os.environ.get("SENTRY_DSN"):
         return
     import sentry_sdk
+    data: dict = {"params": params, "duration_ms": duration_ms, "status": status}
+    if response_size:
+        data["response_size"] = response_size
+    if error_detail:
+        data["error"] = error_detail
     sentry_sdk.add_breadcrumb(
         category="tool",
         message=tool,
-        data={"params": params, "duration_ms": duration_ms, "status": status},
+        data=data,
         level="info" if status == "ok" else "error",
     )
 
@@ -224,6 +232,6 @@ def logged(func):
                     },
                 )
 
-            _add_sentry_breadcrumb(tool_name, params, duration_ms, status)
+            _add_sentry_breadcrumb(tool_name, params, duration_ms, status, response_size, error_detail)
 
     return wrapper
