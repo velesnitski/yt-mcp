@@ -568,6 +568,15 @@ docker run -d -p 9000:9000 \
 - Bulk operations are capped at 100 issues per batch
 - Error messages are truncated to prevent leaking internal API details
 
+### Logging and privacy
+
+All logs are stored **locally** on your machine at `~/.yt-mcp/`:
+
+- `yt-mcp.log` — errors and warnings (JSON)
+- `analytics.log` — tool call names, timing, and project codes (JSON)
+
+**No data is sent externally** unless you explicitly set `SENTRY_DSN`. Logs never contain tokens, passwords, issue content, or descriptions — only tool names, project codes, and error messages (truncated to 200 chars).
+
 ### Read-only mode
 
 To disable all write operations (create, update, delete issues/articles, bulk execute, time tracking):
