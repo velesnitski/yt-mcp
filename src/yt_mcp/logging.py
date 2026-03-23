@@ -86,6 +86,12 @@ class AnalyticsFormatter(logging.Formatter):
         params = getattr(record, "params", None)
         if params:
             entry["params"] = params
+        response_size = getattr(record, "response_size", None)
+        if response_size is not None:
+            entry["response_size"] = response_size
+        error_detail = getattr(record, "error_detail", None)
+        if error_detail:
+            entry["error"] = error_detail
         return json.dumps(entry, ensure_ascii=False)
 
 
@@ -175,7 +181,14 @@ def _add_sentry_breadcrumb(tool: str, params: dict, duration_ms: int, status: st
 
 
 def logged(func):
-    """Decorator that logs every tool call to analytics + Sentry breadcrumbs."""
+    """Decorator that logs every tool call to analytics + Sentry breadcrumbs.
+
+    Captures:
+    - Tool name and all safe params (for usage stats)
+    - Duration in ms
+    - Response size in chars (for context overflow detection)
+    - Error details for failed queries (for prompt improvement)
+    """
 
     @functools.wraps(func)
     async def wrapper(*args, **kwargs):
@@ -183,17 +196,21 @@ def logged(func):
         params = _extract_params(kwargs)
         start = time.monotonic()
         status = "ok"
+        response_size = 0
+        error_detail = ""
 
         try:
             result = await func(*args, **kwargs)
+            if isinstance(result, str):
+                response_size = len(result)
             return result
-        except Exception:
+        except Exception as exc:
             status = "error"
+            error_detail = str(exc)[:200]
             raise
         finally:
             duration_ms = int((time.monotonic() - start) * 1000)
 
-            # Analytics log file
             if _analytics_logger:
                 _analytics_logger.info(
                     tool_name,
@@ -202,10 +219,11 @@ def logged(func):
                         "params": params,
                         "duration_ms": duration_ms,
                         "status": status,
+                        "response_size": response_size,
+                        "error_detail": error_detail,
                     },
                 )
 
-            # Sentry breadcrumb
             _add_sentry_breadcrumb(tool_name, params, duration_ms, status)
 
     return wrapper
