@@ -118,7 +118,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Multi-instance support** — connect multiple YouTrack instances with `YOUTRACK_INSTANCES` env var, auto-detection from URLs, and optional `instance` parameter on all tools
-- **43 tools** across 8 categories: Issues (16), Time tracking (4), Agile boards (5), Projects & users (3), Knowledge Base (8), Bulk operations (3), Translation (2), Impact analysis (2)
+- **52 tools** across 9 categories: Issues (18), Time tracking (4), Agile boards (5), Projects & users (3), Knowledge Base (8), Bulk operations (3), Translation (2), Priority dashboard & monitoring (8), Impact analysis (2)
 - **Issue URL support** — paste full YouTrack URLs instead of issue IDs in any tool
 - **Board URL support** — paste agile board URLs for `get_agile_board` and `get_sprint_board`
 - **Generic field updates** — `update_issue` accepts any YouTrack command string via `command` parameter
@@ -133,7 +133,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Tool filtering** — `DISABLED_TOOLS` to remove specific tools
 - **Security** — HTTPS enforcement, error message truncation, batch tag validation
 - **Transport options** — stdio (default), SSE, and streamable-http
-- **106 tests** with GitHub Actions CI (Python 3.10–3.13)
+- **168 tests** with GitHub Actions CI (Python 3.10–3.13)
 
 [1.5.2]: https://github.com/velesnitski/yt-mcp/compare/v1.5.1...v1.5.2
 [1.5.1]: https://github.com/velesnitski/yt-mcp/compare/v1.5.0...v1.5.1
