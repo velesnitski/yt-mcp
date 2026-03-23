@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-03-20
+
+### Added
+- **Structured JSON logging** to stderr (always on) with instance ID, tool name, and error context
+- **Optional Sentry error tracking** — set `SENTRY_DSN` env var, install with `pip install yt-mcp[sentry]`
+- **Persistent instance ID** (`~/.yt-mcp/instance_id`) for distinguishing errors from different machines
+- **Optional file logging** via `YOUTRACK_LOG_FILE` env var
+- Privacy: tokens, URLs, and issue content are never sent to Sentry
+
 ## [1.5.0] - 2026-03-19
 
 ### Added
@@ -119,6 +128,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Transport options** — stdio (default), SSE, and streamable-http
 - **106 tests** with GitHub Actions CI (Python 3.10–3.13)
 
+[1.5.1]: https://github.com/velesnitski/yt-mcp/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/velesnitski/yt-mcp/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/velesnitski/yt-mcp/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/velesnitski/yt-mcp/compare/v1.2.2...v1.3.0
