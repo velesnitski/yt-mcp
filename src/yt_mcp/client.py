@@ -1,5 +1,9 @@
+import logging
+
 import httpx
 from yt_mcp.config import YouTrackConfig
+
+_logger = logging.getLogger("yt_mcp")
 
 _JSON_HEADERS = {"Content-Type": "application/json"}
 
@@ -36,10 +40,15 @@ class YouTrackClient:
             # Truncate to avoid leaking internal details
             if isinstance(error_msg, str) and len(error_msg) > 200:
                 error_msg = error_msg[:200] + "..."
-            raise ValueError(
+            error = ValueError(
                 f"YouTrack {'query' if resp.status_code == 400 else 'not found'} error "
                 f"({resp.status_code}): {error_msg}"
             )
+            _logger.error(
+                str(error),
+                extra={"error_type": "youtrack_api", "tool": resp.request.url.path},
+            )
+            raise error
         resp.raise_for_status()
 
     async def get(self, path: str, params: dict | None = None):

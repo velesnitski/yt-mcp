@@ -5,6 +5,12 @@ from yt_mcp.config import load_all_configs
 from yt_mcp.client import YouTrackClient
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.tools import register_all
+from yt_mcp.logging import setup_logging, setup_sentry, INSTANCE_ID
+
+# Initialize logging and error tracking
+_logger = setup_logging()
+setup_sentry()
+_logger.info("Starting yt-mcp", extra={"instance": INSTANCE_ID})
 
 _oauth_provider = None
 
