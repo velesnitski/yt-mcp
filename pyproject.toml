@@ -26,11 +26,11 @@ classifiers = [
 dependencies = [
     "mcp>=1.0.0,<1.26.0",
     "httpx[http2]>=0.27.0",
+    "sentry-sdk>=2.0",
 ]
 
 [project.optional-dependencies]
 test = ["pytest>=8.0", "pytest-asyncio>=0.24"]
-sentry = ["sentry-sdk>=2.0"]
 
 [project.urls]
 Homepage = "https://github.com/velesnitski/yt-mcp"
