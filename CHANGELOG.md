@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Structured JSON logging** to stderr (always on) with instance ID, tool name, and error context
-- **Optional Sentry error tracking** — set `SENTRY_DSN` env var, install with `pip install yt-mcp[sentry]`
+- **Optional Sentry error tracking** — set `SENTRY_DSN` env var (SDK included, no extra install needed)
 - **Persistent instance ID** (`~/.yt-mcp/instance_id`) for distinguishing errors from different machines
 - **File logging** to `~/.yt-mcp/yt-mcp.log` by default (override with `YOUTRACK_LOG_FILE`)
 - Privacy: tokens, URLs, and issue content are never sent to Sentry
