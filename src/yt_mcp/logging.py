@@ -68,15 +68,15 @@ def setup_logging() -> logging.Logger:
     stderr_handler.setFormatter(JSONFormatter())
     logger.addHandler(stderr_handler)
 
-    # File handler (optional)
-    log_file = os.environ.get("YOUTRACK_LOG_FILE")
-    if log_file:
-        try:
-            file_handler = logging.FileHandler(log_file)
-            file_handler.setFormatter(JSONFormatter())
-            logger.addHandler(file_handler)
-        except OSError as e:
-            logger.warning(f"Cannot open log file {log_file}: {e}")
+    # File handler (on by default at ~/.yt-mcp/yt-mcp.log, override with YOUTRACK_LOG_FILE)
+    log_file = os.environ.get("YOUTRACK_LOG_FILE", str(_INSTANCE_DIR / "yt-mcp.log"))
+    try:
+        Path(log_file).parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(JSONFormatter())
+        logger.addHandler(file_handler)
+    except OSError:
+        pass  # Silently skip if filesystem is read-only (e.g., some Docker setups)
 
     return logger
 
