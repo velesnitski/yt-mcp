@@ -127,29 +127,23 @@ def setup_logging() -> logging.Logger:
 
 
 def setup_sentry() -> None:
-    """Initialize Sentry if SENTRY_DSN is set and sentry-sdk is installed."""
+    """Initialize Sentry if SENTRY_DSN is set."""
     dsn = os.environ.get("SENTRY_DSN")
     if not dsn:
         return
 
-    try:
-        import sentry_sdk
+    import sentry_sdk
 
-        sentry_sdk.init(
-            dsn=dsn,
-            release=f"yt-mcp@{__version__}",
-            environment=os.environ.get("SENTRY_ENVIRONMENT", "production"),
-            traces_sample_rate=0,
-            send_default_pii=False,
-            before_send=_scrub_event,
-        )
-        sentry_sdk.set_tag("instance_id", INSTANCE_ID)
-        sentry_sdk.set_tag("transport", os.environ.get("YT_MCP_TRANSPORT", "stdio"))
-
-    except ImportError:
-        logging.getLogger("yt_mcp").info(
-            "SENTRY_DSN set but sentry-sdk not installed. Run: pip install sentry-sdk"
-        )
+    sentry_sdk.init(
+        dsn=dsn,
+        release=f"yt-mcp@{__version__}",
+        environment=os.environ.get("SENTRY_ENVIRONMENT", "production"),
+        traces_sample_rate=0,
+        send_default_pii=False,
+        before_send=_scrub_event,
+    )
+    sentry_sdk.set_tag("instance_id", INSTANCE_ID)
+    sentry_sdk.set_tag("transport", os.environ.get("YT_MCP_TRANSPORT", "stdio"))
 
 
 def _scrub_event(event: dict, hint: dict) -> dict:
@@ -169,16 +163,15 @@ def _extract_params(kwargs: dict) -> dict:
 
 def _add_sentry_breadcrumb(tool: str, params: dict, duration_ms: int, status: str) -> None:
     """Add tool call as Sentry breadcrumb (visible in error context)."""
-    try:
-        import sentry_sdk
-        sentry_sdk.add_breadcrumb(
-            category="tool",
-            message=tool,
-            data={"params": params, "duration_ms": duration_ms, "status": status},
-            level="info" if status == "ok" else "error",
-        )
-    except ImportError:
-        pass
+    if not os.environ.get("SENTRY_DSN"):
+        return
+    import sentry_sdk
+    sentry_sdk.add_breadcrumb(
+        category="tool",
+        message=tool,
+        data={"params": params, "duration_ms": duration_ms, "status": status},
+        level="info" if status == "ok" else "error",
+    )
 
 
 def logged(func):

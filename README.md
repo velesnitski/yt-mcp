@@ -239,7 +239,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `YOUTRACK_ALLOW_HTTP` | No | Set to `1` to allow non-HTTPS URLs (not recommended) |
 | `YOUTRACK_OAUTH_URL` | No | Public HTTPS URL of this server — enables OAuth for claude.ai connectors |
 | `YOUTRACK_ACCESS_CODE` | No | Access code for OAuth gate — users must enter this code to connect (requires `YOUTRACK_OAUTH_URL`) |
-| `SENTRY_DSN` | No | Sentry DSN for error tracking (install with `pip install yt-mcp[sentry]`) |
+| `SENTRY_DSN` | No | Sentry DSN for error tracking — just set the env var, SDK is included |
 | `YOUTRACK_LOG_FILE` | No | Error log path (default: `~/.yt-mcp/yt-mcp.log`) |
 | `YOUTRACK_ANALYTICS_FILE` | No | Analytics log path (default: `~/.yt-mcp/analytics.log`) |
 
