@@ -1,17 +1,22 @@
-"""Structured logging with optional Sentry error tracking.
+"""Structured logging and analytics.
 
-Always logs to stderr in JSON format.
-Optional: set SENTRY_DSN to send errors to Sentry (pip install sentry-sdk).
-Optional: set YOUTRACK_LOG_FILE to write logs to a file.
+Logging (errors/warnings):
+- Always to stderr in JSON
+- Always to ~/.yt-mcp/yt-mcp.log (override with YOUTRACK_LOG_FILE)
 
-Each installation gets a persistent instance_id (UUID) for distinguishing
-errors from different machines in Sentry.
+Analytics (every tool call):
+- Always to ~/.yt-mcp/analytics.log
+- Sentry breadcrumbs (if SENTRY_DSN is set)
+
+Each installation gets a persistent instance_id (UUID).
 """
 
+import functools
 import json
 import logging
 import os
 import sys
+import time
 import uuid
 from pathlib import Path
 
@@ -19,6 +24,14 @@ from yt_mcp import __version__
 
 _INSTANCE_DIR = Path.home() / ".yt-mcp"
 _INSTANCE_ID_FILE = _INSTANCE_DIR / "instance_id"
+_ANALYTICS_FILE = _INSTANCE_DIR / "analytics.log"
+
+# Keys to extract from tool params for analytics (safe, non-sensitive)
+_ANALYTICS_KEYS = frozenset({
+    "project", "projects", "query", "issue_id", "instance",
+    "limit", "since", "since_minutes", "stale_days",
+    "keywords", "creator", "exclude_patterns",
+})
 
 
 def _get_instance_id() -> str:
@@ -31,11 +44,13 @@ def _get_instance_id() -> str:
         _INSTANCE_ID_FILE.write_text(instance_id)
         return instance_id
     except OSError:
-        # Fallback for read-only filesystems (Docker without volume)
         return "unknown"
 
 
 INSTANCE_ID = _get_instance_id()
+
+# Analytics logger (separate from error logger)
+_analytics_logger: logging.Logger | None = None
 
 
 class JSONFormatter(logging.Formatter):
@@ -48,8 +63,7 @@ class JSONFormatter(logging.Formatter):
             "msg": record.getMessage(),
             "instance": INSTANCE_ID,
         }
-        # Add extra fields (tool, project, etc.)
-        for key in ("tool", "project", "duration_ms", "error_type"):
+        for key in ("tool", "project", "duration_ms", "error_type", "status"):
             val = getattr(record, key, None)
             if val is not None:
                 entry[key] = val
@@ -58,8 +72,25 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(entry, ensure_ascii=False)
 
 
+class AnalyticsFormatter(logging.Formatter):
+    """Compact JSON formatter for analytics events."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        entry = {
+            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%SZ"),
+            "tool": getattr(record, "tool", "?"),
+            "duration_ms": getattr(record, "duration_ms", 0),
+            "status": getattr(record, "status", "ok"),
+            "instance": INSTANCE_ID,
+        }
+        params = getattr(record, "params", None)
+        if params:
+            entry["params"] = params
+        return json.dumps(entry, ensure_ascii=False)
+
+
 def setup_logging() -> logging.Logger:
-    """Configure logging. Call once at startup."""
+    """Configure error logging. Call once at startup."""
     logger = logging.getLogger("yt_mcp")
     logger.setLevel(logging.INFO)
 
@@ -68,7 +99,7 @@ def setup_logging() -> logging.Logger:
     stderr_handler.setFormatter(JSONFormatter())
     logger.addHandler(stderr_handler)
 
-    # File handler (on by default at ~/.yt-mcp/yt-mcp.log, override with YOUTRACK_LOG_FILE)
+    # File handler (default: ~/.yt-mcp/yt-mcp.log)
     log_file = os.environ.get("YOUTRACK_LOG_FILE", str(_INSTANCE_DIR / "yt-mcp.log"))
     try:
         Path(log_file).parent.mkdir(parents=True, exist_ok=True)
@@ -76,7 +107,21 @@ def setup_logging() -> logging.Logger:
         file_handler.setFormatter(JSONFormatter())
         logger.addHandler(file_handler)
     except OSError:
-        pass  # Silently skip if filesystem is read-only (e.g., some Docker setups)
+        pass
+
+    # Analytics logger (separate file, separate logger)
+    global _analytics_logger
+    _analytics_logger = logging.getLogger("yt_mcp.analytics")
+    _analytics_logger.setLevel(logging.INFO)
+    _analytics_logger.propagate = False  # Don't send analytics to error log
+    try:
+        analytics_file = os.environ.get("YOUTRACK_ANALYTICS_FILE", str(_ANALYTICS_FILE))
+        Path(analytics_file).parent.mkdir(parents=True, exist_ok=True)
+        ah = logging.FileHandler(analytics_file)
+        ah.setFormatter(AnalyticsFormatter())
+        _analytics_logger.addHandler(ah)
+    except OSError:
+        pass
 
     return logger
 
@@ -94,7 +139,7 @@ def setup_sentry() -> None:
             dsn=dsn,
             release=f"yt-mcp@{__version__}",
             environment=os.environ.get("SENTRY_ENVIRONMENT", "production"),
-            traces_sample_rate=0,  # No performance tracing, just errors
+            traces_sample_rate=0,
             send_default_pii=False,
             before_send=_scrub_event,
         )
@@ -102,16 +147,72 @@ def setup_sentry() -> None:
         sentry_sdk.set_tag("transport", os.environ.get("YT_MCP_TRANSPORT", "stdio"))
 
     except ImportError:
-        logger = logging.getLogger("yt_mcp")
-        logger.info("SENTRY_DSN set but sentry-sdk not installed. Run: pip install sentry-sdk")
+        logging.getLogger("yt_mcp").info(
+            "SENTRY_DSN set but sentry-sdk not installed. Run: pip install sentry-sdk"
+        )
 
 
 def _scrub_event(event: dict, hint: dict) -> dict:
     """Remove sensitive data before sending to Sentry."""
-    # Strip any YouTrack tokens or URLs from breadcrumbs/extra
     if "extra" in event:
         for key in list(event["extra"].keys()):
             key_lower = key.lower()
-            if any(s in key_lower for s in ("token", "secret", "password", "dsn", "url")):
+            if any(s in key_lower for s in ("token", "secret", "password", "dsn")):
                 event["extra"][key] = "[REDACTED]"
     return event
+
+
+def _extract_params(kwargs: dict) -> dict:
+    """Extract safe params for analytics logging."""
+    return {k: v for k, v in kwargs.items() if k in _ANALYTICS_KEYS and v}
+
+
+def _add_sentry_breadcrumb(tool: str, params: dict, duration_ms: int, status: str) -> None:
+    """Add tool call as Sentry breadcrumb (visible in error context)."""
+    try:
+        import sentry_sdk
+        sentry_sdk.add_breadcrumb(
+            category="tool",
+            message=tool,
+            data={"params": params, "duration_ms": duration_ms, "status": status},
+            level="info" if status == "ok" else "error",
+        )
+    except ImportError:
+        pass
+
+
+def logged(func):
+    """Decorator that logs every tool call to analytics + Sentry breadcrumbs."""
+
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        tool_name = func.__name__
+        params = _extract_params(kwargs)
+        start = time.monotonic()
+        status = "ok"
+
+        try:
+            result = await func(*args, **kwargs)
+            return result
+        except Exception:
+            status = "error"
+            raise
+        finally:
+            duration_ms = int((time.monotonic() - start) * 1000)
+
+            # Analytics log file
+            if _analytics_logger:
+                _analytics_logger.info(
+                    tool_name,
+                    extra={
+                        "tool": tool_name,
+                        "params": params,
+                        "duration_ms": duration_ms,
+                        "status": status,
+                    },
+                )
+
+            # Sentry breadcrumb
+            _add_sentry_breadcrumb(tool_name, params, duration_ms, status)
+
+    return wrapper

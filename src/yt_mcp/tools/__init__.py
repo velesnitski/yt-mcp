@@ -1,5 +1,6 @@
 from yt_mcp.config import YouTrackConfig
 from yt_mcp.resolver import InstanceResolver
+from yt_mcp.logging import logged
 from yt_mcp.tools import issues, templates, history, bulk, projects, translate, impact, users, articles, dashboard, monitoring
 
 # Tools that modify data — blocked in read-only mode
@@ -36,6 +37,12 @@ def register_all(mcp, resolver: InstanceResolver, config: YouTrackConfig | None 
     modules = [issues, templates, history, bulk, projects, translate, impact, users, articles, dashboard, monitoring]
     for module in modules:
         module.register(mcp, resolver)
+
+    # Wrap all tool functions with analytics logging
+    if hasattr(mcp, "_tool_manager") and hasattr(mcp._tool_manager, "_tools"):
+        for tool in mcp._tool_manager._tools.values():
+            if hasattr(tool, "fn"):
+                tool.fn = logged(tool.fn)
 
     if config is None:
         return
