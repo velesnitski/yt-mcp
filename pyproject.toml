@@ -31,7 +31,6 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=8.0", "pytest-asyncio>=0.24"]
-report = ["openpyxl>=3.1", "requests>=2.31"]
 
 [project.urls]
 Homepage = "https://github.com/velesnitski/yt-mcp"
