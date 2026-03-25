@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import (
-    _resolve_state, _resolve_assignee,
+    _resolve_state, _resolve_assignee, _get_custom_field,
     ISSUE_FIELDS,
     compile_exclude_patterns, should_exclude,
 )
@@ -677,5 +677,142 @@ def register(mcp, resolver: InstanceResolver):
                 f"- **{issue_id}** [{state}] {summary}\n"
                 f"  {reporter_name} → {assignee} | {priority} | {created_str}{flag_str}"
             )
+
+        return "\n".join(lines)
+
+    @mcp.tool()
+    async def get_project_health(
+        project: str,
+        since: str = "24h",
+        exclude_patterns: str = "",
+        instance: str = "",
+    ) -> str:
+        """Get a project health report: state/product distribution, health metrics with percentages, and recently resolved issues.
+
+        Designed for daily briefs and status reports. Shows unestimated, stuck,
+        stale, ancient, blocked, and unassigned counts as % of total.
+
+        Args:
+            project: Project short name (e.g., 'DO', 'AP', 'BAC')
+            since: Period for "recently resolved" — duration ('24h', '7d') or date ('2026-03-18'). Default: 24h.
+            exclude_patterns: Comma-separated regex patterns to exclude (e.g., 'DevOps Daily,Report')
+            instance: YouTrack instance name (optional, for multi-instance setups)
+        """
+        client = resolver.resolve(instance)
+        patterns = compile_exclude_patterns(exclude_patterns)
+        since_ts = _parse_since(since)
+
+        # Fetch unresolved and recently resolved in parallel
+        all_unresolved, all_resolved = await asyncio.gather(
+            client.get(
+                "/api/issues",
+                params={
+                    "query": f"project: {project} #Unresolved",
+                    "fields": "idReadable,summary,created,updated,state(name),priority(name),"
+                    "assignee(name),customFields(name,value(name,minutes))",
+                    "$top": "500",
+                },
+            ),
+            client.get(
+                "/api/issues",
+                params={
+                    "query": f"project: {project} #Resolved",
+                    "fields": "idReadable,summary,resolved,state(name),assignee(name),"
+                    "customFields(name,value(name))",
+                    "$top": "100",
+                },
+            ),
+        )
+
+        if patterns:
+            all_unresolved = [i for i in all_unresolved if not should_exclude(i, patterns)]
+
+        recently_resolved = [
+            i for i in all_resolved
+            if i.get("resolved", 0) >= since_ts
+        ]
+
+        total = len(all_unresolved) or 1
+        now = datetime.now(tz=timezone.utc)
+
+        state_counts: dict[str, int] = {}
+        product_counts: dict[str, int] = {}
+        unestimated = 0
+        stuck = 0
+        stale = 0
+        ancient = 0
+        blocked = 0
+        unassigned_count = 0
+
+        for issue in all_unresolved:
+            state = _resolve_state(issue).lower()
+            state_counts[state] = state_counts.get(state, 0) + 1
+
+            product = _get_custom_field(issue, "Product") or "No product"
+            product_counts[product] = product_counts.get(product, 0) + 1
+
+            if _resolve_assignee(issue) == "Unassigned":
+                unassigned_count += 1
+            if state == "blocked":
+                blocked += 1
+
+            days_idle = _days_since_update(issue)
+            created_ms = issue.get("created", 0)
+            days_open = (now - datetime.fromtimestamp(created_ms / 1000, tz=timezone.utc)).days if created_ms else 0
+
+            if state in ("in progress", "in review", "ready for test") and days_idle > 7:
+                stuck += 1
+            if days_idle > 30:
+                stale += 1
+            if days_open > 200:
+                ancient += 1
+
+            has_estimate = False
+            for cf in issue.get("customFields", []):
+                if cf.get("name", "").lower() in ("estimation", "estimate", "dev estimate", "dev estimation"):
+                    if cf.get("value") is not None:
+                        has_estimate = True
+                    break
+            if not has_estimate:
+                unestimated += 1
+
+        def pct(n: int) -> str:
+            return f"{n * 100 // total}%"
+
+        lines = [f"# {project} — Project Health", ""]
+
+        lines.append("## Health metrics")
+        lines.append("| Metric | Count | % | Severity |")
+        lines.append("|---|---|---|---|")
+        lines.append(f"| Total unresolved | {len(all_unresolved)} | 100% | — |")
+        lines.append(f"| Unestimated | {unestimated} | {pct(unestimated)} | {'CRITICAL' if unestimated > total // 4 else 'HIGH'} |")
+        lines.append(f"| Stuck (>7d in progress) | {stuck} | {pct(stuck)} | CRITICAL |")
+        lines.append(f"| Stale (>30d no update) | {stale} | {pct(stale)} | HIGH |")
+        lines.append(f"| Ancient (>200d open) | {ancient} | {pct(ancient)} | CRITICAL |")
+        lines.append(f"| Blocked | {blocked} | {pct(blocked)} | MEDIUM |")
+        lines.append(f"| Unassigned | {unassigned_count} | {pct(unassigned_count)} | MEDIUM |")
+        lines.append("")
+
+        lines.append("## By state")
+        for state_name, count in sorted(state_counts.items(), key=lambda x: -x[1]):
+            lines.append(f"- **{state_name.title()}:** {count} ({pct(count)})")
+        lines.append("")
+
+        if len(product_counts) > 1:
+            lines.append("## By product")
+            for prod, count in sorted(product_counts.items(), key=lambda x: -x[1]):
+                lines.append(f"- **{prod}:** {count}")
+            lines.append("")
+
+        if recently_resolved:
+            lines.append(f"## Recently resolved ({len(recently_resolved)}) — since {since}")
+            for issue in recently_resolved:
+                issue_id = issue.get("idReadable", "?")
+                summary = issue.get("summary", "?")
+                state = _resolve_state(issue)
+                assignee = _resolve_assignee(issue)
+                lines.append(f"- **{issue_id}** [{state}] {summary} → {assignee}")
+        else:
+            lines.append(f"_No issues resolved since {since}._")
 
         return "\n".join(lines)
