@@ -206,7 +206,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `get_issues_for_translation` | Fetch issues with non-English text for LLM-assisted translation |
 | `apply_translations` | Apply translated text to issues with batch tagging for rollback |
 
-#### Priority dashboard & monitoring (8)
+#### Priority dashboard & monitoring (9)
 
 | Tool | Description |
 |---|---|
@@ -218,6 +218,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `get_at_risk_issues` | Find at-risk issues: stalled (active but silent), forgotten (filed but idle 30d+), overdue, over estimate |
 | `check_task_creation` | Verify a requested task was created with proper fields (priority, assignee, description) + quality score |
 | `get_creation_activity` | Report of recently created issues with quality indicators and PM follow-through stats |
+| `get_project_health` | Project health: state/product distribution, health metrics (%), recently resolved issues |
 
 #### Impact analysis (2)
 
@@ -294,7 +295,7 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{
     uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
 ```
 
-You should see all 52 tools listed.
+You should see all 53 tools listed.
 
 ## Setup for Windows
 
@@ -472,7 +473,7 @@ Put it behind a reverse proxy (Caddy, nginx, Cloudflare Tunnel) for HTTPS.
 
 ### 3. Use it
 
-Start a conversation in claude.ai and ask about your YouTrack issues. All 52 tools are available.
+Start a conversation in claude.ai and ask about your YouTrack issues. All 53 tools are available.
 
 > Without `YOUTRACK_OAUTH_URL`, OAuth is disabled and the server works in standard mode (stdio/SSE without auth) — no changes to existing setups.
 
@@ -594,44 +595,6 @@ DISABLED_TOOLS=delete_issue,bulk_update_execute,apply_translations
 ```
 
 This removes the specified tools from the MCP server entirely — clients won't see them.
-
-## Daily report script
-
-A standalone report script that generates Excel + HTML email reports with delta tracking (compare today vs yesterday).
-
-### Setup
-
-1. Copy the teams config template:
-```bash
-cp scripts/teams.example.json scripts/teams.json
-```
-
-2. Edit `scripts/teams.json` with your teams, projects, board URLs, and GitLab paths.
-
-3. Run:
-```bash
-pip install -e ".[report]"
-YOUTRACK_URL="https://..." YOUTRACK_TOKEN="perm:..." python scripts/yt_report.py
-```
-
-Reports are saved to `reports/` — Excel file + HTML email body.
-
-### Automated daily reports (GitHub Actions)
-
-The included workflow (`.github/workflows/report.yml`) runs every weekday at 07:00 UTC. Configure these secrets in your GitHub repo:
-
-| Secret | Required | Description |
-|---|---|---|
-| `YOUTRACK_URL` | Yes | YouTrack instance URL |
-| `YOUTRACK_TOKEN` | Yes | YouTrack permanent token |
-| `GITLAB_URL` | No | GitLab instance URL (for commit stats) |
-| `GITLAB_TOKEN` | No | GitLab private token |
-| `SMTP_HOST` | No | SMTP server for email delivery |
-| `SMTP_PORT` | No | SMTP port |
-| `SMTP_USERNAME` | No | SMTP username |
-| `SMTP_PASSWORD` | No | SMTP password |
-| `EMAIL_TO` | No | Recipient email |
-| `EMAIL_FROM` | No | Sender email |
 
 ## Requirements
 

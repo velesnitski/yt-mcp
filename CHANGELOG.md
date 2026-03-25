@@ -11,10 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Unestimated issues detection** in `get_at_risk_issues` — flags active issues without estimation
 - **Ancient issues detection** in `get_at_risk_issues` — flags issues open longer than N days (default: 200)
 - `ancient_days` parameter on `get_at_risk_issues`
-- **Report script** (`scripts/yt_report.py`) — generates Excel + HTML email reports with delta tracking, GitLab commit stats, and developer activity
-- `teams.example.json` — template for team configuration (no hardcoded data)
-- GitHub Actions workflow for automated daily reports with email delivery
-- `[report]` optional dependency group (`openpyxl`, `requests`)
+- `get_project_health` — project health report with state/product distribution, health metrics (unestimated, stuck, stale, ancient, blocked, unassigned as %), and recently resolved issues
 
 ## [1.5.2] - 2026-03-20
 
