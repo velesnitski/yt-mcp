@@ -595,6 +595,44 @@ DISABLED_TOOLS=delete_issue,bulk_update_execute,apply_translations
 
 This removes the specified tools from the MCP server entirely — clients won't see them.
 
+## Daily report script
+
+A standalone report script that generates Excel + HTML email reports with delta tracking (compare today vs yesterday).
+
+### Setup
+
+1. Copy the teams config template:
+```bash
+cp scripts/teams.example.json scripts/teams.json
+```
+
+2. Edit `scripts/teams.json` with your teams, projects, board URLs, and GitLab paths.
+
+3. Run:
+```bash
+pip install -e ".[report]"
+YOUTRACK_URL="https://..." YOUTRACK_TOKEN="perm:..." python scripts/yt_report.py
+```
+
+Reports are saved to `reports/` — Excel file + HTML email body.
+
+### Automated daily reports (GitHub Actions)
+
+The included workflow (`.github/workflows/report.yml`) runs every weekday at 07:00 UTC. Configure these secrets in your GitHub repo:
+
+| Secret | Required | Description |
+|---|---|---|
+| `YOUTRACK_URL` | Yes | YouTrack instance URL |
+| `YOUTRACK_TOKEN` | Yes | YouTrack permanent token |
+| `GITLAB_URL` | No | GitLab instance URL (for commit stats) |
+| `GITLAB_TOKEN` | No | GitLab private token |
+| `SMTP_HOST` | No | SMTP server for email delivery |
+| `SMTP_PORT` | No | SMTP port |
+| `SMTP_USERNAME` | No | SMTP username |
+| `SMTP_PASSWORD` | No | SMTP password |
+| `EMAIL_TO` | No | Recipient email |
+| `EMAIL_FROM` | No | Sender email |
+
 ## Requirements
 
 ### Python 3.10+
