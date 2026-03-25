@@ -1,0 +1,28 @@
+[
+  {
+    "name": "Backend",
+    "yt_query": "project: Backend",
+    "yt_board_url": "https://your-instance.youtrack.cloud/agiles/98-1/current",
+    "gitlab_paths": [
+      "your-org/backend"
+    ],
+    "tracked_devs": {
+      "john.doe": "John Doe"
+    }
+  },
+  {
+    "name": "Frontend",
+    "yt_query": "project: Frontend",
+    "yt_boards": [
+      {"name": "Main", "url": "https://your-instance.youtrack.cloud/agiles/98-2/current"},
+      {"name": "Mobile", "url": "https://your-instance.youtrack.cloud/agiles/98-3/current"}
+    ],
+    "gitlab_paths": [
+      "your-org/frontend",
+      "your-org/mobile-web"
+    ],
+    "tracked_devs": {
+      "jane.smith": "Jane Smith"
+    }
+  }
+]

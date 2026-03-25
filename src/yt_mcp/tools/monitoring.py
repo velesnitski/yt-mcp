@@ -204,12 +204,13 @@ def register(mcp, resolver: InstanceResolver):
         project: str,
         stale_days: int = 7,
         forgotten_days: int = 30,
+        ancient_days: int = 200,
         limit_per_category: int = 10,
         deadline_warning_days: int = 7,
         exclude_patterns: str = "",
         instance: str = "",
     ) -> str:
-        """Find issues at risk: stalled, forgotten, overdue deadlines, or over estimate.
+        """Find issues at risk: stalled, forgotten, unestimated, ancient, overdue, or over estimate.
 
         Categories (ordered by urgency):
         - Overdue: past their Deadline date (if Deadline field is used)
@@ -217,6 +218,8 @@ def register(mcp, resolver: InstanceResolver):
         - Stalled: In Progress / In Review / Ready for Test with no updates in N days
           (actively worked on but went silent — high urgency)
         - Over estimate: spent time exceeds estimate (if time tracking is used)
+        - Unestimated: active issues without an Estimation field set
+        - Ancient: issues open for more than N days (default: 200)
         - Forgotten: Submitted / Pause / To Do with no updates in 30+ days
           (filed but never started or intentionally paused — lower urgency)
 
@@ -224,6 +227,7 @@ def register(mcp, resolver: InstanceResolver):
             project: Project short name (e.g., 'DO', 'AP', 'BAC')
             stale_days: Days without updates to flag In Progress issues (default: 7)
             forgotten_days: Days without updates to flag Submitted/Pause issues (default: 30)
+            ancient_days: Days since creation to flag as ancient (default: 200)
             limit_per_category: Max issues shown per category (default: 10)
             deadline_warning_days: Days before deadline to flag as approaching (default: 7)
             exclude_patterns: Comma-separated regex patterns to exclude (e.g., 'DevOps Daily,Report')
@@ -264,6 +268,8 @@ def register(mcp, resolver: InstanceResolver):
         stalled: list[tuple[int, str]] = []
         forgotten: list[tuple[int, str]] = []
         over_estimate: list[tuple[float, str]] = []
+        unestimated: list[tuple[int, str]] = []
+        ancient: list[tuple[int, str]] = []
 
         for issue in all_issues:
             issue_id = issue.get("idReadable", "?")
@@ -343,13 +349,32 @@ def register(mcp, resolver: InstanceResolver):
                     f"Estimate: {est_str}, Spent: {spent_str} (**{ratio:.0%}**)",
                 )))
 
+            # Unestimated: active issues without estimation
+            if estimate_minutes == 0 and state_lower in (working_states | waiting_states):
+                unestimated.append((days_idle, _format_at_risk_line(
+                    issue_id, state, summary, assignee, priority,
+                    "**no estimation**",
+                )))
+
+            # Ancient: open for too long
+            created_ms = issue.get("created", 0)
+            if created_ms:
+                days_open = (now - datetime.fromtimestamp(created_ms / 1000, tz=timezone.utc)).days
+                if days_open >= ancient_days:
+                    ancient.append((days_open, _format_at_risk_line(
+                        issue_id, state, summary, assignee, priority,
+                        f"**{days_open}d old**",
+                    )))
+
         overdue.sort(key=lambda x: x[0], reverse=True)
         approaching.sort(key=lambda x: x[0])
         stalled.sort(key=lambda x: x[0], reverse=True)
         forgotten.sort(key=lambda x: x[0], reverse=True)
         over_estimate.sort(key=lambda x: x[0], reverse=True)
+        unestimated.sort(key=lambda x: x[0], reverse=True)
+        ancient.sort(key=lambda x: x[0], reverse=True)
 
-        total_risks = len(overdue) + len(approaching) + len(stalled) + len(forgotten) + len(over_estimate)
+        total_risks = len(overdue) + len(approaching) + len(stalled) + len(forgotten) + len(over_estimate) + len(unestimated) + len(ancient)
 
         if total_risks == 0:
             return f"No at-risk issues found in **{project}** (stale: {stale_days}d, forgotten: {forgotten_days}d)."
@@ -374,6 +399,8 @@ def register(mcp, resolver: InstanceResolver):
         _append_category("Deadline approaching", approaching)
         _append_category("Stalled — actively worked on but went silent", stalled)
         _append_category("Over estimate", over_estimate)
+        _append_category("Unestimated", unestimated)
+        _append_category("Ancient — open too long", ancient)
         _append_category("Forgotten — filed/paused but idle", forgotten)
 
         return "\n".join(lines)
