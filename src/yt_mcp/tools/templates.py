@@ -26,18 +26,13 @@ def register(mcp, resolver: InstanceResolver):
     ) -> str:
         """Create a YouTrack issue using a predefined template.
 
-        The template provides the description structure. You can fill in sections
-        by passing field values in the 'fields' parameter.
-
         Args:
-            project: Project short name (e.g., 'DO', 'AP')
+            project: Project short name
             template: Template name (bug, feature, task, daily, spike, release, devops)
             summary: Issue title
-            fields: Section values as 'Section Name: value' separated by '|||'.
-                    Example: 'Steps to Reproduce: 1. Open app 2. Click X|||Expected Result: Page loads|||Severity: Major'
-                    Sections not provided will keep placeholder text.
-            product: Product name for the Product custom field (leave empty to skip)
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            fields: Section values as 'Section: value' separated by '|||'
+            product: Product field (optional)
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         result = build_description(template, fields)

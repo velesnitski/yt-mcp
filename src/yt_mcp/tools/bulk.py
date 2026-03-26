@@ -22,15 +22,13 @@ def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()
     async def bulk_update_preview(query: str, command: str, max_results: int = 50, instance: str = "") -> str:
-        """Preview which issues would be affected by a bulk update (dry run).
-
-        Always call this BEFORE bulk_update_execute to review the affected issues.
+        """Preview which issues would be affected by a bulk update (dry run). Call before bulk_update_execute.
 
         Args:
-            query: YouTrack search query to select issues (e.g., 'project: DO state: Open')
-            command: YouTrack command to apply (e.g., 'State Done', 'Assignee John', 'tag Important')
-            max_results: Maximum number of issues to preview (default: 50, max: 100)
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            query: YouTrack search query
+            command: YouTrack command to apply
+            max_results: Max issues to preview (default: 50, max: 100)
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         max_results = min(max_results, MAX_BULK_RESULTS)
@@ -69,16 +67,13 @@ def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()
     async def bulk_update_execute(query: str, command: str, max_results: int = 50, instance: str = "") -> str:
-        """Execute a bulk update on issues matching a query. DESTRUCTIVE — call bulk_update_preview first.
-
-        Each batch is tagged with a unique ID (e.g., 'yt-mcp-1741794000') for rollback.
-        Use bulk_rollback with the batch tag to undo all changes from a batch.
+        """Execute a bulk update. DESTRUCTIVE -- call bulk_update_preview first. Tags batch for rollback.
 
         Args:
-            query: YouTrack search query to select issues (e.g., 'project: DO state: Open')
-            command: YouTrack command to apply (e.g., 'State Done', 'Assignee John', 'tag Important')
-            max_results: Maximum number of issues to update (default: 50, max: 100)
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            query: YouTrack search query
+            command: YouTrack command to apply
+            max_results: Max issues to update (default: 50, max: 100)
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         max_results = min(max_results, MAX_BULK_RESULTS)
@@ -133,12 +128,9 @@ def register(mcp, resolver: InstanceResolver):
     async def bulk_rollback(batch_tag: str, instance: str = "") -> str:
         """Rollback all changes from a bulk update batch.
 
-        Finds all issues tagged with the batch tag, looks up the changes made
-        after the tag was applied, and reverts each change to its previous value.
-
         Args:
-            batch_tag: The batch tag from bulk_update_execute (e.g., 'yt-mcp-1741794000')
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            batch_tag: Batch tag from bulk_update_execute
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         tag_error = _validate_batch_tag(batch_tag)

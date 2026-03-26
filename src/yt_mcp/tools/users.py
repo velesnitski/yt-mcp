@@ -5,10 +5,10 @@ def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()
     async def get_current_user(instance: str = "") -> str:
-        """Get the currently authenticated YouTrack user. Useful to verify the token works.
+        """Get the currently authenticated YouTrack user.
 
         Args:
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         data = await client.get(
@@ -33,12 +33,12 @@ def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()
     async def search_users(query: str, max_results: int = 20, instance: str = "") -> str:
-        """Search YouTrack users by name or login. Useful for finding assignees.
+        """Search YouTrack users by name or login.
 
         Args:
-            query: Search string (matches login, full name, email)
-            max_results: Maximum results (default: 20)
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            query: Search string
+            max_results: Max results (default: 20)
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         users = await client.get(
