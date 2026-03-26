@@ -15,7 +15,7 @@ def register(mcp, resolver: InstanceResolver):
         """List all accessible YouTrack projects.
 
         Args:
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         projects = await client.get(
@@ -34,10 +34,10 @@ def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()
     async def get_agiles(instance: str = "") -> str:
-        """List all agile boards in YouTrack.
+        """List all agile boards.
 
         Args:
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         boards = await client.get(
@@ -56,16 +56,11 @@ def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()
     async def get_agile_board(name: str, instance: str = "") -> str:
-        """Search for an agile board by name, ID, or URL.
-
-        Accepts:
-            - Board name (partial match): 'iOS', 'Sprint Board'
-            - Board ID: '98-114'
-            - YouTrack URL: 'https://company.youtrack.cloud/agiles/98-114/current'
+        """Get agile board details by name, ID, or URL.
 
         Args:
-            name: Board name, ID, or YouTrack agile board URL
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            name: Board name, ID, or URL
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance, name)
 
@@ -140,13 +135,13 @@ def register(mcp, resolver: InstanceResolver):
         column_field: str = "State",
         instance: str = "",
     ) -> str:
-        """Create a new agile board in YouTrack.
+        """Create a new agile board.
 
         Args:
-            name: Board name (e.g., 'My Sprint Board')
-            projects: Comma-separated project short names (e.g., 'DO,BAC')
-            column_field: Field to use for columns (default: 'State')
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            name: Board name
+            projects: Comma-separated project short names
+            column_field: Column field (default: 'State')
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         project_list = [p.strip() for p in projects.split(",")]
@@ -177,13 +172,11 @@ def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()
     async def delete_agile_board(board_name: str, instance: str = "") -> str:
-        """Delete an agile board from YouTrack. The board's issues are NOT deleted.
-
-        Uses case-insensitive partial matching to find the board.
+        """Delete an agile board (issues are not deleted).
 
         Args:
-            board_name: Full or partial board name to delete
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            board_name: Board name (partial match)
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         boards = await client.get(
@@ -217,12 +210,12 @@ def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()
     async def get_sprint_board(board_name: str, sprint: str = "current", instance: str = "") -> str:
-        """Get issues on an agile board grouped by column (state).
+        """Get issues on an agile board grouped by column.
 
         Args:
-            board_name: Board name, ID (e.g., '98-114'), or YouTrack URL
-            sprint: Sprint name or 'current' for active sprint (default: 'current')
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            board_name: Board name, ID, or URL
+            sprint: Sprint name or 'current' (default: 'current')
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance, board_name)
 

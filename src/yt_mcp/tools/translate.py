@@ -25,19 +25,13 @@ def register(mcp, resolver: InstanceResolver):
         max_results: int = 10,
         instance: str = "",
     ) -> str:
-        """Fetch issues that need translation, returning their raw text content.
-
-        Returns issue IDs, summaries, descriptions, and comments as structured text.
-        The LLM should translate the text and then call apply_translations to write it back.
-
-        Only includes issues where summary or description contains non-ASCII characters
-        (i.e., text in a non-English language).
+        """Fetch issues with non-ASCII text for translation. Call apply_translations with results.
 
         Args:
-            query: YouTrack search query (e.g., 'project: AP state: Open')
-            include_comments: Whether to include comments for translation (default: True)
-            max_results: Batch size (default: 10, keep small to fit in context)
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            query: YouTrack search query
+            include_comments: Include comments (default: True)
+            max_results: Batch size (default: 10)
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         comment_fields = ",comments(id,text,author(name))" if include_comments else ""
@@ -108,23 +102,12 @@ def register(mcp, resolver: InstanceResolver):
         batch_tag: str = "",
         instance: str = "",
     ) -> str:
-        """Apply translated text to YouTrack issues. Tags issues for rollback.
-
-        Expected format per issue (separated by ---):
-            ISSUE: AP-1554
-            SUMMARY: Configure app logic for Oman timezone
-            DESCRIPTION:
-            As part of this task...
-            COMMENT 4-15.91-12345:
-            Verified on build 8.1.1, no objections...
-            ---
-
-        Fields not provided are left unchanged. DESCRIPTION and COMMENT can span multiple lines.
+        """Apply translated text to YouTrack issues. Tags for rollback. Format: ISSUE/SUMMARY/DESCRIPTION/COMMENT blocks separated by ---.
 
         Args:
-            translations: Structured translation block (see format above)
-            batch_tag: Optional batch tag for rollback. Auto-generated if empty.
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            translations: Structured translation block
+            batch_tag: Batch tag for rollback (auto-generated if empty)
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         if not batch_tag:
