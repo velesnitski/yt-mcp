@@ -298,6 +298,29 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{
 
 You should see all 53 tools listed.
 
+## Setup for ChatGPT CLI (Codex)
+
+ChatGPT CLI supports MCP servers. Add yt-mcp to your configuration:
+
+Edit `~/.codex/config.json`:
+
+```json
+{
+  "mcpServers": {
+    "youtrack": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/velesnitski/yt-mcp", "yt-mcp"],
+      "env": {
+        "YOUTRACK_URL": "https://your-instance.youtrack.cloud",
+        "YOUTRACK_TOKEN": "perm:your-token-here"
+      }
+    }
+  }
+}
+```
+
+If `uvx` is not found, use the full path (find it with `which uvx`).
+
 ## Setup for Windows
 
 **1. Install uv** (Python package runner):
