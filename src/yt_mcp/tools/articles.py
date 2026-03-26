@@ -7,12 +7,12 @@ def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()
     async def search_articles(query: str, max_results: int = 20, instance: str = "") -> str:
-        """Search YouTrack Knowledge Base articles.
+        """Search Knowledge Base articles.
 
         Args:
-            query: Search string (matches article titles and content)
-            max_results: Maximum results (default: 20)
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            query: Search string
+            max_results: Max results (default: 20)
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         articles = await client.get(
@@ -44,12 +44,12 @@ def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()
     async def get_article(article_id: str, include_comments: bool = True, instance: str = "") -> str:
-        """Get a Knowledge Base article by ID with full content.
+        """Get a Knowledge Base article with full content.
 
         Args:
-            article_id: Article ID (e.g., 'PROJ-A-1') or database ID
-            include_comments: Whether to include comments (default: True)
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            article_id: Article ID or database ID
+            include_comments: Include comments (default: True)
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         comment_fields = (
@@ -135,11 +135,11 @@ def register(mcp, resolver: InstanceResolver):
         """Create a new Knowledge Base article.
 
         Args:
-            project: Project short name (e.g., 'DO', 'AP')
+            project: Project short name
             summary: Article title
-            content: Article body (markdown supported)
-            parent_article_id: Optional parent article ID for nesting (e.g., 'PROJ-A-1')
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            content: Article body (markdown)
+            parent_article_id: Parent article ID for nesting (optional)
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         project_id = await client.resolve_project_id(project)
@@ -171,10 +171,10 @@ def register(mcp, resolver: InstanceResolver):
         """Update a Knowledge Base article. Returns previous values for rollback.
 
         Args:
-            article_id: Article ID (e.g., 'PROJ-A-1') or database ID
-            summary: New title (empty = keep current)
-            content: New content (empty = keep current)
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            article_id: Article ID or database ID
+            summary: New title (empty = keep)
+            content: New content (empty = keep)
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         if not summary and not content:
@@ -205,11 +205,11 @@ def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()
     async def delete_article(article_id: str, instance: str = "") -> str:
-        """Delete a Knowledge Base article. Returns article details for restoration.
+        """Delete a Knowledge Base article. Returns details for restoration.
 
         Args:
-            article_id: Article ID (e.g., 'PROJ-A-1') or database ID
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            article_id: Article ID or database ID
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         old = await client.get(
@@ -236,9 +236,9 @@ def register(mcp, resolver: InstanceResolver):
         """Add a comment to a Knowledge Base article.
 
         Args:
-            article_id: Article ID (e.g., 'PROJ-A-1') or database ID
-            text: Comment text (markdown supported)
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            article_id: Article ID or database ID
+            text: Comment text (markdown)
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         data = await client.post(
@@ -256,13 +256,13 @@ def register(mcp, resolver: InstanceResolver):
     async def update_article_comment(
         article_id: str, comment_id: str, text: str, instance: str = "",
     ) -> str:
-        """Update a comment on a Knowledge Base article. Returns previous text for rollback.
+        """Update an article comment. Returns previous text for rollback.
 
         Args:
-            article_id: Article ID (e.g., 'PROJ-A-1') or database ID
-            comment_id: Comment ID (from get_article)
-            text: New comment text (markdown supported)
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            article_id: Article ID or database ID
+            comment_id: Comment ID
+            text: New comment text (markdown)
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         old = await client.get(
@@ -284,12 +284,12 @@ def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()
     async def delete_article_comment(article_id: str, comment_id: str, instance: str = "") -> str:
-        """Delete a comment from a Knowledge Base article. Returns text for restoration.
+        """Delete an article comment. Returns text for restoration.
 
         Args:
-            article_id: Article ID (e.g., 'PROJ-A-1') or database ID
-            comment_id: Comment ID (from get_article)
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            article_id: Article ID or database ID
+            comment_id: Comment ID
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         old = await client.get(

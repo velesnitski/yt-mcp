@@ -9,15 +9,12 @@ def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()
     async def get_issue_history(issue_id: str, max_results: int = 20, instance: str = "") -> str:
-        """Get the change history of a YouTrack issue from the activity log.
-
-        Shows who changed what field, when, and the old/new values.
-        Useful for auditing changes or finding values to rollback.
+        """Get the change history of a YouTrack issue.
 
         Args:
-            issue_id: Issue ID (e.g., 'DEVOPS-423') or YouTrack issue URL
-            max_results: Maximum number of activities to return (default: 20)
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            issue_id: Issue ID or URL
+            max_results: Max activities (default: 20)
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
@@ -53,14 +50,12 @@ def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()
     async def rollback_issue(issue_id: str, activity_id: str, instance: str = "") -> str:
-        """Rollback a specific change on a YouTrack issue by restoring the previous value.
-
-        Use get_issue_history first to find the activity_id of the change to revert.
+        """Rollback a specific change by restoring the previous value.
 
         Args:
-            issue_id: Issue ID (e.g., 'DEVOPS-423') or YouTrack issue URL
-            activity_id: Activity ID from get_issue_history (e.g., '0-0.88-598477')
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            issue_id: Issue ID or URL
+            activity_id: Activity ID from get_issue_history
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
@@ -127,8 +122,8 @@ def register(mcp, resolver: InstanceResolver):
         """Get time tracking work items for an issue.
 
         Args:
-            issue_id: Issue ID (e.g., 'BAC-1828') or YouTrack issue URL
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            issue_id: Issue ID or URL
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
@@ -189,15 +184,15 @@ def register(mcp, resolver: InstanceResolver):
         work_type: str = "",
         instance: str = "",
     ) -> str:
-        """Log time (add a work item) to a YouTrack issue.
+        """Log time on a YouTrack issue.
 
         Args:
-            issue_id: Issue ID (e.g., 'BAC-1828') or YouTrack issue URL
-            duration_minutes: Time spent in minutes (e.g., 90 for 1h 30m)
-            date: Date of work in YYYY-MM-DD format (default: today)
-            description: Optional description of work done
-            work_type: Optional work type (e.g., 'Development', 'Testing', 'Documentation')
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            issue_id: Issue ID or URL
+            duration_minutes: Time spent in minutes
+            date: Date YYYY-MM-DD (default: today)
+            description: Work description (optional)
+            work_type: Work type (optional)
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
@@ -246,18 +241,15 @@ def register(mcp, resolver: InstanceResolver):
         description: str = "",
         instance: str = "",
     ) -> str:
-        """Update an existing work item (time log entry) on a YouTrack issue.
-
-        Returns previous values so the change can be reverted if needed.
-        Use get_work_items to find work item IDs.
+        """Update a work item. Returns previous values for rollback.
 
         Args:
-            issue_id: Issue ID (e.g., 'BAC-1828') or YouTrack issue URL
-            work_item_id: Work item ID (from get_work_items)
-            duration_minutes: New duration in minutes (0 = keep current)
-            date: New date in YYYY-MM-DD format (empty = keep current)
-            description: New description (empty = keep current)
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            issue_id: Issue ID or URL
+            work_item_id: Work item ID
+            duration_minutes: New duration in minutes (0 = keep)
+            date: New date YYYY-MM-DD (empty = keep)
+            description: New description (empty = keep)
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
@@ -321,15 +313,12 @@ def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()
     async def delete_work_item(issue_id: str, work_item_id: str, instance: str = "") -> str:
-        """Delete a work item (time log entry) from a YouTrack issue.
-
-        Returns the deleted work item details so it can be re-added with add_work_item if needed.
-        Use get_work_items to find work item IDs.
+        """Delete a work item. Returns deleted details for restoration.
 
         Args:
-            issue_id: Issue ID (e.g., 'BAC-1828') or YouTrack issue URL
-            work_item_id: Work item ID (from get_work_items)
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            issue_id: Issue ID or URL
+            work_item_id: Work item ID
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
@@ -381,13 +370,12 @@ def register(mcp, resolver: InstanceResolver):
         since: str = "",
         instance: str = "",
     ) -> str:
-        """Get a compact summary of issue changes: state transitions, assignee changes,
-        and comment count. Filters noise (description edits, spent time).
+        """Get a compact summary of issue changes: state transitions, comments, time logged.
 
         Args:
-            issue_id: Issue ID (e.g., 'MAN-118') or YouTrack issue URL
-            since: Optional ISO date to filter from (e.g., '2026-03-01'). Empty = all history.
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            issue_id: Issue ID or URL
+            since: ISO date filter (optional, e.g. '2026-03-01')
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)

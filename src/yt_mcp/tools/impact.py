@@ -119,17 +119,12 @@ def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()
     async def get_impact_map(issue_id: str, depth: int = 2, instance: str = "") -> str:
-        """Build a cross-product dependency graph starting from an issue.
-
-        Finds all related issues by following:
-        - Issue links (depends on, subtask, relates to) up to N levels deep
-        - Product field overlap (unresolved issues sharing the same product)
-        - Text mentions (issues referencing this issue ID)
+        """Build a cross-product dependency graph from an issue via links, product overlap, and mentions.
 
         Args:
-            issue_id: Root issue ID (e.g., 'BAC-1828') or YouTrack issue URL
-            depth: How many levels of links to follow (default: 2)
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            issue_id: Root issue ID or URL
+            depth: Link levels to follow (default: 2)
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
@@ -206,17 +201,12 @@ def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()
     async def get_deadline_impact(issue_id: str, deadline: str = "", instance: str = "") -> str:
-        """Analyze what breaks if an issue slips past a deadline.
-
-        Finds all dependent/related issues and categorizes them as:
-        - BLOCKED: directly depends on this issue and not yet Done
-        - AT RISK: same product or related, not yet Done
-        - DONE: already completed, unaffected
+        """Analyze what breaks if an issue slips past a deadline. Categorizes as BLOCKED, AT RISK, or DONE.
 
         Args:
-            issue_id: Root issue ID (e.g., 'BAC-1828') or YouTrack issue URL
-            deadline: Optional deadline date (e.g., '2026-03-14'). For context only.
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            issue_id: Root issue ID or URL
+            deadline: Deadline date for context (optional)
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)

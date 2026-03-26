@@ -86,18 +86,15 @@ def register(mcp, resolver: InstanceResolver):
         exclude_patterns: str = "",
         instance: str = "",
     ) -> str:
-        """Get top active issues for a project, ranked by weighted scoring model.
-
-        Scores issues by priority, type, state, tags, staleness, and blocker count.
-        Useful for daily standups, team briefs, and priority dashboards.
+        """Get top active issues ranked by priority score.
 
         Args:
-            project: Project short name (e.g., 'AP', 'DO', 'BAC')
-            limit: Number of top issues to return (default: 3). When grouped, limit is per product.
-            states: Comma-separated active states (default: 'In Progress, Submitted, In Review, Ready for Test, Pause')
-            group_by_product: Group results by Product field (default: false). Returns top N per product.
-            exclude_patterns: Comma-separated regex patterns to exclude (e.g., 'DevOps Daily,Report')
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            project: Project short name
+            limit: Top N results (default: 3), per product when grouped
+            states: Comma-separated active states
+            group_by_product: Group by Product field (default: false)
+            exclude_patterns: Comma-separated regex to exclude
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         patterns = compile_exclude_patterns(exclude_patterns)
@@ -152,17 +149,14 @@ def register(mcp, resolver: InstanceResolver):
         exclude_patterns: str = "",
         instance: str = "",
     ) -> str:
-        """Get top blocked issues for a project, ranked by weighted scoring model.
-
-        Scores blocked issues by priority, type, tags, how long they've been blocked, and blocker count.
-        Useful for identifying long-standing blockers that need escalation.
+        """Get top blocked issues ranked by priority score.
 
         Args:
-            project: Project short name (e.g., 'AP', 'DO', 'BAC')
-            limit: Number of top issues to return (default: 3). When grouped, limit is per product.
-            group_by_product: Group results by Product field (default: false).
-            exclude_patterns: Comma-separated regex patterns to exclude (e.g., 'DevOps Daily,Report')
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            project: Project short name
+            limit: Top N results (default: 3), per product when grouped
+            group_by_product: Group by Product field (default: false)
+            exclude_patterns: Comma-separated regex to exclude
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         patterns = compile_exclude_patterns(exclude_patterns)
@@ -214,17 +208,15 @@ def register(mcp, resolver: InstanceResolver):
         exclude_patterns: str = "",
         instance: str = "",
     ) -> str:
-        """Get a combined priority dashboard for a project — top active, top blocked, and summary stats.
-
-        Provides a quick overview for standups, manager briefs, or automated reports.
+        """Combined dashboard: top active, top blocked, and summary stats for a project.
 
         Args:
-            project: Project short name (e.g., 'AP', 'DO', 'BAC')
-            active_limit: Number of top active issues (default: 3). When grouped, limit is per product.
-            blocked_limit: Number of top blocked issues (default: 3). When grouped, limit is per product.
-            group_by_product: Group results by Product field (default: false).
-            exclude_patterns: Comma-separated regex patterns to exclude (e.g., 'DevOps Daily,Report')
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            project: Project short name
+            active_limit: Top N active (default: 3)
+            blocked_limit: Top N blocked (default: 3)
+            group_by_product: Group by Product field (default: false)
+            exclude_patterns: Comma-separated regex to exclude
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         patterns = compile_exclude_patterns(exclude_patterns)
@@ -326,18 +318,15 @@ def register(mcp, resolver: InstanceResolver):
         exclude_patterns: str = "",
         instance: str = "",
     ) -> str:
-        """Get dashboards for multiple projects in one call.
-
-        Fetches all projects in parallel and returns a combined report.
-        Useful for cross-team briefs and automated reports covering all teams.
+        """Combined dashboard for multiple projects in one call.
 
         Args:
-            projects: Comma-separated project short names (e.g., 'AP, BAC, DO, WP, iOSP, iOSVY, MAN')
-            active_limit: Top active issues per project (default: 5). When grouped, per product.
-            blocked_limit: Top blocked issues per project (default: 3). When grouped, per product.
-            group_by_product: Group results by Product field (default: false).
-            exclude_patterns: Comma-separated regex patterns to exclude (e.g., 'DevOps Daily,Report')
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            projects: Comma-separated project short names
+            active_limit: Top N active per project (default: 5)
+            blocked_limit: Top N blocked per project (default: 3)
+            group_by_product: Group by Product field (default: false)
+            exclude_patterns: Comma-separated regex to exclude
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         patterns = compile_exclude_patterns(exclude_patterns)

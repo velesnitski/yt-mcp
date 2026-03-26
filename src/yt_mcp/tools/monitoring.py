@@ -16,13 +16,7 @@ _SINCE_MULTIPLIERS = {"m": 60, "h": 3600, "d": 86400}
 
 
 def _parse_since(since: str) -> int:
-    """Parse since string to epoch milliseconds.
-
-    Accepts:
-        - Duration: '24h', '7d', '30m'
-        - ISO date: '2026-03-18'
-    Returns timestamp in milliseconds.
-    """
+    """Parse since string (duration or ISO date) to epoch milliseconds."""
     since = since.strip()
     match = _SINCE_RE.match(since)
     if match:
@@ -62,15 +56,11 @@ def register(mcp, resolver: InstanceResolver):
     ) -> str:
         """Get a digest of recent changes for issues matching a query.
 
-        For each issue, shows state changes, new comments, and link updates
-        since the specified time. Useful for daily standups, status checks,
-        and automated reports.
-
         Args:
-            query: YouTrack search query (e.g., 'project: DO State: {In Progress}', 'issue id: BAC-1828')
-            since: How far back to look — duration ('24h', '7d', '30m') or date ('2026-03-18'). Default: 24h.
-            limit: Maximum number of issues (default: 10)
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            query: YouTrack search query
+            since: Duration ('24h', '7d') or date ('2026-03-18'). Default: 24h
+            limit: Max issues (default: 10)
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         since_ts = _parse_since(since)
@@ -210,28 +200,17 @@ def register(mcp, resolver: InstanceResolver):
         exclude_patterns: str = "",
         instance: str = "",
     ) -> str:
-        """Find issues at risk: stalled, forgotten, unestimated, ancient, overdue, or over estimate.
-
-        Categories (ordered by urgency):
-        - Overdue: past their Deadline date (if Deadline field is used)
-        - Approaching deadline: within N days of Deadline (if field is used)
-        - Stalled: In Progress / In Review / Ready for Test with no updates in N days
-          (actively worked on but went silent — high urgency)
-        - Over estimate: spent time exceeds estimate (if time tracking is used)
-        - Unestimated: active issues without an Estimation field set
-        - Ancient: issues open for more than N days (default: 200)
-        - Forgotten: Submitted / Pause / To Do with no updates in 30+ days
-          (filed but never started or intentionally paused — lower urgency)
+        """Find at-risk issues: overdue, stalled, forgotten, unestimated, over estimate, ancient.
 
         Args:
-            project: Project short name (e.g., 'DO', 'AP', 'BAC')
-            stale_days: Days without updates to flag In Progress issues (default: 7)
-            forgotten_days: Days without updates to flag Submitted/Pause issues (default: 30)
-            ancient_days: Days since creation to flag as ancient (default: 200)
-            limit_per_category: Max issues shown per category (default: 10)
-            deadline_warning_days: Days before deadline to flag as approaching (default: 7)
-            exclude_patterns: Comma-separated regex patterns to exclude (e.g., 'DevOps Daily,Report')
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            project: Project short name
+            stale_days: Days idle for In Progress (default: 7)
+            forgotten_days: Days idle for Submitted/Pause (default: 30)
+            ancient_days: Days open to flag (default: 200)
+            limit_per_category: Max per category (default: 10)
+            deadline_warning_days: Days before deadline warning (default: 7)
+            exclude_patterns: Comma-separated regex to exclude
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         patterns = compile_exclude_patterns(exclude_patterns)
@@ -413,17 +392,14 @@ def register(mcp, resolver: InstanceResolver):
         expected_priority: str = "",
         instance: str = "",
     ) -> str:
-        """Check if a task matching keywords was created, and assess its quality.
-
-        Useful for verifying that a requested task was actually created with
-        proper fields (priority, assignee, description, subtasks).
+        """Check if a task matching keywords was created and assess its quality.
 
         Args:
-            keywords: Search keywords for the task (e.g., 'SOCKS proxy', 'server audit')
-            project: Project short name to narrow search (optional)
-            created_since: How far back to look — duration ('7d', '24h') or date ('2026-03-18'). Default: 7d.
-            expected_priority: Expected priority level to verify (e.g., 'Critical'). Empty = don't check.
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            keywords: Search keywords
+            project: Project short name (optional)
+            created_since: Duration ('7d', '24h') or date. Default: 7d
+            expected_priority: Priority to verify (optional)
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         since_ts = _parse_since(created_since)
@@ -567,18 +543,14 @@ def register(mcp, resolver: InstanceResolver):
         limit: int = 20,
         instance: str = "",
     ) -> str:
-        """Get a report of recently created issues with quality indicators.
-
-        Shows all issues created in a project within a time window, with checks for
-        whether each has an assignee, description, priority, and has progressed beyond Submitted.
-        Useful for tracking PM/lead follow-through on task creation.
+        """Report of recently created issues with quality indicators.
 
         Args:
-            project: Project short name (e.g., 'DO', 'AP', 'BAC')
-            since: How far back to look — duration ('7d', '24h', '30d') or date ('2026-03-18'). Default: 7d.
-            creator: Filter by creator name (optional, partial match)
-            limit: Maximum number of issues (default: 20)
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            project: Project short name
+            since: Duration ('7d', '24h') or date. Default: 7d
+            creator: Filter by creator name (optional)
+            limit: Max issues (default: 20)
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         since_ts = _parse_since(since)
@@ -687,16 +659,13 @@ def register(mcp, resolver: InstanceResolver):
         exclude_patterns: str = "",
         instance: str = "",
     ) -> str:
-        """Get a project health report: state/product distribution, health metrics with percentages, and recently resolved issues.
-
-        Designed for daily briefs and status reports. Shows unestimated, stuck,
-        stale, ancient, blocked, and unassigned counts as % of total.
+        """Project health report: state distribution, health metrics, and recently resolved issues.
 
         Args:
-            project: Project short name (e.g., 'DO', 'AP', 'BAC')
-            since: Period for "recently resolved" — duration ('24h', '7d') or date ('2026-03-18'). Default: 24h.
-            exclude_patterns: Comma-separated regex patterns to exclude (e.g., 'DevOps Daily,Report')
-            instance: YouTrack instance name (optional, for multi-instance setups)
+            project: Project short name
+            since: Period for resolved issues (default: '24h')
+            exclude_patterns: Comma-separated regex to exclude
+            instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         patterns = compile_exclude_patterns(exclude_patterns)
