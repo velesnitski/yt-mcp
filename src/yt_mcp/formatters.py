@@ -1,6 +1,25 @@
+import os
 import re
 
 _ISSUE_URL_RE = re.compile(r"/issue/([A-Za-z]+-\d+)")
+
+# Compact mode: strips markdown formatting for token savings (~60%)
+# Set YOUTRACK_COMPACT=1 to enable
+COMPACT = os.environ.get("YOUTRACK_COMPACT", "").lower() in ("1", "true", "yes")
+
+
+def compact_lines(lines: list[str]) -> str:
+    """Join lines, stripping markdown if compact mode is on."""
+    text = "\n".join(lines)
+    if not COMPACT:
+        return text
+    # Strip markdown formatting
+    text = text.replace("**", "").replace("__", "")
+    text = re.sub(r"^#+\s+", "", text, flags=re.MULTILINE)  # ## Headers → plain
+    text = re.sub(r"^- ", "", text, flags=re.MULTILINE)  # bullet points
+    text = re.sub(r"_([^_]+)_", r"\1", text)  # _italic_
+    text = re.sub(r"\n{3,}", "\n\n", text)  # collapse blank lines
+    return text.strip()
 
 
 def parse_issue_id(issue_id: str) -> str:
@@ -81,11 +100,18 @@ def format_issue_list(issues: list) -> str:
         assignee_name = _resolve_assignee(issue)
         state_name = _resolve_state(issue)
         product = get_product(issue)
-        product_str = f" ({product})" if product else ""
-        lines.append(
-            f"- **{issue.get('idReadable', '?')}** [{state_name}]{product_str} "
-            f"{issue.get('summary', 'No summary')} → {assignee_name}"
-        )
+        if COMPACT:
+            prod_str = f"|{product}" if product else ""
+            lines.append(
+                f"{issue.get('idReadable', '?')}|{state_name}{prod_str}|"
+                f"{issue.get('summary', '')}|{assignee_name}"
+            )
+        else:
+            product_str = f" ({product})" if product else ""
+            lines.append(
+                f"- **{issue.get('idReadable', '?')}** [{state_name}]{product_str} "
+                f"{issue.get('summary', 'No summary')} → {assignee_name}"
+            )
     return "\n".join(lines)
 
 
@@ -93,6 +119,36 @@ def format_issue_detail(data: dict) -> str:
     state_name = _resolve_state(data)
     priority_name = _resolve_priority(data)
     assignee_name = _resolve_assignee(data)
+    product = get_product(data)
+    tags = data.get("tags", [])
+    desc = data.get("description")
+    links = data.get("links", [])
+
+    if COMPACT:
+        iid = data.get("idReadable", "?")
+        parts = [f"{iid}|{state_name}|{priority_name}|{assignee_name}"]
+        if product:
+            parts[0] += f"|{product}"
+        parts.append(data.get("summary", ""))
+        if tags:
+            parts.append(f"Tags:{','.join(t.get('name', '') for t in tags)}")
+        if desc:
+            # Truncate description in compact mode
+            parts.append(desc[:500] if len(desc) > 500 else desc)
+        for link in links:
+            lt = link.get("linkType", {}).get("name", "?")
+            d = link.get("direction", "?")
+            for linked in link.get("issues", []):
+                ls = linked.get("state")
+                st = ls.get("name", "") if isinstance(ls, dict) else ""
+                parts.append(f"{lt}({d}):{linked.get('idReadable', '?')}[{st}]")
+        comments = data.get("comments", [])
+        if comments:
+            for c in comments:
+                author = c.get("author", {}).get("name", "?")
+                text = c.get("text", "")[:200]
+                parts.append(f"@{author}:{text}")
+        return "\n".join(parts)
 
     parts = [
         f"# {data.get('idReadable', '?')}: {data.get('summary', '')}",
@@ -102,20 +158,15 @@ def format_issue_detail(data: dict) -> str:
         f"**Assignee:** {assignee_name}",
     ]
 
-    product = get_product(data)
     if product:
         parts.append(f"**Product:** {product}")
 
-    tags = data.get("tags", [])
     if tags:
         parts.append(f"**Tags:** {', '.join(t.get('name', '') for t in tags)}")
 
-    desc = data.get("description")
     if desc:
         parts.extend(["", "## Description", desc])
 
-    # Links
-    links = data.get("links", [])
     if links:
         has_linked = False
         link_lines = []
@@ -124,7 +175,6 @@ def format_issue_detail(data: dict) -> str:
             direction = link.get("direction", "?")
             for linked in link.get("issues", []):
                 linked_state = ""
-                # Try top-level state first, then customFields
                 ls = linked.get("state")
                 if ls and isinstance(ls, dict) and ls.get("name"):
                     linked_state = ls["name"]
