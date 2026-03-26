@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from yt_mcp.resolver import InstanceResolver
-from yt_mcp.formatters import format_issue_list, format_issue_detail, _resolve_state, _resolve_assignee, _get_custom_field, parse_issue_id
+from yt_mcp.formatters import format_issue_list, format_issue_detail, _resolve_state, _resolve_assignee, _get_custom_field, parse_issue_id, compact_lines
 
 
 def register(mcp, resolver: InstanceResolver):
@@ -260,7 +260,7 @@ def register(mcp, resolver: InstanceResolver):
             parts.append("")
             parts.append(f"To restore: `update_issue({issue_id}, {', '.join(rollback_parts)})`")
 
-        return "\n".join(parts)
+        return compact_lines(parts)
 
     @mcp.tool()
     async def delete_issue(issue_id: str, permanent: bool = False, instance: str = "") -> str:
@@ -347,7 +347,7 @@ def register(mcp, resolver: InstanceResolver):
             parts.append(f"\n### {label}")
             parts.extend(items)
 
-        return "\n".join(parts)
+        return compact_lines(parts)
 
     @mcp.tool()
     async def add_issue_link(
@@ -529,4 +529,4 @@ def register(mcp, resolver: InstanceResolver):
         if len(data) >= max_results:
             lines.append(f"\n*Showing first {max_results}, more may exist.*")
 
-        return "\n".join(lines)
+        return compact_lines(lines)

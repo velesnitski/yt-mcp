@@ -3,8 +3,8 @@ import asyncio
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import (
     _resolve_state, _resolve_assignee, _get_custom_field,
-    ISSUE_FIELDS, ACTIVE_STATES,
-    compile_exclude_patterns, should_exclude,
+    ISSUE_FIELDS, ACTIVE_STATES, COMPACT,
+    compile_exclude_patterns, should_exclude, compact_lines,
 )
 from yt_mcp.scoring import (
     compute_active_score,
@@ -19,7 +19,7 @@ from yt_mcp.scoring import (
 
 
 def _format_scored_issue(issue: dict, score: int, breakdown: dict[str, int]) -> str:
-    """Format a single scored issue as a markdown line."""
+    """Format a single scored issue."""
     issue_id = issue.get("idReadable", "?")
     summary = issue.get("summary", "?")
     state = _resolve_state(issue)
@@ -29,6 +29,17 @@ def _format_scored_issue(issue: dict, score: int, breakdown: dict[str, int]) -> 
     blockers = _count_blockers(issue)
     blocking_others = _count_blocking_others(issue)
     products = _count_products(issue)
+
+    if COMPACT:
+        extras = []
+        if blockers:
+            extras.append(f"{blockers}sub")
+        if blocking_others:
+            extras.append(f"blk{blocking_others}")
+        if products > 1:
+            extras.append(f"{products}prod")
+        extra_str = "|" + "|".join(extras) if extras else ""
+        return f"{issue_id}|s:{score}|{state}|{summary}|{priority}|{days}d{extra_str}"
 
     parts = [f"- **{issue_id}** (score: **{score}**) [{state}] {summary}"]
     detail = f"  {assignee} | {priority} | {days}d idle"
@@ -139,7 +150,7 @@ def register(mcp, resolver: InstanceResolver):
                 lines.append(_format_scored_issue(issue, score, breakdown))
                 lines.append("")
 
-        return "\n".join(lines)
+        return compact_lines(lines)
 
     @mcp.tool()
     async def get_top_blocked_issues(
@@ -197,7 +208,7 @@ def register(mcp, resolver: InstanceResolver):
                 lines.append(_format_scored_issue(issue, score, breakdown))
                 lines.append("")
 
-        return "\n".join(lines)
+        return compact_lines(lines)
 
     @mcp.tool()
     async def get_team_dashboard(
@@ -307,7 +318,7 @@ def register(mcp, resolver: InstanceResolver):
         if not scored_blocked:
             lines.append("No blocked issues.\n")
 
-        return "\n".join(lines)
+        return compact_lines(lines)
 
     @mcp.tool()
     async def get_multi_team_dashboard(
@@ -406,4 +417,4 @@ def register(mcp, resolver: InstanceResolver):
             lines.append("---")
             lines.append("")
 
-        return "\n".join(lines)
+        return compact_lines(lines)

@@ -243,6 +243,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `SENTRY_DSN` | No | Sentry DSN for error tracking — just set the env var, SDK is included |
 | `YOUTRACK_LOG_FILE` | No | Error log path (default: `~/.yt-mcp/yt-mcp.log`) |
 | `YOUTRACK_ANALYTICS_FILE` | No | Analytics log path (default: `~/.yt-mcp/analytics.log`) |
+| `YOUTRACK_COMPACT` | No | Set to `1` to strip markdown from tool responses (~60% token savings) |
 
 ## Verify the server works
 
