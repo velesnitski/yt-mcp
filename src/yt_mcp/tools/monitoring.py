@@ -5,8 +5,8 @@ from datetime import datetime, timezone
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import (
     _resolve_state, _resolve_assignee, _get_custom_field,
-    ISSUE_FIELDS,
-    compile_exclude_patterns, should_exclude,
+    ISSUE_FIELDS, COMPACT,
+    compile_exclude_patterns, should_exclude, compact_lines,
 )
 from yt_mcp.scoring import _get_priority_name, _days_since_update
 
@@ -187,7 +187,7 @@ def register(mcp, resolver: InstanceResolver):
         if not has_any_changes:
             lines.append("_No changes found for any issue in this period._")
 
-        return "\n".join(lines)
+        return compact_lines(lines)
 
     @mcp.tool()
     async def get_at_risk_issues(
@@ -382,7 +382,7 @@ def register(mcp, resolver: InstanceResolver):
         _append_category("Ancient — open too long", ancient)
         _append_category("Forgotten — filed/paused but idle", forgotten)
 
-        return "\n".join(lines)
+        return compact_lines(lines)
 
     @mcp.tool()
     async def check_task_creation(
@@ -451,7 +451,7 @@ def register(mcp, resolver: InstanceResolver):
                     created_ms / 1000, tz=timezone.utc
                 ).strftime("%Y-%m-%d") if created_ms else "?"
                 lines.append(f"- **{issue_id}** — {summary} (created {created_str})")
-            return "\n".join(lines)
+            return compact_lines(lines)
 
         lines = [
             f"## Task creation check: \"{keywords}\"",
@@ -533,7 +533,7 @@ def register(mcp, resolver: InstanceResolver):
                 lines.append(f"- {check}")
             lines.append("")
 
-        return "\n".join(lines)
+        return compact_lines(lines)
 
     @mcp.tool()
     async def get_creation_activity(
@@ -650,7 +650,7 @@ def register(mcp, resolver: InstanceResolver):
                 f"  {reporter_name} → {assignee} | {priority} | {created_str}{flag_str}"
             )
 
-        return "\n".join(lines)
+        return compact_lines(lines)
 
     @mcp.tool()
     async def get_project_health(
@@ -784,4 +784,4 @@ def register(mcp, resolver: InstanceResolver):
         else:
             lines.append(f"_No issues resolved since {since}._")
 
-        return "\n".join(lines)
+        return compact_lines(lines)
