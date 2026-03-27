@@ -127,7 +127,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 - *"Log 2 hours of development on BAC-1828"*
 - *"Find articles about deployment"*
 
-### Available tools (44)
+### Available tools (53)
 
 #### Issues (18)
 
