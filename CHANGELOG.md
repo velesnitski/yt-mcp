@@ -5,156 +5,87 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.6.0] - 2026-03-25
+## [1.6.0] - 2026-03-27
 
 ### Added
-- **Unestimated issues detection** in `get_at_risk_issues` — flags active issues without estimation
-- **Ancient issues detection** in `get_at_risk_issues` — flags issues open longer than N days (default: 200)
-- `ancient_days` parameter on `get_at_risk_issues`
-- `get_project_health` — project health report with state/product distribution, health metrics (unestimated, stuck, stale, ancient, blocked, unassigned as %), and recently resolved issues
+- `get_project_health` — project health report with state/product distribution, health metrics (%), and recently resolved issues
+- **Unestimated** and **Ancient** (>200d) categories in `get_at_risk_issues`
+- **Compact mode** — set `YOUTRACK_COMPACT=1` to strip markdown from responses (~60% token savings)
+- **Tool call analytics** — every call logged to `~/.yt-mcp/analytics.log` with response size and error details
+- **Sentry breadcrumbs** — tool calls visible in error context
+- Trimmed all tool docstrings (~22% reduction in tool definition tokens)
 
-## [1.5.2] - 2026-03-20
+### Changed
+- Split `dashboard.py` into `dashboard.py` (scoring) + `monitoring.py` (digest + at-risk)
+- Shared helpers (`compile_exclude_patterns`, `should_exclude`, `ISSUE_FIELDS`) moved to `formatters.py`
+- `get_at_risk_issues` — separate "Stalled" (In Progress, high urgency) from "Forgotten" (Submitted/Pause, lower urgency), add `limit_per_category` and `forgotten_days` params
 
-### Added
-- **Tool call analytics** — every tool call logged to `~/.yt-mcp/analytics.log` with tool name, safe params, duration, and status
-- **Sentry breadcrumbs** — tool calls attached to Sentry error context (shows last N calls before an error)
-- Analytics decorator applied globally — no per-tool changes needed
-
-## [1.5.1] - 2026-03-20
-
-### Added
-- **Structured JSON logging** to stderr (always on) with instance ID, tool name, and error context
-- **Optional Sentry error tracking** — set `SENTRY_DSN` env var (SDK included, no extra install needed)
-- **Persistent instance ID** (`~/.yt-mcp/instance_id`) for distinguishing errors from different machines
-- **File logging** to `~/.yt-mcp/yt-mcp.log` by default (override with `YOUTRACK_LOG_FILE`)
-- Privacy: tokens, URLs, and issue content are never sent to Sentry
-
-## [1.5.0] - 2026-03-19
+## [1.5.0] - 2026-03-20
 
 ### Added
-- `group_by_product` parameter on `get_top_active_issues`, `get_top_blocked_issues`, and `get_team_dashboard` — groups results by Product field, returns top N per product
-- `get_multi_team_dashboard` — fetches all projects in parallel, returns combined cross-team report in one call
+- `group_by_product` parameter on scoring tools — group results by Product field
+- `get_multi_team_dashboard` — combined dashboard for multiple projects in one call (parallel fetch)
+- **Structured JSON logging** to stderr and `~/.yt-mcp/yt-mcp.log` (always on)
+- **Sentry error tracking** — set `SENTRY_DSN` env var (SDK included as dependency)
+- **Persistent instance ID** (`~/.yt-mcp/instance_id`) for distinguishing machines
 
 ## [1.4.0] - 2026-03-19
 
 ### Added
-- **OAuth 2.0 for claude.ai connectors** — set `YOUTRACK_OAUTH_URL` to enable. Auto-approve flow, in-memory token store, dynamic client registration. Uses FastMCP's built-in OAuth middleware.
-- **Access code gate** — set `YOUTRACK_ACCESS_CODE` to require a code before OAuth approval. Users see a simple form; wrong code = retry, correct code = auto-connect.
-- claude.ai connector setup guide in README
+- **OAuth 2.0 for claude.ai connectors** — set `YOUTRACK_OAUTH_URL` to enable
+- **Access code gate** — set `YOUTRACK_ACCESS_CODE` for password-protected OAuth
+- `check_task_creation` — verify a task was created with quality score (0–10)
+- `get_creation_activity` — recently created issues with quality stats
+- `Dockerfile`, `docker-compose.yml` for SSE/HTTP deployments
+- CSRF protection, timing-safe comparisons, session expiry on OAuth form
 
 ## [1.3.0] - 2026-03-19
 
 ### Added
-- `check_task_creation` — verify a requested task was created, with quality score (assignee, description, priority, state, subtasks)
-- `get_creation_activity` — report of recently created issues by project/creator with quality summary stats (% with assignee, description, priority)
-- `Dockerfile`, `docker-compose.yml`, `.dockerignore` for SSE/HTTP deployments
-
-## [1.2.2] - 2026-03-19
-
-### Changed
-- Split `dashboard.py` (711 lines) into `dashboard.py` (scoring tools) + `monitoring.py` (digest + at-risk tools)
-- Extract shared helpers (`compile_exclude_patterns`, `should_exclude`, `ISSUE_FIELDS`, `ACTIVE_STATES`) to `formatters.py`
-- Replace manual score+sort loops with `sorted()` generator expressions
-- Move `_fmt_line` closure out of loop to module-level `_format_at_risk_line` function
-- Use `frozenset` for state-set lookups in monitoring
-
-## [1.2.1] - 2026-03-19
-
-### Changed
-- `get_at_risk_issues` — separate "Stalled" (In Progress/In Review/Ready for Test, high urgency) from "Forgotten" (Submitted/Pause/To Do idle 30d+, lower urgency)
-- Add `limit_per_category` param (default: 10) and `forgotten_days` param (default: 30)
-- Show "...and N more" when categories are truncated
-
-## [1.2.0] - 2026-03-19
-
-### Added
-- `get_issues_digest` tool — shows recent changes (state, comments, fields, links) for any set of issues since a given time
-- `get_at_risk_issues` tool — finds stalled issues (no activity in N days), overdue deadlines, approaching deadlines, and over-estimate issues
-- Supports duration (`24h`, `7d`, `30m`) and date (`2026-03-18`) for the `since` parameter
-- Fetches activity for all matching issues in parallel with `asyncio.gather`
-- Multi-product scoring factor: +10 per additional product (cap +30)
-- Blocking-others scoring factor: +20 per inward Depend link (cap +80)
+- `get_issues_digest` — recent changes for any set of issues (state, comments, fields, links)
+- `get_at_risk_issues` — stalled, overdue, approaching deadline, over estimate detection
+- Multi-product scoring: +10 per additional product (cap +30)
+- Blocking-others scoring: +20 per inward Depend link (cap +80)
+- `poll_changes` — poll for recently changed issues (automation triggers)
+- Make.com setup instructions
 
 ### Fixed
-- `get_top_active_issues` query compatibility — now uses `#Unresolved` with client-side state filtering
+- `get_top_active_issues` query — uses `#Unresolved` with client-side state filtering
+- `poll_changes` query — client-side timestamp filtering
 
-## [1.1.2] - 2026-03-19
+## [1.2.0] - 2026-03-18
+
+### Added
+- **Scoring module** with weighted models for active and blocked issues
+- `get_top_active_issues`, `get_top_blocked_issues`, `get_team_dashboard`
+- Noise filtering via `exclude_patterns` (regex)
+- "Pause" state support (treated as active, state bonus = 0)
+- Community files: CONTRIBUTING.md, CODE_OF_CONDUCT.md, SECURITY.md, issue/PR templates
 
 ### Fixed
-- Fix `get_top_active_issues` query failure on some YouTrack instances — now fetches all unresolved issues and filters by state client-side
-
-### Added
-- "Pause" state support in scoring model and dashboard (treated as active, state bonus = 0)
-
-## [1.1.1] - 2026-03-18
-
-### Fixed
-- Fix `execute_command` 404 error on some YouTrack versions — switch from `/api/issues/{id}/execute` to standard `/api/commands` endpoint
+- `execute_command` — switch to `/api/commands` endpoint (works across all YouTrack versions)
 
 ### Changed
-- Enable HTTP/2 for YouTrack API connections (`httpx[http2]`) — multiplexed requests over single TCP connection
-- Configure connection pooling (20 max connections, 10 keepalive, 30s expiry)
-- Parallelize activities + issue info fetches in `get_issue_changes_summary` with `asyncio.gather`
-- Content-Type header moved to module-level constant
-
-## [1.1.0] - 2026-03-18
-
-### Added
-- **Scoring module** (`scoring.py`) with configurable weighted models for active and blocked issues
-- `get_top_active_issues` — rank active issues by priority, type, state, tags, staleness, and blocker count
-- `get_top_blocked_issues` — rank blocked issues by priority, type, tags, blocked duration, and blocker count
-- `get_team_dashboard` — combined project brief with top active, top blocked, and summary stats
-- Noise filtering via `exclude_patterns` parameter (regex, e.g., exclude daily reports)
-- 31 unit tests for scoring logic (helpers, active model, blocked model, edge cases)
-
-## [1.0.2] - 2026-03-17
-
-### Added
-- `poll_changes` tool for automation triggers (Make.com, n8n, cron) — returns issues updated within the last N minutes
-- Make.com setup instructions in README
-
-## [1.0.1] - 2026-03-17
-
-### Changed
-- Precompile regex patterns at module level in `projects.py` and `translate.py` instead of recompiling per function call
-- Move `import re` and `from datetime` to module level in `projects.py` (was inside async functions)
-- Remove redundant inline import in `issues.py` (`_resolve_state`, `_resolve_assignee` already imported at top)
-- Parallelize independent API calls in `impact.py` using `asyncio.gather` (mentions + same-product searches)
-- Cache timestamp lookup in `bulk.py` list comprehension (walrus operator) to avoid double `.get()`
+- Enable HTTP/2 (`httpx[http2]`) with connection pooling
+- Precompile regex at module level, parallelize independent API calls with `asyncio.gather`
 
 ## [1.0.0] - 2026-03-17
 
 ### Added
-- **Multi-instance support** — connect multiple YouTrack instances with `YOUTRACK_INSTANCES` env var, auto-detection from URLs, and optional `instance` parameter on all tools
-- **52 tools** across 9 categories: Issues (18), Time tracking (4), Agile boards (5), Projects & users (3), Knowledge Base (8), Bulk operations (3), Translation (2), Priority dashboard & monitoring (8), Impact analysis (2)
-- **Issue URL support** — paste full YouTrack URLs instead of issue IDs in any tool
-- **Board URL support** — paste agile board URLs for `get_agile_board` and `get_sprint_board`
-- **Generic field updates** — `update_issue` accepts any YouTrack command string via `command` parameter
-- **Rollback support** — all write operations return previous values for undo
-- **Bulk operations** — batch tag system (`yt-mcp-{timestamp}`) with `bulk_rollback`
-- **Translation workflow** — `get_issues_for_translation` + `apply_translations` with batch rollback
-- **Knowledge Base CRUD** — full article and article comment management
-- **User tools** — `get_current_user` and `search_users`
-- **Impact analysis** — cross-product dependency graphs and deadline impact analysis
-- **Issue templates** — 9 built-in templates (bug, feature, task, daily, spike, release, devops, incident, epic)
-- **Read-only mode** — `YOUTRACK_READ_ONLY=true` blocks all write operations
-- **Tool filtering** — `DISABLED_TOOLS` to remove specific tools
-- **Security** — HTTPS enforcement, error message truncation, batch tag validation
-- **Transport options** — stdio (default), SSE, and streamable-http
+- **53 tools** across 9 categories: Issues (18), Time tracking (4), Agile boards (5), Projects & users (3), Knowledge Base (8), Bulk operations (3), Translation (2), Priority dashboard & monitoring (9), Impact analysis (2)
+- **Multi-instance support** — `YOUTRACK_INSTANCES` env var with URL auto-detection
+- **Issue/Board URL support** — paste YouTrack URLs instead of IDs
+- **Generic field updates** via YouTrack command syntax
+- **Rollback support** — all write operations return previous values
+- **Bulk operations** with batch tag rollback
+- **Translation workflow** with batch rollback
+- **Read-only mode** and per-tool filtering
+- **HTTPS enforcement** and error message truncation
 - **168 tests** with GitHub Actions CI (Python 3.10–3.13)
 
-[1.6.0]: https://github.com/velesnitski/yt-mcp/compare/v1.5.2...v1.6.0
-[1.5.2]: https://github.com/velesnitski/yt-mcp/compare/v1.5.1...v1.5.2
-[1.5.1]: https://github.com/velesnitski/yt-mcp/compare/v1.5.0...v1.5.1
+[1.6.0]: https://github.com/velesnitski/yt-mcp/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/velesnitski/yt-mcp/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/velesnitski/yt-mcp/compare/v1.3.0...v1.4.0
-[1.3.0]: https://github.com/velesnitski/yt-mcp/compare/v1.2.2...v1.3.0
-[1.2.2]: https://github.com/velesnitski/yt-mcp/compare/v1.2.1...v1.2.2
-[1.2.1]: https://github.com/velesnitski/yt-mcp/compare/v1.2.0...v1.2.1
-[1.2.0]: https://github.com/velesnitski/yt-mcp/compare/v1.1.2...v1.2.0
-[1.1.2]: https://github.com/velesnitski/yt-mcp/compare/v1.1.1...v1.1.2
-[1.1.1]: https://github.com/velesnitski/yt-mcp/compare/v1.1.0...v1.1.1
-[1.1.0]: https://github.com/velesnitski/yt-mcp/compare/v1.0.2...v1.1.0
-[1.0.2]: https://github.com/velesnitski/yt-mcp/compare/v1.0.1...v1.0.2
-[1.0.1]: https://github.com/velesnitski/yt-mcp/compare/v1.0.0...v1.0.1
+[1.3.0]: https://github.com/velesnitski/yt-mcp/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/velesnitski/yt-mcp/compare/v1.0.0...v1.2.0
 [1.0.0]: https://github.com/velesnitski/yt-mcp/releases/tag/v1.0.0
