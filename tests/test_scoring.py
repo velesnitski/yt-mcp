@@ -176,11 +176,11 @@ class TestCountBlockingOthers:
 
 class TestCountProducts:
     def test_single_product(self):
-        issue = {"customFields": [{"name": "Product", "value": [{"name": "Planet VPN"}]}]}
+        issue = {"customFields": [{"name": "Product", "value": [{"name": "Product A"}]}]}
         assert _count_products(issue) == 1
 
     def test_multi_product(self):
-        issue = {"customFields": [{"name": "Product", "value": [{"name": "Planet VPN"}, {"name": "VPNLY"}, {"name": "Personal VPN"}]}]}
+        issue = {"customFields": [{"name": "Product", "value": [{"name": "Product A"}, {"name": "Product B"}, {"name": "Product C"}]}]}
         assert _count_products(issue) == 3
 
     def test_no_product(self):
@@ -263,7 +263,7 @@ class TestComputeActiveScore:
         assert all(v == 0 for v in breakdown.values())
 
     def test_multi_product_bonus(self):
-        issue = _make_issue(products=["Planet VPN", "VPNLY", "Personal VPN"])
+        issue = _make_issue(products=["Product A", "Product B", "Product C"])
         _, breakdown = compute_active_score(issue)
         assert breakdown["multi_product"] == 20  # 2 extra * 10
 
@@ -273,7 +273,7 @@ class TestComputeActiveScore:
         assert breakdown["multi_product"] == 30  # capped
 
     def test_single_product_no_bonus(self):
-        issue = _make_issue(products=["Planet VPN"])
+        issue = _make_issue(products=["Product A"])
         _, breakdown = compute_active_score(issue)
         assert breakdown["multi_product"] == 0
 
@@ -292,7 +292,7 @@ class TestComputeActiveScore:
         issue = _make_issue(
             priority="High", issue_type="Task", state="In Progress",
             blocker_count=2, inward_depend_count=1,
-            products=["Planet VPN", "VPNLY", "Personal VPN"],
+            products=["Product A", "Product B", "Product C"],
         )
         score, breakdown = compute_active_score(issue)
         assert breakdown["priority"] == 60
