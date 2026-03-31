@@ -65,15 +65,19 @@ def register(mcp, resolver: InstanceResolver):
     @mcp.tool()
     async def create_issue(
         project: str, summary: str, description: str = "", product: str = "",
+        command: str = "",
         instance: str = "",
     ) -> str:
         """Create a new issue in a YouTrack project.
+
+        Use `command` to set required custom fields at creation time.
 
         Args:
             project: Project short name
             summary: Issue title
             description: Issue description (markdown)
             product: Product custom field (optional)
+            command: YouTrack command for custom fields (e.g. 'Type Task Subsystem {Client Panel}')
             instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
@@ -91,12 +95,18 @@ def register(mcp, resolver: InstanceResolver):
         )
         issue_id = data.get("idReadable", "?")
 
-        product_str = ""
+        # Apply custom fields via command API
+        commands = []
         if product:
-            await client.execute_command(issue_id, f"Product {product}")
-            product_str = f" | **Product:** {product}"
+            commands.append(f"Product {product}")
+        if command:
+            commands.append(command)
+        if commands:
+            await client.execute_command(issue_id, " ".join(commands))
 
-        return f"Created: **{issue_id}** — {data.get('summary', '')}{product_str}"
+        product_str = f" | **Product:** {product}" if product else ""
+        cmd_str = f" | **Fields:** {command}" if command else ""
+        return f"Created: **{issue_id}** — {data.get('summary', '')}{product_str}{cmd_str}"
 
     @mcp.tool()
     async def update_issue(
