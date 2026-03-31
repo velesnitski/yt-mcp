@@ -1,6 +1,8 @@
 import asyncio
+import json
 import re
 from datetime import datetime, timezone
+from pathlib import Path
 
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import (
@@ -9,6 +11,29 @@ from yt_mcp.formatters import (
     compile_exclude_patterns, should_exclude, compact_lines,
 )
 from yt_mcp.scoring import _get_priority_name, _days_since_update
+
+_SNAPSHOTS_DIR = Path.home() / ".yt-mcp" / "snapshots"
+
+
+def _load_snapshot(project: str) -> dict | None:
+    """Load previous health snapshot for a project."""
+    path = _SNAPSHOTS_DIR / f"{project.lower()}.json"
+    try:
+        if path.exists():
+            return json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        pass
+    return None
+
+
+def _save_snapshot(project: str, data: dict) -> None:
+    """Save current health snapshot for delta tracking."""
+    try:
+        _SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+        path = _SNAPSHOTS_DIR / f"{project.lower()}.json"
+        path.write_text(json.dumps(data))
+    except OSError:
+        pass
 
 _SINCE_RE = re.compile(r"^(\d+)\s*(h|d|m)$", re.IGNORECASE)
 
@@ -745,21 +770,49 @@ def register(mcp, resolver: InstanceResolver):
             if not has_estimate:
                 unestimated += 1
 
+        # Build current snapshot
+        current = {
+            "total": len(all_unresolved),
+            "unestimated": unestimated,
+            "stuck": stuck,
+            "stale": stale,
+            "ancient": ancient,
+            "blocked": blocked,
+            "unassigned": unassigned_count,
+            "ts": now.isoformat(),
+        }
+
+        # Load previous snapshot for delta
+        prev = _load_snapshot(project)
+
         def pct(n: int) -> str:
             return f"{n * 100 // total}%"
 
+        def delta(key: str, cur: int) -> str:
+            if not prev or key not in prev:
+                return ""
+            diff = cur - prev[key]
+            if diff == 0:
+                return ""
+            sign = "+" if diff > 0 else ""
+            return f" ({sign}{diff})"
+
         lines = [f"# {project} — Project Health", ""]
 
+        if prev:
+            lines.append(f"_Compared to previous snapshot ({prev.get('ts', '?')[:10]})_")
+            lines.append("")
+
         lines.append("## Health metrics")
-        lines.append("| Metric | Count | % | Severity |")
-        lines.append("|---|---|---|---|")
-        lines.append(f"| Total unresolved | {len(all_unresolved)} | 100% | — |")
-        lines.append(f"| Unestimated | {unestimated} | {pct(unestimated)} | {'CRITICAL' if unestimated > total // 4 else 'HIGH'} |")
-        lines.append(f"| Stuck (>7d in progress) | {stuck} | {pct(stuck)} | CRITICAL |")
-        lines.append(f"| Stale (>30d no update) | {stale} | {pct(stale)} | HIGH |")
-        lines.append(f"| Ancient (>200d open) | {ancient} | {pct(ancient)} | CRITICAL |")
-        lines.append(f"| Blocked | {blocked} | {pct(blocked)} | MEDIUM |")
-        lines.append(f"| Unassigned | {unassigned_count} | {pct(unassigned_count)} | MEDIUM |")
+        lines.append("| Metric | Count | % | Delta | Severity |")
+        lines.append("|---|---|---|---|---|")
+        lines.append(f"| Total unresolved | {len(all_unresolved)} | 100% | {delta('total', len(all_unresolved))} | — |")
+        lines.append(f"| Unestimated | {unestimated} | {pct(unestimated)} | {delta('unestimated', unestimated)} | {'CRITICAL' if unestimated > total // 4 else 'HIGH'} |")
+        lines.append(f"| Stuck (>7d in progress) | {stuck} | {pct(stuck)} | {delta('stuck', stuck)} | CRITICAL |")
+        lines.append(f"| Stale (>30d no update) | {stale} | {pct(stale)} | {delta('stale', stale)} | HIGH |")
+        lines.append(f"| Ancient (>200d open) | {ancient} | {pct(ancient)} | {delta('ancient', ancient)} | CRITICAL |")
+        lines.append(f"| Blocked | {blocked} | {pct(blocked)} | {delta('blocked', blocked)} | MEDIUM |")
+        lines.append(f"| Unassigned | {unassigned_count} | {pct(unassigned_count)} | {delta('unassigned', unassigned_count)} | MEDIUM |")
         lines.append("")
 
         lines.append("## By state")
@@ -783,5 +836,8 @@ def register(mcp, resolver: InstanceResolver):
                 lines.append(f"- **{issue_id}** [{state}] {summary} → {assignee}")
         else:
             lines.append(f"_No issues resolved since {since}._")
+
+        # Save current as new snapshot
+        _save_snapshot(project, current)
 
         return compact_lines(lines)
