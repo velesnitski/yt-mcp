@@ -26,7 +26,7 @@ claude mcp add youtrack \
 
 **Option B — manually edit settings:**
 
-Edit `~/.claude/settings.json` (global) or `.claude/settings.json` in your project root (per-project):
+Edit `~/.claude.json` (global) or `.claude/settings.json` in your project root (per-project):
 
 ```json
 {
