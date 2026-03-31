@@ -84,8 +84,15 @@ class YouTrackClient:
         )
 
     async def resolve_project_id(self, short_name: str) -> str | None:
-        projects = await self.get(
-            "/api/admin/projects",
-            params={"query": f"shortName: {short_name}", "fields": "id,shortName"},
-        )
-        return projects[0]["id"] if projects else None
+        # Try admin endpoint first, fall back to non-admin
+        for endpoint in ("/api/admin/projects", "/api/projects"):
+            try:
+                projects = await self.get(
+                    endpoint,
+                    params={"query": f"shortName: {short_name}", "fields": "id,shortName"},
+                )
+                if projects:
+                    return projects[0]["id"]
+            except (ValueError, Exception):
+                continue
+        return None
