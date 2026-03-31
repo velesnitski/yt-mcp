@@ -18,10 +18,16 @@ def register(mcp, resolver: InstanceResolver):
             instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
-        projects = await client.get(
-            "/api/admin/projects",
-            params={"fields": "shortName,name,archived,leader(name)"},
-        )
+        try:
+            projects = await client.get(
+                "/api/admin/projects",
+                params={"fields": "shortName,name,archived,leader(name)"},
+            )
+        except (ValueError, Exception):
+            projects = await client.get(
+                "/api/projects",
+                params={"fields": "shortName,name,archived,leader(name)"},
+            )
         lines = []
         for p in projects:
             status = " (archived)" if p.get("archived") else ""
