@@ -1,7 +1,31 @@
+import re
 from datetime import datetime, timezone
 
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import format_issue_list, format_issue_detail, _resolve_state, _resolve_assignee, _get_custom_field, parse_issue_id, compact_lines
+
+_CMD_FIELD_RE = re.compile(r"(\S+)\s+\{([^}]+)\}|(\S+)\s+(\S+)")
+_CMD_KEYWORDS = frozenset({"tag", "untag", "remove", "add", "for", "star", "unstar"})
+_FIELD_TYPE_MAP = {
+    "state": "StateIssueCustomField",
+    "priority": "SingleEnumIssueCustomField",
+    "type": "SingleEnumIssueCustomField",
+    "subsystem": "OwnedIssueCustomField",
+    "assignee": "SingleUserIssueCustomField",
+}
+
+
+def _parse_command_fields(command: str) -> list[dict]:
+    """Parse YouTrack command string into customFields for issue creation body."""
+    fields = []
+    for m in _CMD_FIELD_RE.finditer(command):
+        name = m.group(1) or m.group(3)
+        value = m.group(2) or m.group(4)
+        if name.lower() in _CMD_KEYWORDS:
+            continue
+        ft = _FIELD_TYPE_MAP.get(name.lower(), "SingleEnumIssueCustomField")
+        fields.append({"name": name, "$type": ft, "value": {"name": value}})
+    return fields
 
 
 def register(mcp, resolver: InstanceResolver):
@@ -85,14 +109,26 @@ def register(mcp, resolver: InstanceResolver):
         if not project_id:
             return f"Project '{project}' not found."
 
-        data = await client.post(
-            "/api/issues",
-            json={
-                "project": {"id": project_id},
-                "summary": summary,
-                "description": description,
-            },
-        )
+        json_body: dict = {
+            "project": {"id": project_id},
+            "summary": summary,
+            "description": description,
+        }
+
+        fields_in_body = False
+        try:
+            data = await client.post("/api/issues", json=json_body)
+        except ValueError as e:
+            # If creation failed due to required fields, retry with fields from command
+            if "required" not in str(e).lower():
+                raise
+            custom_fields = _parse_command_fields(command) if command else []
+            if not custom_fields:
+                raise
+            json_body["customFields"] = custom_fields
+            data = await client.post("/api/issues", json=json_body)
+            fields_in_body = True
+
         issue_id = data.get("idReadable", "?")
 
         # Apply custom fields via command API
@@ -102,7 +138,14 @@ def register(mcp, resolver: InstanceResolver):
         if command:
             commands.append(command)
         if commands:
-            await client.execute_command(issue_id, " ".join(commands))
+            if fields_in_body:
+                # Fields already set during creation; command may partially fail
+                try:
+                    await client.execute_command(issue_id, " ".join(commands))
+                except (ValueError, Exception):
+                    pass
+            else:
+                await client.execute_command(issue_id, " ".join(commands))
 
         product_str = f" | **Product:** {product}" if product else ""
         cmd_str = f" | **Fields:** {command}" if command else ""
