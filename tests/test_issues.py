@@ -97,6 +97,17 @@ class TestParseCommandFieldsWithDynamicTypes:
         result = _parse_command_fields("Subsystem Frontend", None)
         assert result[0]["$type"] == "OwnedIssueCustomField"
 
+    def test_multi_enum_value_is_list(self):
+        field_types = {"product": "MultiEnumIssueCustomField"}
+        result = _parse_command_fields("Product VPN", field_types)
+        assert result[0]["$type"] == "MultiEnumIssueCustomField"
+        assert result[0]["value"] == [{"name": "VPN"}]
+
+    def test_single_enum_value_is_dict(self):
+        field_types = {"type": "SingleEnumIssueCustomField"}
+        result = _parse_command_fields("Type Bug", field_types)
+        assert result[0]["value"] == {"name": "Bug"}
+
 
 class TestFetchFieldTypes:
     @pytest.mark.asyncio
