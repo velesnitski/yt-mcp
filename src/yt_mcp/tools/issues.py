@@ -6,16 +6,50 @@ from yt_mcp.formatters import format_issue_list, format_issue_detail, _resolve_s
 
 _CMD_FIELD_RE = re.compile(r"(\S+)\s+\{([^}]+)\}|(\S+)\s+(\S+)")
 _CMD_KEYWORDS = frozenset({"tag", "untag", "remove", "add", "for", "star", "unstar"})
-_FIELD_TYPE_MAP = {
+_FIELD_TYPE_FALLBACK = {
     "state": "StateIssueCustomField",
     "priority": "SingleEnumIssueCustomField",
     "type": "SingleEnumIssueCustomField",
     "subsystem": "OwnedIssueCustomField",
     "assignee": "SingleUserIssueCustomField",
 }
+_PROJECT_TO_ISSUE_TYPE = {
+    "EnumProjectCustomField": "SingleEnumIssueCustomField",
+    "OwnedProjectCustomField": "OwnedIssueCustomField",
+    "StateProjectCustomField": "StateIssueCustomField",
+    "UserProjectCustomField": "SingleUserIssueCustomField",
+    "VersionProjectCustomField": "MultiVersionIssueCustomField",
+    "BuildProjectCustomField": "SingleBuildIssueCustomField",
+    "GroupProjectCustomField": "SingleGroupIssueCustomField",
+    "PeriodProjectCustomField": "PeriodIssueCustomField",
+    "SimpleProjectCustomField": "SimpleIssueCustomField",
+    "TextProjectCustomField": "TextIssueCustomField",
+    "DateProjectCustomField": "DateIssueCustomField",
+}
 
 
-def _parse_command_fields(command: str) -> list[dict]:
+async def _fetch_field_types(client, project_id: str) -> dict[str, str]:
+    """Fetch actual custom field $type mapping from the project."""
+    try:
+        fields = await client.get(
+            f"/api/admin/projects/{project_id}/customFields",
+            params={"fields": "field(name),$type"},
+        )
+        result = {}
+        for f in fields:
+            name = f.get("field", {}).get("name", "")
+            ptype = f.get("$type", "")
+            itype = _PROJECT_TO_ISSUE_TYPE.get(ptype, "SingleEnumIssueCustomField")
+            if name:
+                result[name.lower()] = itype
+        return result
+    except Exception:
+        return {}
+
+
+def _parse_command_fields(
+    command: str, field_types: dict[str, str] | None = None,
+) -> list[dict]:
     """Parse YouTrack command string into customFields for issue creation body."""
     fields = []
     for m in _CMD_FIELD_RE.finditer(command):
@@ -23,7 +57,11 @@ def _parse_command_fields(command: str) -> list[dict]:
         value = m.group(2) or m.group(4)
         if name.lower() in _CMD_KEYWORDS:
             continue
-        ft = _FIELD_TYPE_MAP.get(name.lower(), "SingleEnumIssueCustomField")
+        # Prefer dynamically fetched type, fall back to static mapping
+        if field_types and name.lower() in field_types:
+            ft = field_types[name.lower()]
+        else:
+            ft = _FIELD_TYPE_FALLBACK.get(name.lower(), "SingleEnumIssueCustomField")
         fields.append({"name": name, "$type": ft, "value": {"name": value}})
     return fields
 
@@ -122,7 +160,11 @@ def register(mcp, resolver: InstanceResolver):
             # If creation failed due to required fields, retry with fields from command
             if "required" not in str(e).lower():
                 raise
-            custom_fields = _parse_command_fields(command) if command else []
+            # Fetch actual field types from project to set correct $type
+            field_types = await _fetch_field_types(client, project_id)
+            custom_fields = (
+                _parse_command_fields(command, field_types) if command else []
+            )
             if not custom_fields:
                 raise
             json_body["customFields"] = custom_fields
