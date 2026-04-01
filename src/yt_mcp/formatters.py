@@ -26,8 +26,8 @@ def parse_issue_id(issue_id: str) -> str:
     """Extract issue ID from a string that may be an ID or a YouTrack URL.
 
     Accepts:
-        - 'iOSP-1238'
-        - 'https://company.youtrack.cloud/issue/iOSP-1238/some-slug'
+        - 'PROJ-123'
+        - 'https://company.youtrack.cloud/issue/PROJ-123/some-slug'
     """
     match = _ISSUE_URL_RE.search(issue_id)
     if match:

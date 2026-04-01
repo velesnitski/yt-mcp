@@ -39,8 +39,8 @@ class TestHasNonAscii:
 class TestSaveField:
     def test_save_issue(self):
         entry = {"comments": []}
-        _save_field(entry, "issue", ["AP-1554"])
-        assert entry["issue"] == "AP-1554"
+        _save_field(entry, "issue", ["PROJ-1554"])
+        assert entry["issue"] == "PROJ-1554"
 
     def test_save_summary(self):
         entry = {"comments": []}
@@ -77,7 +77,7 @@ class TestTranslationParsing:
     def test_parse_single_block(self):
         import re
         block = (
-            "ISSUE: AP-100\n"
+            "ISSUE: PROJ-100\n"
             "SUMMARY: Translated title\n"
             "DESCRIPTION:\n"
             "Translated description line 1\n"
@@ -117,7 +117,7 @@ class TestTranslationParsing:
         if current_field and current_lines:
             _save_field(entry, current_field, current_lines)
 
-        assert entry["issue"] == "AP-100"
+        assert entry["issue"] == "PROJ-100"
         assert entry["summary"] == "Translated title"
         assert "line 1" in entry["description"]
         assert "Line 2" in entry["description"]

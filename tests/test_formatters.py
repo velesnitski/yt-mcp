@@ -15,20 +15,20 @@ from yt_mcp.formatters import (
 
 class TestParseIssueId:
     def test_plain_id(self):
-        assert parse_issue_id("iOSP-1238") == "iOSP-1238"
+        assert parse_issue_id("PROJ-123") == "PROJ-123"
 
     def test_url_with_slug(self):
         assert parse_issue_id(
-            "https://company.youtrack.cloud/issue/iOSP-1238/some-slug"
-        ) == "iOSP-1238"
+            "https://company.youtrack.cloud/issue/PROJ-123/some-slug"
+        ) == "PROJ-123"
 
     def test_url_without_slug(self):
         assert parse_issue_id(
-            "https://company.youtrack.cloud/issue/BAC-42"
-        ) == "BAC-42"
+            "https://company.youtrack.cloud/issue/DEMO-42"
+        ) == "DEMO-42"
 
     def test_whitespace_stripped(self):
-        assert parse_issue_id("  DEVOPS-123  ") == "DEVOPS-123"
+        assert parse_issue_id("  OPS-123  ") == "OPS-123"
 
     def test_url_extracts_before_query(self):
         assert parse_issue_id(

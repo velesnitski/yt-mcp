@@ -288,7 +288,7 @@ class TestComputeActiveScore:
         assert breakdown["blocking_others"] == 80  # capped
 
     def test_do_1485_scenario(self):
-        """DO-1485: High priority, 3 products, 2 subtasks, 1 inward depend."""
+        """High priority, 3 products, 2 subtasks, 1 inward depend."""
         issue = _make_issue(
             priority="High", issue_type="Task", state="In Progress",
             blocker_count=2, inward_depend_count=1,
