@@ -1,182 +1,66 @@
-import pytest
-from unittest.mock import AsyncMock, MagicMock
+import re
 
-from yt_mcp.tools.issues import _parse_command_fields, _fetch_field_types
+from yt_mcp.tools.issues import _CMD_FIELD_RE, _CMD_KEYWORDS
 
 
-class TestParseCommandFields:
+class TestCommandFieldRegex:
+    """Test the regex that splits compound commands into field-value pairs."""
+
     def test_single_braced_value(self):
-        result = _parse_command_fields("Subsystem {Client Panel}")
-        assert len(result) == 1
-        assert result[0]["name"] == "Subsystem"
-        assert result[0]["value"] == {"name": "Client Panel", "$type": "OwnedBundleElement"}
-        assert result[0]["$type"] == "OwnedIssueCustomField"
+        matches = list(_CMD_FIELD_RE.finditer("Subsystem {Client Panel}"))
+        assert len(matches) == 1
+        assert matches[0].group(1) == "Subsystem"
+        assert matches[0].group(2) == "Client Panel"
 
     def test_single_word_value(self):
-        result = _parse_command_fields("Type Bug")
-        assert len(result) == 1
-        assert result[0]["name"] == "Type"
-        assert result[0]["value"] == {"name": "Bug", "$type": "EnumBundleElement"}
-        assert result[0]["$type"] == "SingleEnumIssueCustomField"
+        matches = list(_CMD_FIELD_RE.finditer("Type Bug"))
+        assert len(matches) == 1
+        assert matches[0].group(3) == "Type"
+        assert matches[0].group(4) == "Bug"
 
     def test_multiple_fields(self):
-        result = _parse_command_fields("Type Task Subsystem {Client Panel}")
-        assert len(result) == 2
-        names = {f["name"] for f in result}
-        assert names == {"Type", "Subsystem"}
-
-    def test_priority_type(self):
-        result = _parse_command_fields("Priority Critical")
-        assert result[0]["$type"] == "SingleEnumIssueCustomField"
-
-    def test_state_type(self):
-        result = _parse_command_fields("State {In Progress}")
-        assert result[0]["$type"] == "StateIssueCustomField"
-
-    def test_assignee_type(self):
-        result = _parse_command_fields("Assignee john.doe")
-        assert result[0]["$type"] == "SingleUserIssueCustomField"
-
-    def test_unknown_field_defaults_to_single_enum(self):
-        result = _parse_command_fields("CustomField Value")
-        assert result[0]["$type"] == "SingleEnumIssueCustomField"
-
-    def test_tag_keyword_skipped(self):
-        result = _parse_command_fields("tag urgent")
-        assert len(result) == 0
-
-    def test_untag_keyword_skipped(self):
-        result = _parse_command_fields("untag obsolete")
-        assert len(result) == 0
-
-    def test_mixed_fields_and_keywords(self):
-        result = _parse_command_fields("Type Bug tag urgent Subsystem {Client Panel}")
-        assert len(result) == 2
-        names = {f["name"] for f in result}
-        assert names == {"Type", "Subsystem"}
-
-    def test_empty_command(self):
-        assert _parse_command_fields("") == []
+        matches = list(_CMD_FIELD_RE.finditer("Type Bug Subsystem {Client Panel}"))
+        assert len(matches) == 2
+        # First: Type Bug (simple)
+        assert (matches[0].group(3), matches[0].group(4)) == ("Type", "Bug")
+        # Second: Subsystem {Client Panel} (braced)
+        assert (matches[1].group(1), matches[1].group(2)) == ("Subsystem", "Client Panel")
 
     def test_braced_then_simple(self):
-        result = _parse_command_fields("Subsystem {Client Panel} Priority High")
-        assert len(result) == 2
-        assert result[0]["name"] == "Subsystem"
-        assert result[0]["value"] == {"name": "Client Panel", "$type": "OwnedBundleElement"}
-        assert result[1]["name"] == "Priority"
-        assert result[1]["value"] == {"name": "High", "$type": "EnumBundleElement"}
+        matches = list(_CMD_FIELD_RE.finditer("Subsystem {Client Panel} Priority High"))
+        assert len(matches) == 2
+        assert matches[0].group(2) == "Client Panel"
+        assert matches[1].group(4) == "High"
+
+    def test_empty_string(self):
+        assert list(_CMD_FIELD_RE.finditer("")) == []
+
+    def test_parentheses_in_braces(self):
+        matches = list(_CMD_FIELD_RE.finditer("Subsystem {CRM (Admin Panel)}"))
+        assert len(matches) == 1
+        assert matches[0].group(2) == "CRM (Admin Panel)"
 
 
-class TestParseCommandFieldsWithDynamicTypes:
-    """Test that dynamically fetched field types override static fallback."""
+class TestCommandKeywords:
+    """Test that tag/untag keywords are filtered when splitting commands."""
 
-    def test_dynamic_type_overrides_fallback(self):
-        # Subsystem static fallback is OwnedIssueCustomField,
-        # but project says it's SingleEnumIssueCustomField
-        field_types = {"subsystem": "SingleEnumIssueCustomField"}
-        result = _parse_command_fields("Subsystem Frontend", field_types)
-        assert result[0]["$type"] == "SingleEnumIssueCustomField"
+    def test_tag_is_keyword(self):
+        assert "tag" in _CMD_KEYWORDS
 
-    def test_dynamic_type_for_unknown_field(self):
-        field_types = {"board": "SingleEnumIssueCustomField"}
-        result = _parse_command_fields("Board {Frontend Board}", field_types)
-        assert result[0]["$type"] == "SingleEnumIssueCustomField"
-        assert result[0]["value"] == {"name": "Frontend Board", "$type": "EnumBundleElement"}
+    def test_untag_is_keyword(self):
+        assert "untag" in _CMD_KEYWORDS
 
-    def test_fallback_when_field_not_in_dynamic(self):
-        field_types = {"priority": "SingleEnumIssueCustomField"}
-        result = _parse_command_fields("Subsystem Frontend", field_types)
-        # Subsystem not in dynamic → uses static fallback
-        assert result[0]["$type"] == "OwnedIssueCustomField"
+    def test_field_names_not_keywords(self):
+        for name in ("Type", "Priority", "Subsystem", "State", "Assignee"):
+            assert name.lower() not in _CMD_KEYWORDS
 
-    def test_empty_dynamic_uses_fallback(self):
-        result = _parse_command_fields("Subsystem Frontend", {})
-        assert result[0]["$type"] == "OwnedIssueCustomField"
-
-    def test_none_dynamic_uses_fallback(self):
-        result = _parse_command_fields("Subsystem Frontend", None)
-        assert result[0]["$type"] == "OwnedIssueCustomField"
-
-    def test_multi_enum_value_is_list(self):
-        field_types = {"product": "MultiEnumIssueCustomField"}
-        result = _parse_command_fields("Product Alpha", field_types)
-        assert result[0]["$type"] == "MultiEnumIssueCustomField"
-        assert result[0]["value"] == [{"name": "Alpha", "$type": "EnumBundleElement"}]
-
-    def test_single_enum_value_is_dict(self):
-        field_types = {"type": "SingleEnumIssueCustomField"}
-        result = _parse_command_fields("Type Bug", field_types)
-        assert result[0]["value"] == {"name": "Bug", "$type": "EnumBundleElement"}
-
-
-class TestFetchFieldTypes:
-    @pytest.mark.asyncio
-    async def test_parses_project_fields(self):
-        client = MagicMock()
-        client.get = AsyncMock(return_value=[
-            {"field": {"name": "Subsystem"}, "$type": "EnumProjectCustomField"},
-            {"field": {"name": "Type"}, "$type": "EnumProjectCustomField"},
-            {"field": {"name": "State"}, "$type": "StateProjectCustomField"},
-            {"field": {"name": "Assignee"}, "$type": "UserProjectCustomField"},
-        ])
-        result = await _fetch_field_types(client, "0-3")
-        assert result["subsystem"] == "SingleEnumIssueCustomField"
-        assert result["type"] == "SingleEnumIssueCustomField"
-        assert result["state"] == "StateIssueCustomField"
-        assert result["assignee"] == "SingleUserIssueCustomField"
-
-    @pytest.mark.asyncio
-    async def test_owned_field(self):
-        client = MagicMock()
-        client.get = AsyncMock(return_value=[
-            {"field": {"name": "Subsystem"}, "$type": "OwnedProjectCustomField"},
-        ])
-        result = await _fetch_field_types(client, "0-3")
-        assert result["subsystem"] == "OwnedIssueCustomField"
-
-    @pytest.mark.asyncio
-    async def test_admin_error_falls_back_to_issue(self):
-        """When admin API fails, fetch $type from existing issue."""
-        client = MagicMock()
-        client.get = AsyncMock(side_effect=[
-            ValueError("403 Forbidden"),  # admin API fails
-            [{"customFields": [  # issue fallback succeeds
-                {"name": "Product", "$type": "MultiEnumIssueCustomField"},
-                {"name": "Type", "$type": "SingleEnumIssueCustomField"},
-            ]}],
-        ])
-        result = await _fetch_field_types(client, "0-3", "FRO")
-        assert result["product"] == "MultiEnumIssueCustomField"
-        assert result["type"] == "SingleEnumIssueCustomField"
-
-    @pytest.mark.asyncio
-    async def test_both_strategies_fail_returns_empty(self):
-        client = MagicMock()
-        client.get = AsyncMock(side_effect=ValueError("403 Forbidden"))
-        result = await _fetch_field_types(client, "0-3", "FRO")
-        assert result == {}
-
-    @pytest.mark.asyncio
-    async def test_no_short_name_skips_fallback(self):
-        client = MagicMock()
-        client.get = AsyncMock(side_effect=ValueError("403 Forbidden"))
-        result = await _fetch_field_types(client, "0-3")
-        assert result == {}
-
-    @pytest.mark.asyncio
-    async def test_case_insensitive_keys(self):
-        client = MagicMock()
-        client.get = AsyncMock(return_value=[
-            {"field": {"name": "Priority"}, "$type": "EnumProjectCustomField"},
-        ])
-        result = await _fetch_field_types(client, "0-3")
-        assert "priority" in result
-
-    @pytest.mark.asyncio
-    async def test_unknown_project_type_defaults(self):
-        client = MagicMock()
-        client.get = AsyncMock(return_value=[
-            {"field": {"name": "Custom"}, "$type": "SomeFutureProjectCustomField"},
-        ])
-        result = await _fetch_field_types(client, "0-3")
-        assert result["custom"] == "SingleEnumIssueCustomField"
+    def test_keyword_filtering(self):
+        """Simulate the filtering logic used in create_issue."""
+        command = "Type Bug tag urgent Subsystem {Client Panel}"
+        field_commands = []
+        for m in _CMD_FIELD_RE.finditer(command):
+            name = m.group(1) or m.group(3)
+            value = m.group(2) or m.group(4)
+            if name.lower() not in _CMD_KEYWORDS:
+                field_commands.append(f"{name} {value}")
+        assert field_commands == ["Type Bug", "Subsystem Client Panel"]
