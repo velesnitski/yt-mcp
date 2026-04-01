@@ -13,6 +13,16 @@ _FIELD_TYPE_FALLBACK = {
     "subsystem": "OwnedIssueCustomField",
     "assignee": "SingleUserIssueCustomField",
 }
+_VALUE_TYPE = {
+    "SingleEnumIssueCustomField": "EnumBundleElement",
+    "MultiEnumIssueCustomField": "EnumBundleElement",
+    "OwnedIssueCustomField": "OwnedBundleElement",
+    "StateIssueCustomField": "StateBundleElement",
+    "SingleUserIssueCustomField": "User",
+    "MultiVersionIssueCustomField": "VersionBundleElement",
+    "SingleBuildIssueCustomField": "BuildBundleElement",
+    "SingleGroupIssueCustomField": "UserGroup",
+}
 _PROJECT_TO_ISSUE_TYPE = {
     "EnumProjectCustomField": "SingleEnumIssueCustomField",
     "OwnedProjectCustomField": "OwnedIssueCustomField",
@@ -89,9 +99,11 @@ def _parse_command_fields(
             ft = field_types[name.lower()]
         else:
             ft = _FIELD_TYPE_FALLBACK.get(name.lower(), "SingleEnumIssueCustomField")
-        val: dict | list = (
-            [{"name": value}] if "Multi" in ft else {"name": value}
-        )
+        vt = _VALUE_TYPE.get(ft)
+        val_obj: dict = {"name": value}
+        if vt:
+            val_obj["$type"] = vt
+        val: dict | list = [val_obj] if "Multi" in ft else val_obj
         fields.append({"name": name, "$type": ft, "value": val})
     return fields
 
@@ -197,11 +209,13 @@ def register(mcp, resolver: InstanceResolver):
             )
             if product:
                 pt = field_types.get("product", "SingleEnumIssueCustomField")
-                val: dict | list = (
-                    [{"name": product}] if "Multi" in pt else {"name": product}
-                )
+                pvt = _VALUE_TYPE.get(pt)
+                p_val: dict = {"name": product}
+                if pvt:
+                    p_val["$type"] = pvt
+                p_wrapped: dict | list = [p_val] if "Multi" in pt else p_val
                 custom_fields.append(
-                    {"name": "Product", "$type": pt, "value": val}
+                    {"name": "Product", "$type": pt, "value": p_wrapped}
                 )
             if not custom_fields:
                 raise
