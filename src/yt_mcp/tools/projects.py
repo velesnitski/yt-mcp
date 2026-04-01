@@ -135,6 +135,64 @@ def register(mcp, resolver: InstanceResolver):
         return "\n".join(lines)
 
     @mcp.tool()
+    async def get_project_fields(project: str, instance: str = "") -> str:
+        """List custom fields for a project with required status and available values.
+
+        Use this before create_issue to discover required fields and valid values.
+
+        Args:
+            project: Project short name
+            instance: YouTrack instance (optional)
+        """
+        client = resolver.resolve(instance)
+        project_id = await client.resolve_project_id(project)
+        if not project_id:
+            return f"Project '{project}' not found."
+
+        # Try admin API first, fall back to regular
+        fields_data = []
+        for endpoint in (
+            f"/api/admin/projects/{project_id}/customFields",
+            f"/api/projects/{project_id}/customFields",
+        ):
+            try:
+                fields_data = await client.get(
+                    endpoint,
+                    params={
+                        "fields": "field(name),canBeEmpty,"
+                        "bundle(values(name,archived))",
+                    },
+                )
+                if fields_data:
+                    break
+            except Exception:
+                continue
+
+        if not fields_data:
+            return f"Cannot fetch custom fields for project '{project}'."
+
+        lines = [f"## Custom fields for {project}"]
+        for f in fields_data:
+            field_info = f.get("field", {})
+            name = field_info.get("name", "?")
+            required = not f.get("canBeEmpty", True)
+            marker = " **(required)**" if required else ""
+
+            bundle = f.get("bundle")
+            if bundle and bundle.get("values"):
+                values = [
+                    v.get("name", "?")
+                    for v in bundle["values"]
+                    if not v.get("archived")
+                ]
+                vals_str = ", ".join(values) if values else "(no active values)"
+                lines.append(f"- **{name}**{marker}: {vals_str}")
+            else:
+                lines.append(f"- **{name}**{marker}")
+
+        return "\n".join(lines)
+
+    @mcp.tool()
     async def create_agile_board(
         name: str,
         projects: str,
