@@ -220,10 +220,10 @@ def register(mcp, resolver: InstanceResolver):
                 "/api/commands",
                 json={"query": full_command, "issues": [{"id": draft_id}]},
             )
-            # Publish draft as a real issue
+            # Publish draft as a real issue (empty body — use draft's data)
             data = await client.post(
                 f"/api/issues?draftId={draft_id}",
-                json=json_body,
+                json={},
             )
             full_command = ""  # already applied
 
