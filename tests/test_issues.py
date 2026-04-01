@@ -9,14 +9,14 @@ class TestParseCommandFields:
         result = _parse_command_fields("Subsystem {Client Panel}")
         assert len(result) == 1
         assert result[0]["name"] == "Subsystem"
-        assert result[0]["value"] == {"name": "Client Panel"}
+        assert result[0]["value"] == {"name": "Client Panel", "$type": "OwnedBundleElement"}
         assert result[0]["$type"] == "OwnedIssueCustomField"
 
     def test_single_word_value(self):
         result = _parse_command_fields("Type Bug")
         assert len(result) == 1
         assert result[0]["name"] == "Type"
-        assert result[0]["value"] == {"name": "Bug"}
+        assert result[0]["value"] == {"name": "Bug", "$type": "EnumBundleElement"}
         assert result[0]["$type"] == "SingleEnumIssueCustomField"
 
     def test_multiple_fields(self):
@@ -62,9 +62,9 @@ class TestParseCommandFields:
         result = _parse_command_fields("Subsystem {Client Panel} Priority High")
         assert len(result) == 2
         assert result[0]["name"] == "Subsystem"
-        assert result[0]["value"] == {"name": "Client Panel"}
+        assert result[0]["value"] == {"name": "Client Panel", "$type": "OwnedBundleElement"}
         assert result[1]["name"] == "Priority"
-        assert result[1]["value"] == {"name": "High"}
+        assert result[1]["value"] == {"name": "High", "$type": "EnumBundleElement"}
 
 
 class TestParseCommandFieldsWithDynamicTypes:
@@ -81,7 +81,7 @@ class TestParseCommandFieldsWithDynamicTypes:
         field_types = {"board": "SingleEnumIssueCustomField"}
         result = _parse_command_fields("Board {Frontend Board}", field_types)
         assert result[0]["$type"] == "SingleEnumIssueCustomField"
-        assert result[0]["value"] == {"name": "Frontend Board"}
+        assert result[0]["value"] == {"name": "Frontend Board", "$type": "EnumBundleElement"}
 
     def test_fallback_when_field_not_in_dynamic(self):
         field_types = {"priority": "SingleEnumIssueCustomField"}
@@ -101,12 +101,12 @@ class TestParseCommandFieldsWithDynamicTypes:
         field_types = {"product": "MultiEnumIssueCustomField"}
         result = _parse_command_fields("Product Alpha", field_types)
         assert result[0]["$type"] == "MultiEnumIssueCustomField"
-        assert result[0]["value"] == [{"name": "Alpha"}]
+        assert result[0]["value"] == [{"name": "Alpha", "$type": "EnumBundleElement"}]
 
     def test_single_enum_value_is_dict(self):
         field_types = {"type": "SingleEnumIssueCustomField"}
         result = _parse_command_fields("Type Bug", field_types)
-        assert result[0]["value"] == {"name": "Bug"}
+        assert result[0]["value"] == {"name": "Bug", "$type": "EnumBundleElement"}
 
 
 class TestFetchFieldTypes:
