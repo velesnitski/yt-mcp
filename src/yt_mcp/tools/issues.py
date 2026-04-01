@@ -28,8 +28,9 @@ _PROJECT_TO_ISSUE_TYPE = {
 }
 
 
-async def _fetch_field_types(client, project_id: str) -> dict[str, str]:
+async def _fetch_field_types(client, project_id: str, project_short: str = "") -> dict[str, str]:
     """Fetch actual custom field $type mapping from the project."""
+    # Strategy 1: admin API (returns project field types, needs mapping)
     try:
         fields = await client.get(
             f"/api/admin/projects/{project_id}/customFields",
@@ -42,9 +43,35 @@ async def _fetch_field_types(client, project_id: str) -> dict[str, str]:
             itype = _PROJECT_TO_ISSUE_TYPE.get(ptype, "SingleEnumIssueCustomField")
             if name:
                 result[name.lower()] = itype
-        return result
+        if result:
+            return result
     except Exception:
-        return {}
+        pass
+
+    # Strategy 2: get $type from an existing issue (no admin access needed)
+    if project_short:
+        try:
+            issues = await client.get(
+                "/api/issues",
+                params={
+                    "query": f"project: {project_short}",
+                    "fields": "customFields(name,$type)",
+                    "$top": "1",
+                },
+            )
+            if issues:
+                result = {}
+                for cf in issues[0].get("customFields", []):
+                    name = cf.get("name", "")
+                    ctype = cf.get("$type", "")
+                    if name and ctype:
+                        result[name.lower()] = ctype
+                if result:
+                    return result
+        except Exception:
+            pass
+
+    return {}
 
 
 def _parse_command_fields(
@@ -164,7 +191,7 @@ def register(mcp, resolver: InstanceResolver):
             if "required" not in str(e).lower():
                 raise
             # Fetch actual field types from project to set correct $type
-            field_types = await _fetch_field_types(client, project_id)
+            field_types = await _fetch_field_types(client, project_id, project)
             custom_fields = (
                 _parse_command_fields(command, field_types) if command else []
             )
