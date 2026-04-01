@@ -62,7 +62,10 @@ def _parse_command_fields(
             ft = field_types[name.lower()]
         else:
             ft = _FIELD_TYPE_FALLBACK.get(name.lower(), "SingleEnumIssueCustomField")
-        fields.append({"name": name, "$type": ft, "value": {"name": value}})
+        val: dict | list = (
+            [{"name": value}] if "Multi" in ft else {"name": value}
+        )
+        fields.append({"name": name, "$type": ft, "value": val})
     return fields
 
 
@@ -157,7 +160,7 @@ def register(mcp, resolver: InstanceResolver):
         try:
             data = await client.post("/api/issues", json=json_body)
         except ValueError as e:
-            # If creation failed due to required fields, retry with fields from command
+            # If creation failed due to required fields, retry with fields from command + product
             if "required" not in str(e).lower():
                 raise
             # Fetch actual field types from project to set correct $type
@@ -165,6 +168,14 @@ def register(mcp, resolver: InstanceResolver):
             custom_fields = (
                 _parse_command_fields(command, field_types) if command else []
             )
+            if product:
+                pt = field_types.get("product", "SingleEnumIssueCustomField")
+                val: dict | list = (
+                    [{"name": product}] if "Multi" in pt else {"name": product}
+                )
+                custom_fields.append(
+                    {"name": "Product", "$type": pt, "value": val}
+                )
             if not custom_fields:
                 raise
             json_body["customFields"] = custom_fields
