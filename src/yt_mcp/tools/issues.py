@@ -195,51 +195,30 @@ def register(mcp, resolver: InstanceResolver):
             "description": description,
         }
 
-        fields_in_body = False
+        # Build full command string from explicit params + raw command
+        all_commands = []
+        if product:
+            all_commands.append(f"Product {product}")
+        if command:
+            all_commands.append(command)
+        full_command = " ".join(all_commands)
+
         try:
             data = await client.post("/api/issues", json=json_body)
         except ValueError as e:
-            # If creation failed due to required fields, retry with fields from command + product
-            if "required" not in str(e).lower():
+            if "required" not in str(e).lower() or not full_command:
                 raise
-            # Fetch actual field types from project to set correct $type
-            field_types = await _fetch_field_types(client, project_id, project)
-            custom_fields = (
-                _parse_command_fields(command, field_types) if command else []
+            # Required field missing — retry with draftId to bypass validation
+            import uuid
+            data = await client.post(
+                f"/api/issues?draftId={uuid.uuid4()}", json=json_body,
             )
-            if product:
-                pt = field_types.get("product", "SingleEnumIssueCustomField")
-                pvt = _VALUE_TYPE.get(pt)
-                p_val: dict = {"name": product}
-                if pvt:
-                    p_val["$type"] = pvt
-                p_wrapped: dict | list = [p_val] if "Multi" in pt else p_val
-                custom_fields.append(
-                    {"name": "Product", "$type": pt, "value": p_wrapped}
-                )
-            if not custom_fields:
-                raise
-            json_body["customFields"] = custom_fields
-            data = await client.post("/api/issues", json=json_body)
-            fields_in_body = True
 
         issue_id = data.get("idReadable", "?")
 
-        # Apply custom fields via command API
-        commands = []
-        if product:
-            commands.append(f"Product {product}")
-        if command:
-            commands.append(command)
-        if commands:
-            if fields_in_body:
-                # Fields already set during creation; command may partially fail
-                try:
-                    await client.execute_command(issue_id, " ".join(commands))
-                except (ValueError, Exception):
-                    pass
-            else:
-                await client.execute_command(issue_id, " ".join(commands))
+        # Apply command to set custom fields (required fields + product)
+        if full_command:
+            await client.execute_command(issue_id, full_command)
 
         product_str = f" | **Product:** {product}" if product else ""
         cmd_str = f" | **Fields:** {command}" if command else ""
