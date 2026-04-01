@@ -198,17 +198,13 @@ def register(mcp, resolver: InstanceResolver):
         # Build individual command strings for each field
         field_commands: list[str] = []
         if product:
-            field_commands.append(
-                f"Product {{{product}}}" if " " in product else f"Product {product}"
-            )
+            field_commands.append(f"Product {product}")
         if command:
             # Split compound command into individual field-value pairs
             for m in _CMD_FIELD_RE.finditer(command):
                 name = m.group(1) or m.group(3)
                 value = m.group(2) or m.group(4)
-                field_commands.append(
-                    f"{name} {{{value}}}" if " " in value else f"{name} {value}"
-                )
+                field_commands.append(f"{name} {value}")
 
         try:
             data = await client.post("/api/issues", json=json_body)
