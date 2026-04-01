@@ -195,43 +195,49 @@ def register(mcp, resolver: InstanceResolver):
             "description": description,
         }
 
-        # Build full command string from explicit params + raw command
-        all_commands = []
+        # Build individual command strings for each field
+        field_commands: list[str] = []
         if product:
-            all_commands.append(f"Product {product}")
+            field_commands.append(
+                f"Product {{{product}}}" if " " in product else f"Product {product}"
+            )
         if command:
-            all_commands.append(command)
-        full_command = " ".join(all_commands)
+            # Split compound command into individual field-value pairs
+            for m in _CMD_FIELD_RE.finditer(command):
+                name = m.group(1) or m.group(3)
+                value = m.group(2) or m.group(4)
+                field_commands.append(
+                    f"{name} {{{value}}}" if " " in value else f"{name} {value}"
+                )
 
         try:
             data = await client.post("/api/issues", json=json_body)
+            issue_id = data.get("idReadable", "?")
+            # Apply commands on the created issue
+            for cmd in field_commands:
+                await client.execute_command(issue_id, cmd)
         except ValueError as e:
-            if "required" not in str(e).lower() or not full_command:
+            if "required" not in str(e).lower() or not field_commands:
                 raise
-            # Required field missing — create as draft, apply command, publish
+            # Required field missing — create as draft, apply commands, publish
             draft = await client.post(
                 "/api/users/me/drafts", json=json_body,
             )
             draft_id = draft.get("id", "")
             if not draft_id:
                 raise
-            # Apply command on draft to set required fields
-            await client.post(
-                "/api/commands",
-                json={"query": full_command, "issues": [{"id": draft_id}]},
-            )
+            # Apply each field command separately to avoid parser ambiguity
+            for cmd in field_commands:
+                await client.post(
+                    "/api/commands",
+                    json={"query": cmd, "issues": [{"id": draft_id}]},
+                )
             # Publish draft as a real issue (empty body — use draft's data)
             data = await client.post(
                 f"/api/issues?draftId={draft_id}",
                 json={},
             )
-            full_command = ""  # already applied
-
-        issue_id = data.get("idReadable", "?")
-
-        # Apply command to set custom fields (required fields + product)
-        if full_command:
-            await client.execute_command(issue_id, full_command)
+            issue_id = data.get("idReadable", "?")
 
         product_str = f" | **Product:** {product}" if product else ""
         cmd_str = f" | **Fields:** {command}" if command else ""
