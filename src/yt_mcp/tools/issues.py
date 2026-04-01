@@ -208,11 +208,24 @@ def register(mcp, resolver: InstanceResolver):
         except ValueError as e:
             if "required" not in str(e).lower() or not full_command:
                 raise
-            # Required field missing — retry with draftId to bypass validation
-            import uuid
-            data = await client.post(
-                f"/api/issues?draftId={uuid.uuid4()}", json=json_body,
+            # Required field missing — create as draft, apply command, publish
+            draft = await client.post(
+                "/api/users/me/drafts", json=json_body,
             )
+            draft_id = draft.get("id", "")
+            if not draft_id:
+                raise
+            # Apply command on draft to set required fields
+            await client.post(
+                "/api/commands",
+                json={"query": full_command, "issues": [{"id": draft_id}]},
+            )
+            # Publish draft as a real issue
+            data = await client.post(
+                f"/api/issues?draftId={draft_id}",
+                json=json_body,
+            )
+            full_command = ""  # already applied
 
         issue_id = data.get("idReadable", "?")
 
