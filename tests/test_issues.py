@@ -135,7 +135,29 @@ class TestFetchFieldTypes:
         assert result["subsystem"] == "OwnedIssueCustomField"
 
     @pytest.mark.asyncio
-    async def test_api_error_returns_empty(self):
+    async def test_admin_error_falls_back_to_issue(self):
+        """When admin API fails, fetch $type from existing issue."""
+        client = MagicMock()
+        client.get = AsyncMock(side_effect=[
+            ValueError("403 Forbidden"),  # admin API fails
+            [{"customFields": [  # issue fallback succeeds
+                {"name": "Product", "$type": "MultiEnumIssueCustomField"},
+                {"name": "Type", "$type": "SingleEnumIssueCustomField"},
+            ]}],
+        ])
+        result = await _fetch_field_types(client, "0-3", "FRO")
+        assert result["product"] == "MultiEnumIssueCustomField"
+        assert result["type"] == "SingleEnumIssueCustomField"
+
+    @pytest.mark.asyncio
+    async def test_both_strategies_fail_returns_empty(self):
+        client = MagicMock()
+        client.get = AsyncMock(side_effect=ValueError("403 Forbidden"))
+        result = await _fetch_field_types(client, "0-3", "FRO")
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_no_short_name_skips_fallback(self):
         client = MagicMock()
         client.get = AsyncMock(side_effect=ValueError("403 Forbidden"))
         result = await _fetch_field_types(client, "0-3")
