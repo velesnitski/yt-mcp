@@ -99,9 +99,9 @@ class TestParseCommandFieldsWithDynamicTypes:
 
     def test_multi_enum_value_is_list(self):
         field_types = {"product": "MultiEnumIssueCustomField"}
-        result = _parse_command_fields("Product VPN", field_types)
+        result = _parse_command_fields("Product Alpha", field_types)
         assert result[0]["$type"] == "MultiEnumIssueCustomField"
-        assert result[0]["value"] == [{"name": "VPN"}]
+        assert result[0]["value"] == [{"name": "Alpha"}]
 
     def test_single_enum_value_is_dict(self):
         field_types = {"type": "SingleEnumIssueCustomField"}

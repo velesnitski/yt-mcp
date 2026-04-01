@@ -119,8 +119,8 @@ class TestResolveAssignee:
 
 class TestGetProduct:
     def test_with_product(self):
-        issue = {"customFields": [{"name": "Product", "value": {"name": "VPN"}}]}
-        assert get_product(issue) == "VPN"
+        issue = {"customFields": [{"name": "Product", "value": {"name": "Alpha"}}]}
+        assert get_product(issue) == "Alpha"
 
     def test_without_product(self):
         assert get_product({}) == ""
@@ -150,9 +150,9 @@ class TestFormatIssueList:
 
     def test_with_product(self):
         issues = [{"idReadable": "A-1", "summary": "X",
-                    "customFields": [{"name": "Product", "value": {"name": "VPN"}}]}]
+                    "customFields": [{"name": "Product", "value": {"name": "Alpha"}}]}]
         result = format_issue_list(issues)
-        assert "(VPN)" in result
+        assert "(Alpha)" in result
 
 
 # --- format_issue_detail ---
