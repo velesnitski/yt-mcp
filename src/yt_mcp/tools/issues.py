@@ -230,7 +230,7 @@ def register(mcp, resolver: InstanceResolver):
                 )
             # Publish draft as a real issue (empty body — use draft's data)
             data = await client.post(
-                f"/api/issues?draftId={draft_id}",
+                f"/api/issues?draftId={draft_id}&fields=idReadable,summary",
                 json={},
             )
             issue_id = data.get("idReadable", "?")
