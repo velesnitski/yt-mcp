@@ -169,6 +169,45 @@ def register(mcp, resolver: InstanceResolver):
                 continue
 
         if not fields_data:
+            # Fallback: discover fields from existing issues
+            try:
+                issues = await client.get(
+                    "/api/issues",
+                    params={
+                        "query": f"project: {project}",
+                        "fields": "customFields(name,value(name))",
+                        "$top": "50",
+                    },
+                )
+                seen: dict[str, set[str]] = {}
+                for issue in issues:
+                    for cf in issue.get("customFields", []):
+                        n = cf.get("name", "")
+                        if not n:
+                            continue
+                        if n not in seen:
+                            seen[n] = set()
+                        v = cf.get("value")
+                        if v is None:
+                            continue
+                        if isinstance(v, dict):
+                            val = v.get("name", "")
+                            if val:
+                                seen[n].add(val)
+                        elif isinstance(v, list):
+                            for item in v:
+                                val = item.get("name", "") if isinstance(item, dict) else ""
+                                if val:
+                                    seen[n].add(val)
+                if seen:
+                    lines = [f"## Custom fields for {project} (from existing issues)"]
+                    for n, vals in sorted(seen.items()):
+                        vals_str = ", ".join(sorted(vals)) if vals else "(no values found)"
+                        lines.append(f"- **{n}**: {vals_str}")
+                    lines.append("\n*Note: required status unavailable, values based on existing issues.*")
+                    return "\n".join(lines)
+            except Exception:
+                pass
             return f"Cannot fetch custom fields for project '{project}'."
 
         lines = [f"## Custom fields for {project}"]
