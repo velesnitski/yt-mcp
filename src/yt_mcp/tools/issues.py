@@ -123,18 +123,11 @@ def register(mcp, resolver: InstanceResolver):
             "description": description,
         }
 
-        # Build full command and split commands (fallback)
-        full_command_parts: list[str] = []
-        if product:
-            full_command_parts.append(f"Product {product}")
-        if command:
-            full_command_parts.append(command)
-        full_command = " ".join(full_command_parts)
-
-        # Split into individual field-value pairs (for fallback)
+        # Product is always a separate command (multi-word values)
+        # User's command is tried as-is first (handles emoji/multi-word fields),
+        # then split into individual pairs as fallback
+        product_cmd = f"Product {product}" if product else ""
         split_commands: list[str] = []
-        if product:
-            split_commands.append(f"Product {product}")
         if command:
             for m in _CMD_FIELD_RE.finditer(command):
                 name = m.group(1) or m.group(3)
@@ -144,18 +137,29 @@ def register(mcp, resolver: InstanceResolver):
         failed_commands: list[str] = []
 
         async def _apply_commands(target_id: str, *, use_internal_id: bool = False):
-            """Try full command first; on failure, fall back to split commands."""
+            """Apply product, then try user command as-is, split on failure."""
             issue_ref = {"id": target_id} if use_internal_id else {"idReadable": target_id}
-            if full_command:
+            # Product always separate
+            if product_cmd:
                 try:
                     await client.post(
                         "/api/commands",
-                        json={"query": full_command, "issues": [issue_ref]},
+                        json={"query": product_cmd, "issues": [issue_ref]},
                     )
-                    return  # full command worked
-                except (ValueError, Exception):
-                    pass  # fall through to split
-            # Apply each field separately; collect failures
+                except (ValueError, Exception) as e:
+                    failed_commands.append(f"`{product_cmd}`: {e}")
+            if not command:
+                return
+            # Try user's original command as-is (handles emoji/multi-word fields)
+            try:
+                await client.post(
+                    "/api/commands",
+                    json={"query": command, "issues": [issue_ref]},
+                )
+                return  # full command worked
+            except (ValueError, Exception):
+                pass  # fall through to split
+            # Split fallback: apply each field separately
             for cmd in split_commands:
                 try:
                     await client.post(
@@ -170,7 +174,7 @@ def register(mcp, resolver: InstanceResolver):
             issue_id = data.get("idReadable", "?")
             await _apply_commands(issue_id)
         except ValueError as e:
-            if "required" not in str(e).lower() or not (full_command or split_commands):
+            if "required" not in str(e).lower() or not (command or product_cmd):
                 raise
             # Required field missing — create as draft, apply commands, publish
             draft = await client.post(
