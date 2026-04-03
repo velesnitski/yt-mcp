@@ -123,30 +123,54 @@ def register(mcp, resolver: InstanceResolver):
             "description": description,
         }
 
-        # Build individual command strings for each field
-        field_commands: list[str] = []
+        # Build full command and split commands (fallback)
+        full_command_parts: list[str] = []
         if product:
-            field_commands.append(f"Product {product}")
+            full_command_parts.append(f"Product {product}")
         if command:
-            # Split compound command into individual field-value pairs
+            full_command_parts.append(command)
+        full_command = " ".join(full_command_parts)
+
+        # Split into individual field-value pairs (for fallback)
+        split_commands: list[str] = []
+        if product:
+            split_commands.append(f"Product {product}")
+        if command:
             for m in _CMD_FIELD_RE.finditer(command):
                 name = m.group(1) or m.group(3)
                 value = m.group(2) or m.group(4)
-                field_commands.append(f"{name} {value}")
+                split_commands.append(f"{name} {value}")
 
         failed_commands: list[str] = []
+
+        async def _apply_commands(target_id: str, *, use_internal_id: bool = False):
+            """Try full command first; on failure, fall back to split commands."""
+            issue_ref = {"id": target_id} if use_internal_id else {"idReadable": target_id}
+            if full_command:
+                try:
+                    await client.post(
+                        "/api/commands",
+                        json={"query": full_command, "issues": [issue_ref]},
+                    )
+                    return  # full command worked
+                except (ValueError, Exception):
+                    pass  # fall through to split
+            # Apply each field separately; collect failures
+            for cmd in split_commands:
+                try:
+                    await client.post(
+                        "/api/commands",
+                        json={"query": cmd, "issues": [issue_ref]},
+                    )
+                except (ValueError, Exception) as cmd_err:
+                    failed_commands.append(f"`{cmd}`: {cmd_err}")
 
         try:
             data = await client.post("/api/issues", json=json_body)
             issue_id = data.get("idReadable", "?")
-            # Apply commands on the created issue
-            for cmd in field_commands:
-                try:
-                    await client.execute_command(issue_id, cmd)
-                except (ValueError, Exception) as cmd_err:
-                    failed_commands.append(f"`{cmd}`: {cmd_err}")
+            await _apply_commands(issue_id)
         except ValueError as e:
-            if "required" not in str(e).lower() or not field_commands:
+            if "required" not in str(e).lower() or not (full_command or split_commands):
                 raise
             # Required field missing — create as draft, apply commands, publish
             draft = await client.post(
@@ -155,15 +179,7 @@ def register(mcp, resolver: InstanceResolver):
             draft_id = draft.get("id", "")
             if not draft_id:
                 raise
-            # Apply each field command separately; collect failures
-            for cmd in field_commands:
-                try:
-                    await client.post(
-                        "/api/commands",
-                        json={"query": cmd, "issues": [{"id": draft_id}]},
-                    )
-                except (ValueError, Exception) as cmd_err:
-                    failed_commands.append(f"`{cmd}`: {cmd_err}")
+            await _apply_commands(draft_id, use_internal_id=True)
             # Publish draft as a real issue (empty body — use draft's data)
             try:
                 data = await client.post(
