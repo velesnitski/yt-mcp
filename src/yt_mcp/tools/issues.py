@@ -8,6 +8,34 @@ _CMD_FIELD_RE = re.compile(r"(\S+)\s+\{([^}]+)\}|(\S+)\s+(\S+)")
 _CMD_KEYWORDS = frozenset({"tag", "untag", "remove", "add", "for", "star", "unstar"})
 
 
+async def _get_required_fields_info(client, project_id: str, project_short: str) -> str:
+    """Fetch required fields with values to help LLM fix the command."""
+    for endpoint in (
+        f"/api/admin/projects/{project_id}/customFields",
+        f"/api/projects/{project_id}/customFields",
+    ):
+        try:
+            fields = await client.get(
+                endpoint,
+                params={"fields": "field(name),canBeEmpty,bundle(values(name,archived))"},
+            )
+            lines = ["**Required fields for this project:**"]
+            for f in fields:
+                if f.get("canBeEmpty", True):
+                    continue
+                name = f.get("field", {}).get("name", "?")
+                bundle = f.get("bundle")
+                if bundle and bundle.get("values"):
+                    vals = [v["name"] for v in bundle["values"] if not v.get("archived")]
+                    lines.append(f"- **{name}**: {', '.join(vals)}")
+                else:
+                    lines.append(f"- **{name}**")
+            return "\n".join(lines) if len(lines) > 1 else ""
+        except Exception:
+            continue
+    return ""
+
+
 def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()
@@ -137,11 +165,21 @@ def register(mcp, resolver: InstanceResolver):
                 except (ValueError, Exception) as cmd_err:
                     failed_commands.append(f"`{cmd}`: {cmd_err}")
             # Publish draft as a real issue (empty body — use draft's data)
-            data = await client.post(
-                f"/api/issues?draftId={draft_id}&fields=idReadable,summary",
-                json={},
-            )
-            issue_id = data.get("idReadable", "?")
+            try:
+                data = await client.post(
+                    f"/api/issues?draftId={draft_id}&fields=idReadable,summary",
+                    json={},
+                )
+                issue_id = data.get("idReadable", "?")
+            except ValueError as pub_err:
+                # Publish failed — fetch required fields to help the LLM
+                req_info = await _get_required_fields_info(client, project_id, project)
+                return (
+                    f"**Could not create issue:** {pub_err}\n\n"
+                    + (f"**Failed commands:** {'; '.join(failed_commands)}\n" if failed_commands else "")
+                    + (f"\n{req_info}" if req_info else "")
+                    + "\nCreate the issue manually or adjust the command."
+                )
 
         parts = [f"Created: **{issue_id}** — {data.get('summary', '')}"]
         if product:
