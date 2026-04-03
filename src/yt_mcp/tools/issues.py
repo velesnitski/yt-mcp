@@ -106,12 +106,17 @@ def register(mcp, resolver: InstanceResolver):
                 value = m.group(2) or m.group(4)
                 field_commands.append(f"{name} {value}")
 
+        failed_commands: list[str] = []
+
         try:
             data = await client.post("/api/issues", json=json_body)
             issue_id = data.get("idReadable", "?")
             # Apply commands on the created issue
             for cmd in field_commands:
-                await client.execute_command(issue_id, cmd)
+                try:
+                    await client.execute_command(issue_id, cmd)
+                except (ValueError, Exception) as cmd_err:
+                    failed_commands.append(f"`{cmd}`: {cmd_err}")
         except ValueError as e:
             if "required" not in str(e).lower() or not field_commands:
                 raise
@@ -122,12 +127,15 @@ def register(mcp, resolver: InstanceResolver):
             draft_id = draft.get("id", "")
             if not draft_id:
                 raise
-            # Apply each field command separately to avoid parser ambiguity
+            # Apply each field command separately; collect failures
             for cmd in field_commands:
-                await client.post(
-                    "/api/commands",
-                    json={"query": cmd, "issues": [{"id": draft_id}]},
-                )
+                try:
+                    await client.post(
+                        "/api/commands",
+                        json={"query": cmd, "issues": [{"id": draft_id}]},
+                    )
+                except (ValueError, Exception) as cmd_err:
+                    failed_commands.append(f"`{cmd}`: {cmd_err}")
             # Publish draft as a real issue (empty body — use draft's data)
             data = await client.post(
                 f"/api/issues?draftId={draft_id}&fields=idReadable,summary",
@@ -135,9 +143,15 @@ def register(mcp, resolver: InstanceResolver):
             )
             issue_id = data.get("idReadable", "?")
 
-        product_str = f" | **Product:** {product}" if product else ""
-        cmd_str = f" | **Fields:** {command}" if command else ""
-        return f"Created: **{issue_id}** — {data.get('summary', '')}{product_str}{cmd_str}"
+        parts = [f"Created: **{issue_id}** — {data.get('summary', '')}"]
+        if product:
+            parts.append(f"**Product:** {product}")
+        if command:
+            parts.append(f"**Fields:** {command}")
+        if failed_commands:
+            parts.append(f"\n**Could not set:** {'; '.join(failed_commands)}")
+            parts.append("Set these fields manually in YouTrack.")
+        return " | ".join(parts[:3]) + ("".join(parts[3:]) if len(parts) > 3 else "")
 
     @mcp.tool()
     async def update_issue(
