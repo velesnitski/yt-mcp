@@ -160,14 +160,26 @@ def register(mcp, resolver: InstanceResolver):
             except (ValueError, Exception):
                 pass  # fall through to split
             # Split fallback: apply each field separately
+            split_failed: list[str] = []
             for cmd in split_commands:
                 try:
                     await client.post(
                         "/api/commands",
                         json={"query": cmd, "issues": [issue_ref]},
                     )
+                except (ValueError, Exception):
+                    split_failed.append(cmd)
+            # Rejoin failed splits and retry as single command
+            # (handles multi-word/emoji fields like "Evaluation time 🕙 1h")
+            if split_failed:
+                rejoined = " ".join(split_failed)
+                try:
+                    await client.post(
+                        "/api/commands",
+                        json={"query": rejoined, "issues": [issue_ref]},
+                    )
                 except (ValueError, Exception) as cmd_err:
-                    failed_commands.append(f"`{cmd}`: {cmd_err}")
+                    failed_commands.append(f"`{rejoined}`: {cmd_err}")
 
         try:
             data = await client.post("/api/issues", json=json_body)
