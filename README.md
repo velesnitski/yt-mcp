@@ -1,6 +1,6 @@
 # yt-mcp
 
-YouTrack MCP server for [Claude Code](https://claude.com/claude-code), [n8n](https://n8n.io), and any MCP-compatible client. Talk to your YouTrack instance in natural language.
+YouTrack MCP server for [Claude Code](https://claude.com/claude-code), [GitHub Copilot](https://github.com/features/copilot), [Cursor](https://cursor.com), [JetBrains IDEs](https://www.jetbrains.com/help/idea/mcp.html), [n8n](https://n8n.io), and any MCP-compatible client. Talk to your YouTrack instance in natural language.
 
 ## Quick start
 
@@ -61,6 +61,65 @@ claude
 
 You should see `youtrack` listed when Claude starts. Try asking: *"List my YouTrack projects"*
 
+### Install in GitHub Copilot (VS Code)
+
+Add to `.vscode/mcp.json` in your project (or to VS Code User Settings under `mcp.servers`):
+
+```json
+{
+  "servers": {
+    "youtrack": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/velesnitski/yt-mcp", "yt-mcp"],
+      "env": {
+        "YOUTRACK_URL": "https://your-instance.youtrack.cloud",
+        "YOUTRACK_TOKEN": "perm:your-token-here"
+      }
+    }
+  }
+}
+```
+
+Open Copilot Chat (Agent mode) and ask: *"List my YouTrack projects"*
+
+### Install in Cursor
+
+Add to `.cursor/mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "youtrack": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/velesnitski/yt-mcp", "yt-mcp"],
+      "env": {
+        "YOUTRACK_URL": "https://your-instance.youtrack.cloud",
+        "YOUTRACK_TOKEN": "perm:your-token-here"
+      }
+    }
+  }
+}
+```
+
+### Install in JetBrains IDEs (IntelliJ, WebStorm, PyCharm, etc.)
+
+Go to **Settings** → **Tools** → **AI Assistant** → **Model Context Protocol (MCP)** → **Add** → **As JSON**:
+
+```json
+{
+  "youtrack": {
+    "command": "uvx",
+    "args": ["--from", "git+https://github.com/velesnitski/yt-mcp", "yt-mcp"],
+    "env": {
+      "YOUTRACK_URL": "https://your-instance.youtrack.cloud",
+      "YOUTRACK_TOKEN": "perm:your-token-here"
+    }
+  }
+}
+```
+
+> **Note:** If `uvx` is not found, use the full path (find with `which uvx`).
+
 ## Multi-instance setup
 
 Connect multiple YouTrack instances to a single MCP server. Each tool gets an optional `instance` parameter — the LLM picks the right instance from context, or auto-detects it when you paste a YouTrack URL.
@@ -119,15 +178,15 @@ claude mcp add youtrack \
 Gives MCP clients live access to your YouTrack instance. Instead of opening the YouTrack UI, just ask:
 
 - *"What open issues does the Android team have?"*
-- *"Show me DEVOPS-423"*
+- *"Show me OPS-423"*
 - *"Create a bug in the WordPress project: homepage returns 500"*
 - *"Set priority to Critical and assign to John"*
 - *"List all agile boards"*
 - *"What did the DevOps team close this week?"*
-- *"Log 2 hours of development on BAC-1828"*
+- *"Log 2 hours of development on PROJ-1828"*
 - *"Find articles about deployment"*
 
-### Available tools (53)
+### Available tools (54)
 
 #### Issues (18)
 
@@ -170,11 +229,12 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `create_agile_board` | Create a new agile board for one or more projects |
 | `delete_agile_board` | Delete an agile board (issues are not affected) |
 
-#### Projects & users (3)
+#### Projects & users (4)
 
 | Tool | Description |
 |---|---|
 | `list_projects` | List all accessible projects |
+| `get_project_fields` | List custom fields with required status and valid values (use before `create_issue`) |
 | `get_current_user` | Get the authenticated user's profile |
 | `search_users` | Search users by name, login, or email |
 
@@ -296,7 +356,7 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{
     uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
 ```
 
-You should see all 53 tools listed.
+You should see all 54 tools listed.
 
 ## Setup for Windows
 
@@ -377,9 +437,9 @@ project MOBILE                             # move issue to another project
 
 All changes show a before/after diff and return rollback instructions.
 
-> *"Set DEVOPS-423 priority to Critical and assign to John"*
-> *"Move BAC-100 to the MOBILE project and set deadline to April 1st"*
-> *"Set dev estimate to 8 and QA estimate to 3 on iOS-55"*
+> *"Set OPS-423 priority to Critical and assign to John"*
+> *"Move PROJ-100 to the MOBILE project and set deadline to April 1st"*
+> *"Set dev estimate to 8 and QA estimate to 3 on APP-55"*
 
 ## Query syntax examples
 
@@ -474,7 +534,7 @@ Put it behind a reverse proxy (Caddy, nginx, Cloudflare Tunnel) for HTTPS.
 
 ### 3. Use it
 
-Start a conversation in claude.ai and ask about your YouTrack issues. All 53 tools are available.
+Start a conversation in claude.ai and ask about your YouTrack issues. All 54 tools are available.
 
 > Without `YOUTRACK_OAUTH_URL`, OAuth is disabled and the server works in standard mode (stdio/SSE without auth) — no changes to existing setups.
 
