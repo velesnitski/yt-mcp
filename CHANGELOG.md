@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-04-07
+
+### Added
+- `get_project_fields` — list custom fields with required status and valid values (use before `create_issue` to discover correct field names)
+- **Draft-based issue creation** — projects with required custom fields (Subsystem, Type, Product, etc.) now work via automatic draft → command → publish flow
+- **3-level command strategy** — full command as-is → split into individual fields → rejoin failed splits (handles emoji field names like `Evaluation time 🕙`)
+- **Graceful command failures** — unsettable fields reported with "Could not set" guidance instead of aborting
+- **Required fields info on publish failure** — fetches and displays all required fields with valid values
+- **GitHub Copilot** setup instructions (`.vscode/mcp.json`)
+- **Cursor** setup instructions (`.cursor/mcp.json`)
+- **JetBrains IDEs** setup instructions (Settings → AI Assistant → MCP)
+
+### Fixed
+- `create_issue` 400 error on projects with required custom fields (Subsystem, Type, Phase, etc.)
+- YouTrack command API brace handling — braces treated as literal chars, now sent without braces
+- Multi-word product values no longer break command parsing
+- Draft publish returns correct `idReadable` (was returning "?")
+
+### Changed
+- **54 tools** (was 53) — added `get_project_fields`
+- Removed dead code from abandoned customFields $type approach (~270 lines)
+- Replaced real project prefixes with generic ones in tests and docs
+
 ## [1.6.0] - 2026-03-27
 
 ### Added
@@ -83,6 +106,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **HTTPS enforcement** and error message truncation
 - **168 tests** with GitHub Actions CI (Python 3.10–3.13)
 
+[1.7.0]: https://github.com/velesnitski/yt-mcp/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/velesnitski/yt-mcp/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/velesnitski/yt-mcp/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/velesnitski/yt-mcp/compare/v1.3.0...v1.4.0
