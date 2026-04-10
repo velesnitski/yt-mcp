@@ -1,6 +1,6 @@
 services:
   youtrack-mcp:
-    build: .
+    image: velesnitski/yt-mcp
     ports:
       - "8000:8000"
     environment:

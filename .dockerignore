@@ -1,5 +1,6 @@
 .git
 .venv
+.env
 .pytest_cache
 .mypy_cache
 .DS_Store
@@ -8,4 +9,10 @@ __pycache__
 dist
 build
 tests
+docs
 .github
+CHANGELOG.md
+CODE_OF_CONDUCT.md
+CONTRIBUTING.md
+SECURITY.md
+LICENSE
