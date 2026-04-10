@@ -1,11 +1,37 @@
 import re
 from datetime import datetime, timezone
+from typing import Any
 
 from yt_mcp.resolver import InstanceResolver
-from yt_mcp.formatters import _resolve_state, _resolve_assignee, _get_custom_field
+from yt_mcp.formatters import _resolve_state, _resolve_assignee, _get_custom_field, compact_lines
 
 _AGILE_URL_RE = re.compile(r"/agiles/([\d-]+)")
 _BOARD_ID_RE = re.compile(r"^\d+-\d+$")
+
+
+async def _resolve_board(client: Any, board_name: str) -> tuple[dict | None, str]:
+    """Find an agile board by name (partial match). Returns (board, error_msg)."""
+    boards = await client.get(
+        "/api/agiles",
+        params={"fields": "id,name,sprints(id,name,start,finish,archived)"},
+    )
+    query_lower = board_name.lower()
+    matches = [b for b in boards if query_lower in b.get("name", "").lower()]
+    if not matches:
+        return None, f"No agile board found matching '{board_name}'."
+    if len(matches) > 1:
+        names = ", ".join(f"'{b.get('name', '?')}'" for b in matches)
+        return None, f"Multiple boards match '{board_name}': {names}. Be more specific."
+    return matches[0], ""
+
+
+def _find_sprint(board: dict, sprint_name: str) -> tuple[dict | None, str]:
+    """Find a sprint by name in a board. Returns (sprint, error_msg)."""
+    sprint_lower = sprint_name.lower()
+    for s in board.get("sprints", []):
+        if sprint_lower in s.get("name", "").lower():
+            return s, ""
+    return None, f"Sprint '{sprint_name}' not found on board '{board.get('name', '?')}'."
 
 
 def register(mcp, resolver: InstanceResolver):
@@ -421,3 +447,225 @@ def register(mcp, resolver: InstanceResolver):
                 )
 
         return "\n".join(parts)
+
+    @mcp.tool()
+    async def create_sprint(
+        board_name: str,
+        sprint_name: str,
+        start: str = "",
+        finish: str = "",
+        instance: str = "",
+    ) -> str:
+        """Create a new sprint on an agile board.
+
+        Args:
+            board_name: Board name (partial match)
+            sprint_name: Name for the new sprint
+            start: Start date ISO 8601 (optional, e.g. '2025-01-01')
+            finish: End date ISO 8601 (optional, e.g. '2025-01-14')
+            instance: YouTrack instance (optional)
+        """
+        client = resolver.resolve(instance)
+        board, err = await _resolve_board(client, board_name)
+        if not board:
+            return err
+
+        body: dict = {"name": sprint_name}
+        if start:
+            body["start"] = int(datetime.fromisoformat(start).replace(tzinfo=timezone.utc).timestamp() * 1000)
+        if finish:
+            body["finish"] = int(datetime.fromisoformat(finish).replace(tzinfo=timezone.utc).timestamp() * 1000)
+
+        data = await client.post(f"/api/agiles/{board['id']}/sprints", json=body)
+        return (
+            f"Created sprint: **{data.get('name', sprint_name)}**\n"
+            f"**Board:** {board.get('name', '?')}\n"
+            f"**ID:** {data.get('id', '?')}"
+        )
+
+    @mcp.tool()
+    async def update_sprint(
+        board_name: str,
+        sprint_name: str,
+        new_name: str = "",
+        start: str = "",
+        finish: str = "",
+        archived: bool | None = None,
+        instance: str = "",
+    ) -> str:
+        """Update an existing sprint on an agile board.
+
+        Args:
+            board_name: Board name (partial match)
+            sprint_name: Current sprint name (partial match)
+            new_name: New sprint name (empty = keep)
+            start: New start date ISO 8601 (empty = keep)
+            finish: New end date ISO 8601 (empty = keep)
+            archived: Set archived status (None = keep)
+            instance: YouTrack instance (optional)
+        """
+        client = resolver.resolve(instance)
+        board, err = await _resolve_board(client, board_name)
+        if not board:
+            return err
+
+        sprint, err = _find_sprint(board, sprint_name)
+        if not sprint:
+            return err
+
+        body: dict = {}
+        if new_name:
+            body["name"] = new_name
+        if start:
+            body["start"] = int(datetime.fromisoformat(start).replace(tzinfo=timezone.utc).timestamp() * 1000)
+        if finish:
+            body["finish"] = int(datetime.fromisoformat(finish).replace(tzinfo=timezone.utc).timestamp() * 1000)
+        if archived is not None:
+            body["archived"] = archived
+
+        if not body:
+            return "Nothing to update — provide at least one field."
+
+        await client.post(f"/api/agiles/{board['id']}/sprints/{sprint['id']}", json=body)
+        display_name = new_name if new_name else sprint.get("name", sprint_name)
+        return (
+            f"Updated sprint: **{display_name}**\n"
+            f"**Board:** {board.get('name', '?')}"
+        )
+
+    @mcp.tool()
+    async def add_issues_to_sprint(
+        board_name: str,
+        sprint_name: str,
+        issue_ids: str,
+        instance: str = "",
+    ) -> str:
+        """Add issues to a sprint using YouTrack commands.
+
+        Args:
+            board_name: Board name (partial match)
+            sprint_name: Sprint name (partial match)
+            issue_ids: Comma-separated issue IDs (e.g. 'PROJ-1,PROJ-2')
+            instance: YouTrack instance (optional)
+        """
+        client = resolver.resolve(instance)
+        board, err = await _resolve_board(client, board_name)
+        if not board:
+            return err
+
+        sprint, err = _find_sprint(board, sprint_name)
+        if not sprint:
+            return err
+
+        ids = [pid.strip() for pid in issue_ids.split(",") if pid.strip()]
+        if not ids:
+            return "No issue IDs provided."
+
+        board_display = board.get("name", board_name)
+        sprint_display = sprint.get("name", sprint_name)
+        command = f"Board {board_display} {sprint_display}"
+
+        succeeded = []
+        failed = []
+        for iid in ids:
+            try:
+                await client.execute_command(iid, command)
+                succeeded.append(iid)
+            except (ValueError, Exception) as e:
+                failed.append(f"{iid}: {e}")
+
+        parts = [f"**Board:** {board_display} — **Sprint:** {sprint_display}"]
+        if succeeded:
+            parts.append(f"**Added ({len(succeeded)}):** {', '.join(succeeded)}")
+        if failed:
+            parts.append(f"**Failed ({len(failed)}):** {'; '.join(failed)}")
+        return compact_lines(parts)
+
+    @mcp.tool()
+    async def list_tags(instance: str = "") -> str:
+        """List all issue tags with issue counts.
+
+        Args:
+            instance: YouTrack instance (optional)
+        """
+        client = resolver.resolve(instance)
+        tags = await client.get(
+            "/api/issueTags",
+            params={"fields": "name,issues(id)", "$top": "100"},
+        )
+        if not tags:
+            return "No tags found."
+
+        lines = []
+        for t in tags:
+            name = t.get("name", "?")
+            count = len(t.get("issues", []))
+            lines.append(f"- **{name}** ({count} issues)")
+        return "\n".join(lines)
+
+    @mcp.tool()
+    async def list_saved_searches(instance: str = "") -> str:
+        """List all saved searches (queries).
+
+        Args:
+            instance: YouTrack instance (optional)
+        """
+        client = resolver.resolve(instance)
+        queries = await client.get(
+            "/api/savedQueries",
+            params={"fields": "name,query"},
+        )
+        if not queries:
+            return "No saved searches found."
+
+        lines = []
+        for q in queries:
+            lines.append(f"- **{q.get('name', '?')}**: `{q.get('query', '?')}`")
+        return "\n".join(lines)
+
+    @mcp.tool()
+    async def run_saved_search(name: str, max_results: int = 50, instance: str = "") -> str:
+        """Run a saved search by name and return matching issues.
+
+        Args:
+            name: Saved search name (partial match)
+            max_results: Max results (default: 50)
+            instance: YouTrack instance (optional)
+        """
+        client = resolver.resolve(instance)
+        queries = await client.get(
+            "/api/savedQueries",
+            params={"fields": "name,query"},
+        )
+
+        name_lower = name.lower()
+        matches = [q for q in queries if name_lower in q.get("name", "").lower()]
+        if not matches:
+            return f"No saved search found matching '{name}'."
+        if len(matches) > 1:
+            names = ", ".join(f"'{q.get('name', '?')}'" for q in matches)
+            return f"Multiple saved searches match '{name}': {names}. Be more specific."
+
+        query = matches[0].get("query", "")
+        query_name = matches[0].get("name", name)
+
+        data = await client.get(
+            "/api/issues",
+            params={
+                "query": query,
+                "fields": "idReadable,summary,state(name),assignee(name),"
+                "customFields(name,value(name)),created,updated",
+                "$top": str(max_results),
+            },
+        )
+
+        from yt_mcp.formatters import format_issue_list
+        result = format_issue_list(data)
+
+        count = len(data)
+        header = f"**Saved search:** {query_name}\n**Query:** `{query}`\n**Found: {count} issues**"
+        if count >= max_results:
+            header += f" (showing first {max_results}, more may exist)"
+        if count == 0:
+            return f"{header}\n\nNo issues match this saved search."
+        return f"{header}\n\n{result}"
