@@ -588,28 +588,79 @@ The server will be available at `http://localhost:8000/mcp`.
 
 ### Docker (for remote / always-on deployments)
 
-**Using docker-compose** (recommended):
+**Using Docker Hub** (recommended):
 
 ```bash
-git clone https://github.com/velesnitski/yt-mcp.git
-cd yt-mcp
-# Edit docker-compose.yml with your YOUTRACK_URL and YOUTRACK_TOKEN
-docker compose up -d
-```
-
-The server will be available at `http://localhost:8000/sse`.
-
-**Using docker build directly:**
-
-```bash
-git clone https://github.com/velesnitski/yt-mcp.git
-cd yt-mcp
-docker build -t yt-mcp .
 docker run -d --name youtrack-mcp \
   -e YOUTRACK_URL="https://your-instance.youtrack.cloud" \
   -e YOUTRACK_TOKEN="perm:your-token-here" \
   -p 8000:8000 \
-  yt-mcp
+  velesnitski/yt-mcp
+```
+
+The server will be available at `http://localhost:8000/sse`.
+
+**Using docker-compose:**
+
+```yaml
+services:
+  youtrack-mcp:
+    image: velesnitski/yt-mcp
+    ports:
+      - "8000:8000"
+    environment:
+      - YOUTRACK_URL=https://your-instance.youtrack.cloud
+      - YOUTRACK_TOKEN=perm:your-token-here
+    restart: unless-stopped
+```
+
+```bash
+docker compose up -d
+```
+
+**Connect MCP clients to the Docker container:**
+
+Claude Code (`~/.claude.json`):
+
+```json
+{
+  "mcpServers": {
+    "youtrack": {
+      "type": "url",
+      "url": "http://localhost:8000/sse"
+    }
+  }
+}
+```
+
+Cursor (`.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "youtrack": {
+      "url": "http://localhost:8000/sse"
+    }
+  }
+}
+```
+
+**Using stdio via Docker** (no exposed port):
+
+```json
+{
+  "mcpServers": {
+    "youtrack": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm",
+        "-e", "YOUTRACK_URL=https://your-instance.youtrack.cloud",
+        "-e", "YOUTRACK_TOKEN=perm:your-token-here",
+        "velesnitski/yt-mcp",
+        "--transport", "stdio"
+      ]
+    }
+  }
+}
 ```
 
 **Override transport and port:**
@@ -617,7 +668,15 @@ docker run -d --name youtrack-mcp \
 ```bash
 docker run -d -p 9000:9000 \
   -e YOUTRACK_URL="..." -e YOUTRACK_TOKEN="..." \
-  yt-mcp --transport streamable-http --port 9000
+  velesnitski/yt-mcp --transport streamable-http --port 9000
+```
+
+**Build from source:**
+
+```bash
+git clone https://github.com/velesnitski/yt-mcp.git
+cd yt-mcp
+docker build -t yt-mcp .
 ```
 
 ## Security
