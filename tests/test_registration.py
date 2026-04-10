@@ -44,7 +44,7 @@ class TestToolRegistration:
         register_all(mcp, resolver, config)
 
         tools = _get_tool_names(mcp)
-        assert len(tools) == 54, f"Expected 53 tools, got {len(tools)}: {sorted(tools)}"
+        assert len(tools) == 63, f"Expected 63 tools, got {len(tools)}: {sorted(tools)}"
 
     def test_expected_tools_present(self):
         mcp = FastMCP("test")
@@ -62,6 +62,9 @@ class TestToolRegistration:
             "check_task_creation", "get_creation_activity", "get_project_health",
             "list_projects", "get_project_fields", "get_agiles", "get_agile_board", "create_agile_board",
             "delete_agile_board", "get_sprint_board",
+            "create_sprint", "update_sprint", "add_issues_to_sprint",
+            "list_tags", "list_saved_searches", "run_saved_search",
+            "list_attachments", "get_attachment_url", "count_issues",
             "list_templates", "create_issue_from_template",
             "get_issue_history", "rollback_issue", "get_work_items",
             "add_work_item", "update_work_item", "delete_work_item",
@@ -148,6 +151,7 @@ class TestToolRegistration:
             "add_work_item", "update_work_item", "delete_work_item",
             "bulk_update_execute", "bulk_rollback",
             "create_agile_board", "delete_agile_board",
+            "create_sprint", "update_sprint", "add_issues_to_sprint",
             "apply_translations", "rollback_issue",
             "create_article", "update_article", "delete_article",
             "add_article_comment", "update_article_comment", "delete_article_comment",
@@ -163,4 +167,4 @@ class TestToolRegistration:
         register_all(mcp, resolver, config=None)
 
         tools = _get_tool_names(mcp)
-        assert len(tools) == 54
+        assert len(tools) == 63
