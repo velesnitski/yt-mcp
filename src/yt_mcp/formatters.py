@@ -8,6 +8,12 @@ _ISSUE_URL_RE = re.compile(r"/issue/([A-Za-z]+-\d+)")
 COMPACT = os.environ.get("YOUTRACK_COMPACT", "").lower() in ("1", "true", "yes")
 
 
+def escape_query_value(value: str) -> str:
+    """Escape a value for safe use in YouTrack search queries."""
+    # Remove braces and backslashes that could break query syntax
+    return value.replace("\\", "").replace("{", "").replace("}", "")
+
+
 def compact_lines(lines: list[str]) -> str:
     """Join lines, stripping markdown if compact mode is on."""
     text = "\n".join(lines)

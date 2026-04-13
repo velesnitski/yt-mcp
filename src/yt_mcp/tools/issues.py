@@ -31,7 +31,7 @@ async def _get_required_fields_info(client, project_id: str, project_short: str)
                 else:
                     lines.append(f"- **{name}**")
             return "\n".join(lines) if len(lines) > 1 else ""
-        except Exception:
+        except (ValueError, KeyError):
             continue
     return ""
 
@@ -146,7 +146,7 @@ def register(mcp, resolver: InstanceResolver):
                         "/api/commands",
                         json={"query": product_cmd, "issues": [issue_ref]},
                     )
-                except (ValueError, Exception) as e:
+                except ValueError as e:
                     failed_commands.append(f"`{product_cmd}`: {e}")
             if not command:
                 return
@@ -157,7 +157,7 @@ def register(mcp, resolver: InstanceResolver):
                     json={"query": command, "issues": [issue_ref]},
                 )
                 return  # full command worked
-            except (ValueError, Exception):
+            except ValueError:
                 pass  # fall through to split
             # Split fallback: apply each field separately
             split_failed: list[str] = []
@@ -167,7 +167,7 @@ def register(mcp, resolver: InstanceResolver):
                         "/api/commands",
                         json={"query": cmd, "issues": [issue_ref]},
                     )
-                except (ValueError, Exception):
+                except ValueError:
                     split_failed.append(cmd)
             # Rejoin failed splits and retry as single command
             # (handles multi-word/emoji fields like "Evaluation time 🕙 1h")
@@ -178,7 +178,7 @@ def register(mcp, resolver: InstanceResolver):
                         "/api/commands",
                         json={"query": rejoined, "issues": [issue_ref]},
                     )
-                except (ValueError, Exception) as cmd_err:
+                except ValueError as cmd_err:
                     failed_commands.append(f"`{rejoined}`: {cmd_err}")
 
         try:
