@@ -2,7 +2,7 @@ import asyncio
 
 from yt_mcp.client import YouTrackClient
 from yt_mcp.resolver import InstanceResolver
-from yt_mcp.formatters import _resolve_state, get_product, parse_issue_id
+from yt_mcp.formatters import _resolve_state, get_product, parse_issue_id, escape_query_value
 
 
 def register(mcp, resolver: InstanceResolver):
@@ -72,7 +72,7 @@ def register(mcp, resolver: InstanceResolver):
                         "$top": "20",
                     },
                 )
-            except (ValueError, Exception):
+            except ValueError:
                 return []
 
         async def _fetch_same_product():
@@ -82,13 +82,13 @@ def register(mcp, resolver: InstanceResolver):
                 return await client.get(
                     "/api/issues",
                     params={
-                        "query": f"Product: {{{first_product}}} #Unresolved",
+                        "query": f"Product: {{{escape_query_value(first_product)}}} #Unresolved",
                         "fields": "idReadable,summary,state(name),"
                         "customFields(name,value(name))",
                         "$top": "20",
                     },
                 )
-            except (ValueError, Exception):
+            except ValueError:
                 return []
 
         mentions, same_product = await asyncio.gather(

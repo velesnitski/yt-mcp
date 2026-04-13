@@ -3,6 +3,16 @@ from datetime import datetime, timezone
 from yt_mcp.resolver import InstanceResolver
 
 
+def _safe_date(ms: int | None, fmt: str = "%Y-%m-%d %H:%M") -> str:
+    """Format a millisecond timestamp safely."""
+    if not ms:
+        return ""
+    try:
+        return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime(fmt)
+    except (OSError, ValueError):
+        return ""
+
+
 def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()

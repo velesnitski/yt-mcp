@@ -28,12 +28,13 @@ def _load_snapshot(project: str) -> dict | None:
 
 def _save_snapshot(project: str, data: dict) -> None:
     """Save current health snapshot for delta tracking."""
+    import logging
     try:
         _SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
         path = _SNAPSHOTS_DIR / f"{project.lower()}.json"
         path.write_text(json.dumps(data))
-    except OSError:
-        pass
+    except OSError as e:
+        logging.getLogger("yt_mcp").warning("Failed to save snapshot for %s: %s", project, e)
 
 _SINCE_RE = re.compile(r"^(\d+)\s*(h|d|m)$", re.IGNORECASE)
 
@@ -116,7 +117,7 @@ def register(mcp, resolver: InstanceResolver):
                         "$top": 100,
                     },
                 )
-            except (ValueError, Exception):
+            except ValueError:
                 return []
 
         all_activities = await asyncio.gather(

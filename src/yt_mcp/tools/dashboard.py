@@ -358,7 +358,7 @@ def register(mcp, resolver: InstanceResolver):
                     },
                 )
                 return project, issues
-            except (ValueError, Exception):
+            except ValueError:
                 return project, []
 
         results = await asyncio.gather(*[_fetch_project(p) for p in project_list])

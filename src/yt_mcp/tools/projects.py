@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from yt_mcp.resolver import InstanceResolver
-from yt_mcp.formatters import _resolve_state, _resolve_assignee, _get_custom_field, compact_lines
+from yt_mcp.formatters import _resolve_state, _resolve_assignee, _get_custom_field, compact_lines, escape_query_value
 
 _AGILE_URL_RE = re.compile(r"/agiles/([\d-]+)")
 _BOARD_ID_RE = re.compile(r"^\d+-\d+$")
@@ -49,7 +49,7 @@ def register(mcp, resolver: InstanceResolver):
                 "/api/admin/projects",
                 params={"fields": "shortName,name,archived,leader(name)"},
             )
-        except (ValueError, Exception):
+        except ValueError:
             projects = await client.get(
                 "/api/projects",
                 params={"fields": "shortName,name,archived,leader(name)"},
@@ -118,7 +118,7 @@ def register(mcp, resolver: InstanceResolver):
                     params={"fields": fields},
                 )
                 matches = [board]
-            except (ValueError, Exception):
+            except ValueError:
                 return f"No agile board found with ID '{board_id}'."
         else:
             boards = await client.get(
@@ -191,7 +191,7 @@ def register(mcp, resolver: InstanceResolver):
                 )
                 if fields_data:
                     break
-            except Exception:
+            except (ValueError, KeyError):
                 continue
 
         if not fields_data:
@@ -200,7 +200,7 @@ def register(mcp, resolver: InstanceResolver):
                 issues = await client.get(
                     "/api/issues",
                     params={
-                        "query": f"project: {project}",
+                        "query": f"project: {escape_query_value(project)}",
                         "fields": "customFields(name,value(name))",
                         "$top": "50",
                     },
@@ -232,7 +232,7 @@ def register(mcp, resolver: InstanceResolver):
                         lines.append(f"- **{n}**: {vals_str}")
                     lines.append("\n*Note: required status unavailable, values based on existing issues.*")
                     return "\n".join(lines)
-            except Exception:
+            except (ValueError, KeyError):
                 pass
             return f"Cannot fetch custom fields for project '{project}'."
 
@@ -363,7 +363,7 @@ def register(mcp, resolver: InstanceResolver):
                     f"/api/agiles/{resolved_id}",
                     params={"fields": fields},
                 )
-            except (ValueError, Exception):
+            except ValueError:
                 return f"No agile board found with ID '{resolved_id}'."
         else:
             boards = await client.get(
@@ -571,7 +571,7 @@ def register(mcp, resolver: InstanceResolver):
             try:
                 await client.execute_command(iid, command)
                 succeeded.append(iid)
-            except (ValueError, Exception) as e:
+            except ValueError as e:
                 failed.append(f"{iid}: {e}")
 
         parts = [f"**Board:** {board_display} — **Sprint:** {sprint_display}"]

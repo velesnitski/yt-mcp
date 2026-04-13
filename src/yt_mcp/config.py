@@ -36,7 +36,10 @@ def _parse_global_settings() -> tuple[bool, frozenset, int]:
         if t.strip()
     )
 
-    max_bulk = int(os.environ.get("YOUTRACK_MAX_BULK_RESULTS", "100"))
+    try:
+        max_bulk = int(os.environ.get("YOUTRACK_MAX_BULK_RESULTS", "100"))
+    except ValueError:
+        max_bulk = 100
     return read_only, disabled, max_bulk
 
 

@@ -35,7 +35,7 @@ class YouTrackClient:
                     "error_description",
                     error_data.get("error", "Unknown error"),
                 )
-            except Exception:
+            except (ValueError, KeyError):
                 error_msg = "Unknown error"
             # Truncate to avoid leaking internal details
             if isinstance(error_msg, str) and len(error_msg) > 200:
@@ -93,6 +93,6 @@ class YouTrackClient:
                 for p in projects:
                     if p.get("shortName", "").lower() == short_name.lower():
                         return p["id"]
-            except (ValueError, Exception):
+            except ValueError:
                 continue
         return None
