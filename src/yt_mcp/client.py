@@ -15,8 +15,8 @@ class YouTrackClient:
             timeout=30,
             http2=True,
             limits=httpx.Limits(
-                max_connections=20,
-                max_keepalive_connections=10,
+                max_connections=5,
+                max_keepalive_connections=2,
                 keepalive_expiry=30,
             ),
             headers={
