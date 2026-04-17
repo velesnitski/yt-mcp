@@ -28,3 +28,8 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local notes (not committed)
+tasks.md
+TODO.md
+NOTES.md
