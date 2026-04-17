@@ -40,6 +40,53 @@ _SINCE_RE = re.compile(r"^(\d+)\s*(h|d|m)$", re.IGNORECASE)
 
 _SINCE_MULTIPLIERS = {"m": 60, "h": 3600, "d": 86400}
 
+# Risk detection constants (shared with youtrack-reports scoring logic)
+BLOCKED_RISK_DAYS = 14
+NEW_ISSUE_GRACE_HOURS = 4
+
+WORKING_STATES = frozenset({"in progress", "in review", "ready for test"})
+WAITING_STATES = frozenset({"submitted", "pause", "to do", "reopen"})
+
+# Health score dedup: each issue deducts once at its worst category's weight
+_RISK_WEIGHTS = {
+    "stalled": 3,
+    "ancient": 2,
+    "forgotten": 1,
+    "blocked": 1,
+    "unassigned": 1,
+}
+
+
+def _hours_since(ts_ms) -> float:
+    """Return hours since a millisecond timestamp."""
+    if not ts_ms:
+        return 0.0
+    dt = datetime.fromtimestamp(ts_ms / 1000, tz=timezone.utc)
+    return (datetime.now(tz=timezone.utc) - dt).total_seconds() / 3600
+
+
+def _compute_health_score(total: int, risks: dict[str, list]) -> int:
+    """Compute health score with per-issue dedup.
+
+    Each issue contributes at most once, using the worst category's weight.
+    Avoids triple-counting issues that are ancient + unassigned + blocked.
+    """
+    if total == 0:
+        return 100
+    worst_per_issue: dict[str, int] = {}
+    for category, weight in _RISK_WEIGHTS.items():
+        for issue in risks.get(category, []):
+            iid = issue.get("idReadable") or issue.get("id")
+            if iid is None:
+                continue
+            if iid not in worst_per_issue or weight > worst_per_issue[iid]:
+                worst_per_issue[iid] = weight
+    deductions = sum(worst_per_issue.values())
+    return max(0, 100 - deductions * 100 // total)
+
+
+_DEFAULT_EXCLUDE_PATTERNS = [re.compile(r"DevOps Daily", re.IGNORECASE)]
+
 
 def _parse_since(since: str) -> int:
     """Parse since string (duration or ISO date) to epoch milliseconds."""
@@ -239,7 +286,7 @@ def register(mcp, resolver: InstanceResolver):
             instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
-        patterns = compile_exclude_patterns(exclude_patterns)
+        patterns = compile_exclude_patterns(exclude_patterns) or _DEFAULT_EXCLUDE_PATTERNS
 
         at_risk_fields = (
             "idReadable,summary,updated,created,state(name),priority(name),"
@@ -290,7 +337,11 @@ def register(mcp, resolver: InstanceResolver):
                     issue_id, state, summary, assignee, priority,
                     f"**{days_idle}d without updates**",
                 )))
-            elif state_lower in waiting_states and days_idle >= forgotten_days:
+            elif (
+                state_lower in waiting_states
+                and state_lower != "pause"
+                and days_idle >= forgotten_days
+            ):
                 forgotten.append((days_idle, _format_at_risk_line(
                     issue_id, state, summary, assignee, priority,
                     f"**{days_idle}d without updates**",
@@ -361,9 +412,9 @@ def register(mcp, resolver: InstanceResolver):
                     "**no estimation**",
                 )))
 
-            # Ancient: open for too long
+            # Ancient: open for too long (pause excluded — intentional backlog)
             created_ms = issue.get("created", 0)
-            if created_ms:
+            if created_ms and state_lower != "pause":
                 days_open = (now - datetime.fromtimestamp(created_ms / 1000, tz=timezone.utc)).days
                 if days_open >= ancient_days:
                     ancient.append((days_open, _format_at_risk_line(
@@ -537,10 +588,14 @@ def register(mcp, resolver: InstanceResolver):
             else:
                 checks.append("Priority: **not set**")
 
-            # State moved beyond Submitted? (+2)
+            # State moved beyond Submitted? (+2) — with grace period for new issues
+            hours_open = _hours_since(created_ms)
             if state.lower() not in ("submitted", "open", ""):
                 quality_score += 2
                 checks.append(f"State: **{state}** (progressing)")
+            elif hours_open <= NEW_ISSUE_GRACE_HOURS:
+                quality_score += 2
+                checks.append(f"State: **{state}** (just created)")
             else:
                 checks.append(f"State: **{state}**")
 
@@ -658,15 +713,16 @@ def register(mcp, resolver: InstanceResolver):
                 created_ms / 1000, tz=timezone.utc
             ).strftime("%Y-%m-%d") if created_ms else "?"
 
-            # Quality indicators
+            # Quality indicators (with grace period for brand-new issues)
+            hours_open = _hours_since(created_ms)
             flags: list[str] = []
-            if assignee == "Unassigned":
+            if assignee == "Unassigned" and hours_open > NEW_ISSUE_GRACE_HOURS:
                 flags.append("no assignee")
             if not description:
                 flags.append("no description")
             if priority in ("", "?"):
                 flags.append("no priority")
-            if state.lower() in ("submitted", "open"):
+            if state.lower() in ("submitted", "open") and hours_open > NEW_ISSUE_GRACE_HOURS:
                 flags.append("not started")
 
             flag_str = f" — {', '.join(flags)}" if flags else ""
@@ -694,7 +750,7 @@ def register(mcp, resolver: InstanceResolver):
             instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
-        patterns = compile_exclude_patterns(exclude_patterns)
+        patterns = compile_exclude_patterns(exclude_patterns) or _DEFAULT_EXCLUDE_PATTERNS
         since_ts = _parse_since(since)
 
         # Fetch unresolved and recently resolved in parallel
@@ -739,6 +795,15 @@ def register(mcp, resolver: InstanceResolver):
         blocked = 0
         unassigned_count = 0
 
+        # Track issues per risk category for score dedup
+        risks: dict[str, list] = {
+            "stalled": [],
+            "forgotten": [],
+            "ancient": [],
+            "blocked": [],
+            "unassigned": [],
+        }
+
         for issue in all_unresolved:
             state = _resolve_state(issue).lower()
             state_counts[state] = state_counts.get(state, 0) + 1
@@ -746,21 +811,30 @@ def register(mcp, resolver: InstanceResolver):
             product = _get_custom_field(issue, "Product") or "No product"
             product_counts[product] = product_counts.get(product, 0) + 1
 
-            if _resolve_assignee(issue) == "Unassigned":
-                unassigned_count += 1
-            if state == "blocked":
-                blocked += 1
-
             days_idle = _days_since_update(issue)
             created_ms = issue.get("created", 0)
             days_open = (now - datetime.fromtimestamp(created_ms / 1000, tz=timezone.utc)).days if created_ms else 0
+            hours_open = _hours_since(created_ms)
 
-            if state in ("in progress", "in review", "ready for test") and days_idle > 7:
+            # Unassigned: grace period for brand-new issues
+            if _resolve_assignee(issue) == "Unassigned" and hours_open > NEW_ISSUE_GRACE_HOURS:
+                unassigned_count += 1
+                risks["unassigned"].append(issue)
+
+            # Blocked: only flag if idle for BLOCKED_RISK_DAYS+
+            if state == "blocked" and days_idle >= BLOCKED_RISK_DAYS:
+                blocked += 1
+                risks["blocked"].append(issue)
+
+            if state in WORKING_STATES and days_idle > 7:
                 stuck += 1
-            if days_idle > 30:
+                risks["stalled"].append(issue)
+            if days_idle > 30 and state != "pause":
                 stale += 1
-            if days_open > 200:
+                risks["forgotten"].append(issue)
+            if days_open > 200 and state != "pause":
                 ancient += 1
+                risks["ancient"].append(issue)
 
             has_estimate = False
             for cf in issue.get("customFields", []):
@@ -770,6 +844,8 @@ def register(mcp, resolver: InstanceResolver):
                     break
             if not has_estimate:
                 unestimated += 1
+
+        health_score = _compute_health_score(len(all_unresolved), risks)
 
         # Build current snapshot
         current = {
@@ -804,6 +880,8 @@ def register(mcp, resolver: InstanceResolver):
             lines.append(f"_Compared to previous snapshot ({prev.get('ts', '?')[:10]})_")
             lines.append("")
 
+        lines.append(f"**Health score: {health_score}/100**")
+        lines.append("")
         lines.append("## Health metrics")
         lines.append("| Metric | Count | % | Delta | Severity |")
         lines.append("|---|---|---|---|---|")
