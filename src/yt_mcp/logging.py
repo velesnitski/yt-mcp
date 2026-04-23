@@ -152,8 +152,23 @@ def setup_sentry() -> None:
     sentry_sdk.set_tag("transport", os.environ.get("YT_MCP_TRANSPORT", "stdio"))
 
 
-def _scrub_event(event: dict, hint: dict) -> dict:
-    """Remove sensitive data before sending to Sentry."""
+_IGNORED_EXCEPTIONS = (BrokenPipeError, ConnectionResetError)
+
+
+def _scrub_event(event: dict, hint: dict) -> dict | None:
+    """Remove sensitive data and filter out benign shutdown errors before sending to Sentry."""
+    # Drop client-disconnect noise (happens when MCP client closes stdio pipe)
+    exc_info = hint.get("exc_info") if hint else None
+    if exc_info:
+        exc = exc_info[1] if len(exc_info) > 1 else None
+        if isinstance(exc, _IGNORED_EXCEPTIONS):
+            return None
+        # ExceptionGroup with only ignored exceptions inside
+        if hasattr(exc, "exceptions"):
+            inner = getattr(exc, "exceptions", ())
+            if inner and all(isinstance(e, _IGNORED_EXCEPTIONS) for e in inner):
+                return None
+
     if "extra" in event:
         for key in list(event["extra"].keys()):
             key_lower = key.lower()
