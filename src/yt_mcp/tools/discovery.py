@@ -115,14 +115,17 @@ def register(mcp, resolver: InstanceResolver):
             "customFields(name,value(name))"
         )
 
-        async def _fetch(iid: str) -> tuple[str, dict | None, str]:
-            try:
-                data = await client.get(f"/api/issues/{iid}", params={"fields": fields})
-                return iid, data, ""
-            except (ValueError, KeyError) as e:
-                return iid, None, str(e)
+        # Single batch query: `issue ID: A-1, B-2, C-3` is OR-joined in YT
+        batch_query = "issue ID: " + ", ".join(ids)
+        try:
+            data_list = await client.get(
+                "/api/issues",
+                params={"query": batch_query, "fields": fields, "$top": str(max(len(ids), 100))},
+            )
+        except ValueError:
+            data_list = []
 
-        results = await asyncio.gather(*(_fetch(i) for i in ids))
+        by_id = {issue.get("idReadable", ""): issue for issue in data_list if issue.get("idReadable")}
 
         from datetime import datetime, timezone
         now = datetime.now(tz=timezone.utc)
@@ -131,8 +134,9 @@ def register(mcp, resolver: InstanceResolver):
         not_found: list[str] = []
         resolved_ids: list[str] = []
 
-        for iid, data, err in results:
-            if err or not data:
+        for iid in ids:
+            data = by_id.get(iid)
+            if not data:
                 not_found.append(iid)
                 continue
             state = _resolve_state(data)
