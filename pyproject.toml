@@ -32,7 +32,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=9.0.3", "pytest-asyncio>=0.24"]
+test = ["pytest>=9.0.3", "pytest-asyncio>=0.24", "pytest-timeout>=2.3"]
 
 [project.urls]
 Homepage = "https://github.com/velesnitski/yt-mcp"
