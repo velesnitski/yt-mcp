@@ -186,7 +186,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 - *"Log 2 hours of development on PROJ-1828"*
 - *"Find articles about deployment"*
 
-### Available tools (54)
+### Available tools (63)
 
 #### Issues (18)
 
@@ -208,7 +208,15 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `get_issue_changes_summary` | Get a compact summary of issue changes (state transitions, comments, time logged) |
 | `rollback_issue` | Revert a specific change using its activity ID |
 | `poll_changes` | Poll for recently changed issues (for automation triggers — Make.com, n8n, cron) |
+| `count_issues` | Lightweight count of issues matching a query (no full data) |
 | `list_templates` | List available issue templates |
+
+#### Attachments (2)
+
+| Tool | Description |
+|---|---|
+| `list_attachments` | List all attachments on an issue (name, size, type, author, date) |
+| `get_attachment_url` | Get the download URL for a specific attachment |
 
 #### Time tracking (4)
 
@@ -219,7 +227,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `update_work_item` | Update an existing work item (duration, date, description) |
 | `delete_work_item` | Delete a work item from an issue |
 
-#### Agile boards (5)
+#### Agile boards & sprints (8)
 
 | Tool | Description |
 |---|---|
@@ -228,6 +236,9 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `get_sprint_board` | Get issues on an agile board grouped by column/state for a sprint |
 | `create_agile_board` | Create a new agile board for one or more projects |
 | `delete_agile_board` | Delete an agile board (issues are not affected) |
+| `create_sprint` | Create a new sprint on an agile board (with optional dates) |
+| `update_sprint` | Update an existing sprint (rename, reschedule, archive) |
+| `add_issues_to_sprint` | Assign issues to a sprint via YouTrack commands |
 
 #### Projects & users (4)
 
@@ -237,6 +248,14 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `get_project_fields` | List custom fields with required status and valid values (use before `create_issue`) |
 | `get_current_user` | Get the authenticated user's profile |
 | `search_users` | Search users by name, login, or email |
+
+#### Discovery (3)
+
+| Tool | Description |
+|---|---|
+| `list_tags` | List all issue tags with issue counts |
+| `list_saved_searches` | List all saved searches (queries) |
+| `run_saved_search` | Execute a saved search by name and return matching issues |
 
 #### Knowledge Base (8)
 
@@ -278,7 +297,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `get_at_risk_issues` | Find at-risk issues: stalled (active but silent), forgotten (filed but idle 30d+), overdue, over estimate |
 | `check_task_creation` | Verify a requested task was created with proper fields (priority, assignee, description) + quality score |
 | `get_creation_activity` | Report of recently created issues with quality indicators and PM follow-through stats |
-| `get_project_health` | Project health: state/product distribution, health metrics (%), recently resolved issues |
+| `get_project_health` | Project health score (0-100, dedup'd) + state/product distribution, metrics, recently resolved |
 
 #### Impact analysis (2)
 
@@ -356,7 +375,7 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{
     uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
 ```
 
-You should see all 54 tools listed.
+You should see all 63 tools listed.
 
 ## Setup for Windows
 
@@ -534,7 +553,7 @@ Put it behind a reverse proxy (Caddy, nginx, Cloudflare Tunnel) for HTTPS.
 
 ### 3. Use it
 
-Start a conversation in claude.ai and ask about your YouTrack issues. All 54 tools are available.
+Start a conversation in claude.ai and ask about your YouTrack issues. All 63 tools are available.
 
 > Without `YOUTRACK_OAUTH_URL`, OAuth is disabled and the server works in standard mode (stdio/SSE without auth) — no changes to existing setups.
 
