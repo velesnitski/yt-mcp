@@ -45,7 +45,18 @@ BLOCKED_RISK_DAYS = 14
 NEW_ISSUE_GRACE_HOURS = 4
 
 WORKING_STATES = frozenset({"in progress", "in review", "ready for test"})
-WAITING_STATES = frozenset({"submitted", "pause", "to do", "reopen"})
+WAITING_STATES = frozenset({"submitted", "pause", "to do", "reopen", "open"})
+# Completion-pending states — dev work is done, further age isn't the team's
+# problem. Excluded from Ancient and Forgotten checks to avoid noise from
+# release queues and won't-fix piles. Do NOT add "On Testing"/"For Review"
+# to WORKING_STATES — old items there belong in Ancient (weight 2), not
+# Stalled (weight 3); shifting category doesn't change the signal.
+COMPLETION_STATES = frozenset({
+    "ready for release",
+    "backlog",
+    "won't fix", "wontfix",
+    "rejected", "declined", "duplicate", "archived",
+})
 
 # Health score dedup: each issue deducts once at its worst category's weight
 _RISK_WEIGHTS = {
@@ -55,6 +66,17 @@ _RISK_WEIGHTS = {
     "blocked": 1,
     "unassigned": 1,
 }
+
+
+def _count_flagged_issues(risks: dict[str, list]) -> int:
+    """Distinct issues across all risk categories (no double-counting)."""
+    seen: set[str] = set()
+    for category in _RISK_WEIGHTS:
+        for issue in risks.get(category, []):
+            iid = issue.get("idReadable") or issue.get("id")
+            if iid:
+                seen.add(iid)
+    return len(seen)
 
 
 def _hours_since(ts_ms) -> float:
@@ -340,6 +362,7 @@ def register(mcp, resolver: InstanceResolver):
             elif (
                 state_lower in waiting_states
                 and state_lower != "pause"
+                and state_lower not in COMPLETION_STATES
                 and days_idle >= forgotten_days
             ):
                 forgotten.append((days_idle, _format_at_risk_line(
@@ -412,9 +435,13 @@ def register(mcp, resolver: InstanceResolver):
                     "**no estimation**",
                 )))
 
-            # Ancient: open for too long (pause excluded — intentional backlog)
+            # Ancient: open for too long (pause + completion states excluded)
             created_ms = issue.get("created", 0)
-            if created_ms and state_lower != "pause":
+            if (
+                created_ms
+                and state_lower != "pause"
+                and state_lower not in COMPLETION_STATES
+            ):
                 days_open = (now - datetime.fromtimestamp(created_ms / 1000, tz=timezone.utc)).days
                 if days_open >= ancient_days:
                     ancient.append((days_open, _format_at_risk_line(
@@ -829,10 +856,10 @@ def register(mcp, resolver: InstanceResolver):
             if state in WORKING_STATES and days_idle > 7:
                 stuck += 1
                 risks["stalled"].append(issue)
-            if days_idle > 30 and state != "pause":
+            if days_idle > 30 and state != "pause" and state not in COMPLETION_STATES:
                 stale += 1
                 risks["forgotten"].append(issue)
-            if days_open > 200 and state != "pause":
+            if days_open > 200 and state != "pause" and state not in COMPLETION_STATES:
                 ancient += 1
                 risks["ancient"].append(issue)
 
@@ -880,7 +907,12 @@ def register(mcp, resolver: InstanceResolver):
             lines.append(f"_Compared to previous snapshot ({prev.get('ts', '?')[:10]})_")
             lines.append("")
 
-        lines.append(f"**Health score: {health_score}/100**")
+        score_line = f"**Health score: {health_score}/100**"
+        # Floor-aware: when score hits 0, surface flagged ratio for signal
+        if health_score == 0 and len(all_unresolved) > 0:
+            flagged = _count_flagged_issues(risks)
+            score_line += f" ({flagged}/{len(all_unresolved)} flagged)"
+        lines.append(score_line)
         lines.append("")
         lines.append("## Health metrics")
         lines.append("| Metric | Count | % | Delta | Severity |")
