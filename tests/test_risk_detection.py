@@ -115,6 +115,13 @@ class TestConstants:
         assert "wontfix" in COMPLETION_STATES
         assert "rejected" in COMPLETION_STATES
 
+    def test_active_states_excludes_pause(self):
+        # ACTIVE_STATES is used by get_top_active_issues + dashboards.
+        # Pause = explicit deferral, must not surface as "top active".
+        from yt_mcp.formatters import ACTIVE_STATES
+        assert "pause" not in ACTIVE_STATES
+        assert "in progress" in ACTIVE_STATES
+
 
 class TestCompletionStateExclusion:
     """Logic mirror — verify state checks exclude COMPLETION_STATES."""

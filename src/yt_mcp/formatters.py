@@ -217,7 +217,7 @@ ISSUE_FIELDS = (
     "links(direction,linkType(name),issues(idReadable))"
 )
 
-ACTIVE_STATES = frozenset({"in progress", "submitted", "in review", "ready for test", "pause"})
+ACTIVE_STATES = frozenset({"in progress", "submitted", "in review", "ready for test"})
 
 
 def compile_exclude_patterns(exclude_patterns: str) -> list[re.Pattern]:
