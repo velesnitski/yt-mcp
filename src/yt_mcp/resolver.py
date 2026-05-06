@@ -27,13 +27,23 @@ class InstanceResolver:
     def resolve(self, instance: str = "", identifier: str = "") -> YouTrackClient:
         """Pick the right client based on instance name or URL auto-detection."""
         if instance:
-            if instance not in self._clients:
-                available = ", ".join(self._clients.keys())
-                raise ValueError(
-                    f"Unknown YouTrack instance '{instance}'. "
-                    f"Available: {available}"
-                )
-            return self._clients[instance]
+            # Exact match
+            if instance in self._clients:
+                return self._clients[instance]
+            # Case-insensitive match
+            lower = instance.lower()
+            for name in self._clients:
+                if name.lower() == lower:
+                    return self._clients[name]
+            # Domain substring match (e.g. 'alpha' matches 'alpha.youtrack.cloud')
+            for domain, name in self._domain_map.items():
+                if lower in domain.lower():
+                    return self._clients[name]
+            available = ", ".join(self._clients.keys())
+            raise ValueError(
+                f"Unknown YouTrack instance '{instance}'. "
+                f"Available: {available}"
+            )
 
         if identifier and "://" in identifier:
             domain = urlparse(identifier).hostname

@@ -41,6 +41,27 @@ class TestInstanceResolver:
         with pytest.raises(ValueError, match="Unknown YouTrack instance 'nope'"):
             resolver.resolve(instance="nope")
 
+    def test_case_insensitive_instance_name(self):
+        client = _mock_client("https://test.youtrack.cloud")
+        resolver = InstanceResolver({"main": client})
+        assert resolver.resolve(instance="MAIN") is client
+        assert resolver.resolve(instance="Main") is client
+
+    def test_domain_substring_match(self):
+        # LLM guesses subdomain but instance has a different name
+        main = _mock_client("https://main.youtrack.cloud")
+        second = _mock_client("https://alpha.youtrack.cloud")
+        resolver = InstanceResolver({"main": main, "second": second})
+        assert resolver.resolve(instance="alpha") is second
+        assert resolver.resolve(instance="ALPHA") is second  # case-insensitive
+
+    def test_exact_match_wins_over_substring(self):
+        # If "second" is a real instance name, don't fall through to substring match
+        main = _mock_client("https://main.youtrack.cloud")
+        second = _mock_client("https://second.youtrack.cloud")
+        resolver = InstanceResolver({"main": main, "second": second})
+        assert resolver.resolve(instance="second") is second
+
     def test_url_auto_detection(self):
         main = _mock_client("https://main.youtrack.cloud")
         second = _mock_client("https://second.youtrack.cloud")
