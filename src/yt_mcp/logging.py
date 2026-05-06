@@ -154,19 +154,40 @@ def setup_sentry() -> None:
 
 _IGNORED_EXCEPTIONS = (BrokenPipeError, ConnectionResetError)
 
+# ValueError messages that indicate user-input validation, not bugs.
+# These are LLM-supplied bad params, not code defects — drop from Sentry.
+_USER_INPUT_VALUE_ERROR_PATTERNS = (
+    "Unknown YouTrack instance",
+    "YouTrack query error",
+    "YouTrack not found error",
+)
+
+
+def _is_user_input_error(exc: BaseException) -> bool:
+    """True if the exception is from validating LLM-supplied input, not a code bug."""
+    if not isinstance(exc, ValueError):
+        return False
+    msg = str(exc)
+    return any(p in msg for p in _USER_INPUT_VALUE_ERROR_PATTERNS)
+
 
 def _scrub_event(event: dict, hint: dict) -> dict | None:
-    """Remove sensitive data and filter out benign shutdown errors before sending to Sentry."""
-    # Drop client-disconnect noise (happens when MCP client closes stdio pipe)
+    """Remove sensitive data and filter out benign errors before sending to Sentry."""
+    # Drop client-disconnect noise + user-input validation errors
     exc_info = hint.get("exc_info") if hint else None
     if exc_info:
         exc = exc_info[1] if len(exc_info) > 1 else None
         if isinstance(exc, _IGNORED_EXCEPTIONS):
             return None
+        if exc is not None and _is_user_input_error(exc):
+            return None
         # ExceptionGroup with only ignored exceptions inside
         if hasattr(exc, "exceptions"):
             inner = getattr(exc, "exceptions", ())
-            if inner and all(isinstance(e, _IGNORED_EXCEPTIONS) for e in inner):
+            if inner and all(
+                isinstance(e, _IGNORED_EXCEPTIONS) or _is_user_input_error(e)
+                for e in inner
+            ):
                 return None
 
     if "extra" in event:
