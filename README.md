@@ -1,5 +1,13 @@
 # yt-mcp
 
+[![Tests](https://github.com/velesnitski/yt-mcp/actions/workflows/test.yml/badge.svg)](https://github.com/velesnitski/yt-mcp/actions/workflows/test.yml)
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/velesnitski/yt-mcp)](https://github.com/velesnitski/yt-mcp/releases)
+[![Tools](https://img.shields.io/badge/tools-66-purple.svg)](#available-tools-66)
+[![Docker](https://img.shields.io/badge/docker-velesnitski%2Fyt--mcp-blue?logo=docker)](https://hub.docker.com/r/velesnitski/yt-mcp)
+[![Stars](https://img.shields.io/github/stars/velesnitski/yt-mcp?style=social)](https://github.com/velesnitski/yt-mcp/stargazers)
+
 YouTrack MCP server for [Claude Code](https://claude.com/claude-code), [GitHub Copilot](https://github.com/features/copilot), [Cursor](https://cursor.com), [JetBrains IDEs](https://www.jetbrains.com/help/idea/mcp.html), [n8n](https://n8n.io), and any MCP-compatible client. Talk to your YouTrack instance in natural language.
 
 ## Quick start
@@ -186,7 +194,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 - *"Log 2 hours of development on PROJ-1828"*
 - *"Find articles about deployment"*
 
-### Available tools (63)
+### Available tools (66)
 
 #### Issues (18)
 
@@ -249,13 +257,16 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `get_current_user` | Get the authenticated user's profile |
 | `search_users` | Search users by name, login, or email |
 
-#### Discovery (3)
+#### Discovery & cross-issue analysis (6)
 
 | Tool | Description |
 |---|---|
 | `list_tags` | List all issue tags with issue counts |
 | `list_saved_searches` | List all saved searches (queries) |
 | `run_saved_search` | Execute a saved search by name and return matching issues |
+| `audit_issue_list` | Get current status/assignee/idle for a list of IDs (validate stale roadmaps) |
+| `compare_issue_lists` | Diff a known list vs a query — find untracked items or stale entries |
+| `get_roadmap` | Cross-project unresolved view filtered by type and state (parallel fetch) |
 
 #### Knowledge Base (8)
 
@@ -375,7 +386,7 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{
     uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
 ```
 
-You should see all 63 tools listed.
+You should see all 66 tools listed.
 
 ## Setup for Windows
 
@@ -553,7 +564,7 @@ Put it behind a reverse proxy (Caddy, nginx, Cloudflare Tunnel) for HTTPS.
 
 ### 3. Use it
 
-Start a conversation in claude.ai and ask about your YouTrack issues. All 63 tools are available.
+Start a conversation in claude.ai and ask about your YouTrack issues. All 66 tools are available.
 
 > Without `YOUTRACK_OAUTH_URL`, OAuth is disabled and the server works in standard mode (stdio/SSE without auth) — no changes to existing setups.
 
