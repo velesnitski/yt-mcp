@@ -163,32 +163,52 @@ _USER_INPUT_VALUE_ERROR_PATTERNS = (
 )
 
 
+def _walk_exception_chain(exc: BaseException):
+    """Yield exc and every cause/context in its chain (depth-first, deduped)."""
+    seen: set[int] = set()
+    stack: list[BaseException] = [exc]
+    while stack:
+        cur = stack.pop()
+        if cur is None or id(cur) in seen:
+            continue
+        seen.add(id(cur))
+        yield cur
+        for next_exc in (cur.__cause__, cur.__context__):
+            if next_exc is not None:
+                stack.append(next_exc)
+        # ExceptionGroup members
+        if hasattr(cur, "exceptions"):
+            for inner in getattr(cur, "exceptions", ()) or ():
+                stack.append(inner)
+
+
 def _is_user_input_error(exc: BaseException) -> bool:
-    """True if the exception is from validating LLM-supplied input, not a code bug."""
-    if not isinstance(exc, ValueError):
-        return False
-    msg = str(exc)
-    return any(p in msg for p in _USER_INPUT_VALUE_ERROR_PATTERNS)
+    """True if any exception in the chain matches a user-input pattern."""
+    for e in _walk_exception_chain(exc):
+        if isinstance(e, ValueError):
+            msg = str(e)
+            if any(p in msg for p in _USER_INPUT_VALUE_ERROR_PATTERNS):
+                return True
+    return False
+
+
+def _is_ignored_disconnect(exc: BaseException) -> bool:
+    """True if any exception in the chain is a benign client disconnect."""
+    for e in _walk_exception_chain(exc):
+        if isinstance(e, _IGNORED_EXCEPTIONS):
+            return True
+    return False
 
 
 def _scrub_event(event: dict, hint: dict) -> dict | None:
     """Remove sensitive data and filter out benign errors before sending to Sentry."""
-    # Drop client-disconnect noise + user-input validation errors
     exc_info = hint.get("exc_info") if hint else None
     if exc_info:
         exc = exc_info[1] if len(exc_info) > 1 else None
-        if isinstance(exc, _IGNORED_EXCEPTIONS):
+        if exc is not None and _is_ignored_disconnect(exc):
             return None
         if exc is not None and _is_user_input_error(exc):
             return None
-        # ExceptionGroup with only ignored exceptions inside
-        if hasattr(exc, "exceptions"):
-            inner = getattr(exc, "exceptions", ())
-            if inner and all(
-                isinstance(e, _IGNORED_EXCEPTIONS) or _is_user_input_error(e)
-                for e in inner
-            ):
-                return None
 
     if "extra" in event:
         for key in list(event["extra"].keys()):
