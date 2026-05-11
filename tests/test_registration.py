@@ -44,7 +44,7 @@ class TestToolRegistration:
         register_all(mcp, resolver, config)
 
         tools = _get_tool_names(mcp)
-        assert len(tools) == 66, f"Expected 66 tools, got {len(tools)}: {sorted(tools)}"
+        assert len(tools) == 67, f"Expected 67 tools, got {len(tools)}: {sorted(tools)}"
 
     def test_expected_tools_present(self):
         mcp = FastMCP("test")
@@ -65,6 +65,7 @@ class TestToolRegistration:
             "create_sprint", "update_sprint", "add_issues_to_sprint",
             "list_tags", "list_saved_searches", "run_saved_search",
             "audit_issue_list", "compare_issue_lists", "get_roadmap",
+            "track_cross_dept_journey",
             "list_attachments", "get_attachment_url", "count_issues",
             "list_templates", "create_issue_from_template",
             "get_issue_history", "rollback_issue", "get_work_items",
@@ -168,4 +169,4 @@ class TestToolRegistration:
         register_all(mcp, resolver, config=None)
 
         tools = _get_tool_names(mcp)
-        assert len(tools) == 66
+        assert len(tools) == 67
