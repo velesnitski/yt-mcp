@@ -146,7 +146,120 @@ def _gather_subtask_ids(issue: dict) -> list[str]:
     return ids
 
 
+# Default handoff states — issue is "in someone else's court" while in any of these
+_DEFAULT_HANDOFF_STATES = (
+    "For Review", "Code Review", "In Review",
+    "Dev QA", "Staging QA", "Prod QA", "On Testing",
+    "Ready for Stage", "Ready to Prod", "Ready for Release",
+    "Blocked",
+)
+
+
 def register(mcp, resolver: InstanceResolver):
+
+    @mcp.tool()
+    async def get_handoff_snapshot(
+        projects: str = "",
+        states: str = "",
+        stale_days: int = 5,
+        instance: str = "",
+    ) -> str:
+        """Snapshot of all tickets currently in handoff states (waiting on another team).
+
+        Fast single-query view (1 API call) — complements track_cross_dept_journey
+        which is richer but per-issue. Groups results by state (which dept holds it).
+
+        Args:
+            projects: Comma-separated project shortnames (empty = all accessible)
+            states: Comma-separated handoff states (empty = use defaults:
+                For Review, Dev QA/Staging QA/Prod QA, Ready for Stage/Prod/Release, Blocked)
+            stale_days: Highlight tickets idle > N days (default: 5)
+            instance: YouTrack instance (optional)
+        """
+        client = resolver.resolve(instance)
+
+        state_list = [s.strip() for s in states.split(",") if s.strip()] or list(_DEFAULT_HANDOFF_STATES)
+        proj_list = [p.strip() for p in projects.split(",") if p.strip()]
+
+        # Build query: (proj: A OR proj: B) AND (State: X OR State: Y)
+        proj_clause = ""
+        if proj_list:
+            proj_clause = " ".join(f"project: {p}" for p in proj_list)
+            if len(proj_list) > 1:
+                proj_clause = "(" + " or ".join(f"project: {p}" for p in proj_list) + ")"
+        state_clause = "(" + " or ".join(
+            f"State: {{{s}}}" if " " in s else f"State: {s}" for s in state_list
+        ) + ")"
+        query = f"{proj_clause} {state_clause} #Unresolved".strip()
+
+        data = await client.get(
+            "/api/issues",
+            params={
+                "query": query,
+                "fields": "idReadable,summary,state(name),assignee(name),"
+                "project(shortName),updated",
+                "$top": "500",
+            },
+        )
+
+        if not data:
+            return f"No handoff tickets found.\nQuery: `{query}`"
+
+        now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
+
+        # Group by state
+        by_state: dict[str, list[dict]] = {}
+        for issue in data:
+            state = (issue.get("state") or {}).get("name", "?")
+            by_state.setdefault(state, []).append(issue)
+
+        total = len(data)
+        stale_count = 0
+        proj_names = sorted({(i.get("project") or {}).get("shortName", "?") for i in data})
+
+        lines = [
+            f"## Handoff snapshot — {len(proj_names)} projects, {total} tickets",
+            f"**Projects:** {', '.join(proj_names)}",
+            f"**Stale threshold:** {stale_days}d",
+            "",
+        ]
+
+        # Render each state group
+        for state in sorted(by_state, key=lambda s: -len(by_state[s])):
+            items = by_state[state]
+            dept_hint = _state_dept(state) or "?"
+            lines.append(f"### {state} ({len(items)}) — {dept_hint} team holding")
+
+            # Sort by oldest (most stale first)
+            items_with_age = []
+            for issue in items:
+                updated_ms = issue.get("updated", now_ms)
+                days_idle = max(0, (now_ms - updated_ms) / 86400000)
+                items_with_age.append((days_idle, issue))
+            items_with_age.sort(key=lambda x: -x[0])
+
+            shown = 0
+            for days_idle, issue in items_with_age:
+                if shown >= 15:
+                    break
+                iid = issue.get("idReadable", "?")
+                summary = (issue.get("summary", "") or "?")[:80]
+                assignee = (issue.get("assignee") or {}).get("name") or "Unassigned"
+                proj = (issue.get("project") or {}).get("shortName", "?")
+                stale_marker = " 🔴" if days_idle >= stale_days else ""
+                if days_idle >= stale_days:
+                    stale_count += 1
+                lines.append(
+                    f"- **{iid}** [{proj}] {days_idle:.0f}d{stale_marker} → {assignee} | {summary}"
+                )
+                shown += 1
+            if len(items) > 15:
+                lines.append(f"_...and {len(items) - 15} more_")
+            lines.append("")
+
+        # Summary line
+        lines.append(f"**Stuck (>{stale_days}d):** {stale_count} of {total}")
+        return compact_lines(lines)
 
     @mcp.tool()
     async def track_cross_dept_journey(
