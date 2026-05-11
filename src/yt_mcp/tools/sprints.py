@@ -1,8 +1,9 @@
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
 from yt_mcp.resolver import InstanceResolver
-from yt_mcp.formatters import compact_lines
+from yt_mcp.formatters import compact_lines, _resolve_state
 
 
 async def _resolve_board(client: Any, board_name: str) -> tuple[dict | None, str]:
@@ -164,3 +165,127 @@ def register(mcp, resolver: InstanceResolver):
         if failed:
             parts.append(f"**Failed ({len(failed)}):** {'; '.join(failed)}")
         return compact_lines(parts)
+
+    @mcp.tool()
+    async def get_active_sprint_issues(
+        boards: str = "",
+        exclude_states: str = "",
+        ids_only: bool = False,
+        instance: str = "",
+    ) -> str:
+        """Collect issue IDs across current sprints of all boards (parallel fetch).
+
+        Use for "what's actually in flight" across the org — sprint-based truth,
+        not state guessing. Feeds into translation/audit/digest flows.
+
+        Args:
+            boards: Comma-separated board names (partial match). Empty = all boards.
+            exclude_states: Comma-separated states to skip (e.g. 'Closed,Done').
+            ids_only: If True, return just a comma-separated ID list (for piping
+                into id-based queries like translation). If False, return grouped
+                markdown.
+            instance: YouTrack instance (optional)
+        """
+        client = resolver.resolve(instance)
+
+        all_boards = await client.get(
+            "/api/agiles",
+            params={
+                "fields": "id,name,currentSprint(id,name),sprints(id,name,archived)",
+            },
+        )
+        if not all_boards:
+            return "No agile boards found."
+
+        # Filter boards by name if requested
+        if boards:
+            name_filters = [b.strip().lower() for b in boards.split(",") if b.strip()]
+            selected = [
+                b for b in all_boards
+                if any(f in b.get("name", "").lower() for f in name_filters)
+            ]
+        else:
+            selected = all_boards
+
+        # Pick current sprint per board (fall back to latest non-archived)
+        to_fetch: list[tuple[dict, dict]] = []
+        boards_no_sprint: list[str] = []
+        for b in selected:
+            cs = b.get("currentSprint")
+            if cs and cs.get("id"):
+                to_fetch.append((b, cs))
+                continue
+            active_sprints = [s for s in b.get("sprints", []) if not s.get("archived")]
+            if active_sprints:
+                to_fetch.append((b, active_sprints[-1]))
+            else:
+                boards_no_sprint.append(b.get("name", "?"))
+
+        if not to_fetch:
+            return f"No boards with active sprints. (Searched {len(selected)} boards.)"
+
+        excl = {s.strip().lower() for s in exclude_states.split(",") if s.strip()}
+
+        async def _fetch_sprint_issues(board: dict, sprint: dict) -> tuple[str, str, list[dict]]:
+            try:
+                data = await client.get(
+                    f"/api/agiles/{board['id']}/sprints/{sprint['id']}",
+                    params={
+                        "fields": "board(columns(issues(idReadable,summary,"
+                        "state(name),assignee(name),customFields(name,value(name)))))",
+                    },
+                )
+                issues: list[dict] = []
+                for col in (data.get("board") or {}).get("columns", []):
+                    for issue in col.get("issues", []):
+                        issues.append(issue)
+                return board.get("name", "?"), sprint.get("name", "?"), issues
+            except (ValueError, KeyError):
+                return board.get("name", "?"), sprint.get("name", "?"), []
+
+        results = await asyncio.gather(*(_fetch_sprint_issues(b, s) for b, s in to_fetch))
+
+        # Dedupe (same issue can appear on multiple boards)
+        seen_ids: set[str] = set()
+        per_board: list[tuple[str, str, list[dict]]] = []
+        all_ids: list[str] = []
+        for board_name, sprint_name, issues in results:
+            unique = []
+            for issue in issues:
+                iid = issue.get("idReadable", "")
+                if not iid or iid in seen_ids:
+                    continue
+                state = _resolve_state(issue).lower()
+                if state in excl:
+                    continue
+                seen_ids.add(iid)
+                unique.append(issue)
+                all_ids.append(iid)
+            per_board.append((board_name, sprint_name, unique))
+
+        if ids_only:
+            return ", ".join(all_ids) if all_ids else "(no issues)"
+
+        lines = [
+            f"## Active sprint issues — {len(all_ids)} unique across {len(to_fetch)} boards",
+        ]
+        if exclude_states:
+            lines.append(f"**Excluded states:** {exclude_states}")
+        lines.append("")
+
+        for board_name, sprint_name, issues in sorted(per_board, key=lambda x: -len(x[2])):
+            if not issues:
+                continue
+            lines.append(f"### {board_name} — {sprint_name} ({len(issues)})")
+            for issue in issues:
+                iid = issue.get("idReadable", "?")
+                state = _resolve_state(issue)
+                assignee = (issue.get("assignee") or {}).get("name") or "Unassigned"
+                summary = (issue.get("summary", "") or "?")[:80]
+                lines.append(f"- **{iid}** [{state}] → {assignee} | {summary}")
+            lines.append("")
+
+        if boards_no_sprint:
+            lines.append(f"_Boards without active sprint: {', '.join(boards_no_sprint)}_")
+
+        return compact_lines(lines)
