@@ -121,3 +121,76 @@ class TestTranslationParsing:
         assert entry["summary"] == "Translated title"
         assert "line 1" in entry["description"]
         assert "Line 2" in entry["description"]
+
+
+class TestBlockSplitting:
+    """Verify '---' splits between ISSUE blocks but not inside content (e.g. '----')."""
+
+    @staticmethod
+    def _split(translations: str) -> list[str]:
+        """Mirror the parser's block-splitting logic."""
+        raw_lines = translations.split("\n")
+        blocks_lines: list[list[str]] = [[]]
+        for idx, line in enumerate(raw_lines):
+            if line.strip() == "---":
+                next_non_empty = ""
+                for look in raw_lines[idx + 1:]:
+                    if look.strip():
+                        next_non_empty = look.strip()
+                        break
+                if next_non_empty.startswith("ISSUE:"):
+                    blocks_lines.append([])
+                    continue
+            blocks_lines[-1].append(line)
+        return ["\n".join(b).strip() for b in blocks_lines if "\n".join(b).strip()]
+
+    def test_separates_two_issues(self):
+        text = (
+            "ISSUE: A-1\nSUMMARY: First\n"
+            "---\n"
+            "ISSUE: B-2\nSUMMARY: Second\n"
+        )
+        blocks = self._split(text)
+        assert len(blocks) == 2
+        assert "A-1" in blocks[0]
+        assert "B-2" in blocks[1]
+
+    def test_four_dash_in_description_not_a_separator(self):
+        """`----` inside a description must NOT split the block."""
+        text = (
+            "ISSUE: A-1\n"
+            "SUMMARY: First\n"
+            "DESCRIPTION:\n"
+            "English text here\n"
+            "\n"
+            "----\n"
+            "\n"
+            "Russian text below\n"
+        )
+        blocks = self._split(text)
+        assert len(blocks) == 1
+        assert "English text" in blocks[0]
+        assert "Russian text" in blocks[0]
+        assert "----" in blocks[0]
+
+    def test_three_dash_in_content_followed_by_non_issue_kept(self):
+        """`---` followed by non-ISSUE content is treated as content."""
+        text = (
+            "ISSUE: A-1\n"
+            "DESCRIPTION:\n"
+            "Some content\n"
+            "---\n"
+            "More content (not a new issue)\n"
+        )
+        blocks = self._split(text)
+        assert len(blocks) == 1
+        assert "More content" in blocks[0]
+
+    def test_three_dash_followed_by_issue_splits(self):
+        text = (
+            "ISSUE: A-1\nDESCRIPTION: first\n"
+            "---\n"
+            "ISSUE: B-2\nDESCRIPTION: second\n"
+        )
+        blocks = self._split(text)
+        assert len(blocks) == 2

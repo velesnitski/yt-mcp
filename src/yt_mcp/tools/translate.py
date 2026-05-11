@@ -119,8 +119,26 @@ def register(mcp, resolver: InstanceResolver):
         if not batch_tag:
             batch_tag = f"yt-translate-{int(time.time())}"
 
-        # Parse the structured input
-        blocks = translations.split("---")
+        # Parse the structured input.
+        # Split on standalone '---' separator lines, BUT only when the next
+        # non-empty line starts with 'ISSUE:' — otherwise treat as content
+        # (e.g. '----' delimiter inside a bilingual description).
+        raw_lines = translations.split("\n")
+        blocks_lines: list[list[str]] = [[]]
+        for idx, line in enumerate(raw_lines):
+            stripped = line.strip()
+            if stripped == "---":
+                # Look ahead for the next non-empty line
+                next_non_empty = ""
+                for look in raw_lines[idx + 1:]:
+                    if look.strip():
+                        next_non_empty = look.strip()
+                        break
+                if next_non_empty.startswith("ISSUE:"):
+                    blocks_lines.append([])
+                    continue
+            blocks_lines[-1].append(line)
+        blocks = ["\n".join(b) for b in blocks_lines]
         parsed = []
         for block in blocks:
             block = block.strip()
