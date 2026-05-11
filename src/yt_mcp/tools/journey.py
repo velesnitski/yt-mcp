@@ -162,6 +162,7 @@ def register(mcp, resolver: InstanceResolver):
         projects: str = "",
         states: str = "",
         stale_days: int = 5,
+        active_within_days: int = 0,
         instance: str = "",
     ) -> str:
         """Snapshot of all tickets currently in handoff states (waiting on another team).
@@ -174,6 +175,8 @@ def register(mcp, resolver: InstanceResolver):
             states: Comma-separated handoff states (empty = use defaults:
                 For Review, Dev QA/Staging QA/Prod QA, Ready for Stage/Prod/Release, Blocked)
             stale_days: Highlight tickets idle > N days (default: 5)
+            active_within_days: Only show tickets updated in last N days (default: 0 = all).
+                Use 14 for "currently in flight" view.
             instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
@@ -190,7 +193,10 @@ def register(mcp, resolver: InstanceResolver):
         state_clause = "(" + " or ".join(
             f"State: {{{s}}}" if " " in s else f"State: {s}" for s in state_list
         ) + ")"
-        query = f"{proj_clause} {state_clause} #Unresolved".strip()
+        recency_clause = ""
+        if active_within_days > 0:
+            recency_clause = f" updated: {{minus {active_within_days}d}} .. Today"
+        query = f"{proj_clause} {state_clause} #Unresolved{recency_clause}".strip()
 
         data = await client.get(
             "/api/issues",
@@ -220,7 +226,8 @@ def register(mcp, resolver: InstanceResolver):
         lines = [
             f"## Handoff snapshot — {len(proj_names)} projects, {total} tickets",
             f"**Projects:** {', '.join(proj_names)}",
-            f"**Stale threshold:** {stale_days}d",
+            f"**Stale threshold:** {stale_days}d"
+            + (f" | **Filter:** updated within {active_within_days}d" if active_within_days > 0 else ""),
             "",
         ]
 
