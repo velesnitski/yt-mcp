@@ -100,6 +100,8 @@ def register(mcp, resolver: InstanceResolver):
     async def apply_translations(
         translations: str,
         batch_tag: str = "",
+        preserve_original: bool = False,
+        delimiter: str = "----",
         instance: str = "",
     ) -> str:
         """Apply translated text to YouTrack issues. Tags for rollback. Format: ISSUE/SUMMARY/DESCRIPTION/COMMENT blocks separated by ---.
@@ -107,6 +109,10 @@ def register(mcp, resolver: InstanceResolver):
         Args:
             translations: Structured translation block
             batch_tag: Batch tag for rollback (auto-generated if empty)
+            preserve_original: If True, append the current original description below
+                a delimiter so both languages remain visible. Summary is still replaced.
+                Comments use the same bilingual format.
+            delimiter: Separator line between English and original (default: '----')
             instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
@@ -177,12 +183,33 @@ def register(mcp, resolver: InstanceResolver):
                 # Tag for rollback
                 await client.execute_command(issue_id, f"tag {batch_tag}")
 
+                # Fetch originals if we need to preserve them
+                originals: dict = {}
+                if preserve_original:
+                    fields = "description"
+                    if entry.get("comments"):
+                        fields += ",comments(id,text)"
+                    cur = await client.get(
+                        f"/api/issues/{issue_id}",
+                        params={"fields": fields},
+                    )
+                    originals["description"] = cur.get("description", "") or ""
+                    originals["comments"] = {
+                        c.get("id"): c.get("text", "")
+                        for c in (cur.get("comments") or [])
+                    }
+
                 # Update summary and/or description
                 payload: dict = {}
                 if entry.get("summary"):
                     payload["summary"] = entry["summary"]
                 if entry.get("description"):
-                    payload["description"] = entry["description"]
+                    new_desc = entry["description"]
+                    if preserve_original and originals.get("description"):
+                        new_desc = (
+                            f"{new_desc}\n\n{delimiter}\n\n{originals['description']}"
+                        )
+                    payload["description"] = new_desc
 
                 if payload:
                     await client.post(f"/api/issues/{issue_id}", json=payload)
@@ -191,6 +218,10 @@ def register(mcp, resolver: InstanceResolver):
                 for comment in entry.get("comments", []):
                     c_id = comment["id"]
                     c_text = comment["text"]
+                    if preserve_original:
+                        orig_text = originals.get("comments", {}).get(c_id, "")
+                        if orig_text:
+                            c_text = f"{c_text}\n\n{delimiter}\n\n{orig_text}"
                     try:
                         await client.update_comment(issue_id, c_id, c_text)
                         updated_comments += 1
