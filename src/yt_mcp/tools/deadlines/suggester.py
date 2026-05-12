@@ -9,7 +9,12 @@ from typing import Any
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.tools.deadlines import config as cfg
 from yt_mcp.tools.deadlines import fetcher
-from yt_mcp.tools.deadlines.parser import _DONE_STATES, _is_deadline_field
+from yt_mcp.tools.deadlines.parser import (
+    _DONE_STATES,
+    _compile_bot_patterns,
+    _is_bot,
+    _is_deadline_field,
+)
 from yt_mcp.tools.deadlines.render import render_suggestion
 
 
@@ -40,6 +45,9 @@ def register(mcp, resolver: InstanceResolver):
         """
         client = resolver.resolve(instance)
         now = datetime.now(tz=timezone.utc)
+        policy = cfg._load_policy()
+        bot_patterns = _compile_bot_patterns(policy)
+        manual_pms: set[str] = set(policy.get("manual_pms") or [])
         operator = await fetcher.get_operator_login(client)
         proj_clause, proj_list = fetcher.build_project_clause(projects)
 
@@ -63,13 +71,13 @@ def register(mcp, resolver: InstanceResolver):
         for issue in issues:
             r = (issue.get("reporter") or {}).get("login")
             a = fetcher.extract_assignee_login(issue)
-            if r and a:
+            if r and a and not _is_bot(r, bot_patterns) and not _is_bot(a, bot_patterns):
                 reporter_assignees[r].add(a)
         fanouts = sorted(
             ((r, len(s)) for r, s in reporter_assignees.items()),
             key=lambda x: -x[1],
         )
-        pms: set[str] = set()
+        pms: set[str] = set(manual_pms)
         if fanouts:
             top_n = max(1, int(len(fanouts) * (1 - _PM_FANOUT_PERCENTILE)))
             for r, fanout in fanouts[:top_n]:
@@ -83,12 +91,14 @@ def register(mcp, resolver: InstanceResolver):
         for iid, activities in zip(ids, results):
             issue = issue_by_id.get(iid, {})
             target = fetcher.extract_assignee_login(issue)
-            if not target:
+            if not target or _is_bot(target, bot_patterns):
                 continue
             for a in activities:
                 fname = (a.get("field") or {}).get("name", "")
                 author = (a.get("author") or {}).get("login") or ""
                 if not author or author == target or author in pms:
+                    continue
+                if _is_bot(author, bot_patterns):
                     continue
                 if fname == "State":
                     added = a.get("added") or []
@@ -102,12 +112,12 @@ def register(mcp, resolver: InstanceResolver):
         all_targets = {t for t, _ in field_edits} | {t for t, _ in resolvers}
         for i in issues:
             t = fetcher.extract_assignee_login(i)
-            if t:
+            if t and not _is_bot(t, bot_patterns):
                 all_targets.add(t)
 
         suggestion: dict[str, Any] = {}
         for target in sorted(all_targets):
-            if target in pms:
+            if target in pms or _is_bot(target, bot_patterns):
                 continue
             candidates: dict[str, dict] = {}
             for (t, editor), n in field_edits.items():
