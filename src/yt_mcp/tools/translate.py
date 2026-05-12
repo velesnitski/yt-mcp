@@ -16,6 +16,36 @@ def _has_non_ascii(text: str) -> bool:
     return bool(_NON_ASCII_RE.search(text))
 
 
+def _split_bilingual(desc: str, delimiter: str = "----") -> tuple[str, str]:
+    """Split a description on a standalone delimiter line.
+
+    Returns ``(top, bottom)``. If no standalone delimiter line is present,
+    returns ``(desc, "")``. Whitespace adjacent to the delimiter is stripped.
+    """
+    if not desc:
+        return "", ""
+    lines = desc.split("\n")
+    for i, line in enumerate(lines):
+        if line.strip() == delimiter:
+            top = "\n".join(lines[:i]).rstrip()
+            bottom = "\n".join(lines[i + 1:]).lstrip()
+            return top, bottom
+    return desc, ""
+
+
+def _is_bilingual(desc: str, delimiter: str = "----") -> bool:
+    """True if description appears to already be in EN + delimiter + RU format.
+
+    Heuristic: a standalone delimiter line with non-empty content above and
+    below, where the bottom portion contains non-ASCII characters. False
+    positives just trigger an unnecessary skip — never data loss.
+    """
+    top, bottom = _split_bilingual(desc, delimiter)
+    if not top.strip() or not bottom.strip():
+        return False
+    return _has_non_ascii(bottom)
+
+
 def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool()
@@ -23,6 +53,8 @@ def register(mcp, resolver: InstanceResolver):
         query: str,
         include_comments: bool = True,
         max_results: int = 10,
+        exclude_translated: bool = True,
+        delimiter: str = "----",
         instance: str = "",
     ) -> str:
         """Fetch issues with non-ASCII text for translation. Call apply_translations with results.
@@ -31,9 +63,22 @@ def register(mcp, resolver: InstanceResolver):
             query: YouTrack search query
             include_comments: Include comments (default: True)
             max_results: Batch size (default: 10)
+            exclude_translated: Auto-exclude issues already tagged from prior
+                runs (any `yt-translate-*` tag) and issues whose description
+                already has the EN + delimiter + original-language bilingual
+                structure. Default True. Set False to force re-translation.
+            delimiter: Bilingual delimiter to detect already-translated state
+                (default: '----'). Must match what `apply_translations` uses.
             instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
+
+        # Auto-exclude previously-tagged issues unless the caller already has
+        # an explicit tag clause. Wildcard `tag: -yt-translate-*` is supported
+        # by YouTrack tag-query syntax.
+        if exclude_translated and "tag:" not in query.lower():
+            query = f"{query} tag: -yt-translate-*".strip()
+
         comment_fields = ",comments(id,text,author(name))" if include_comments else ""
         issues = await client.get(
             "/api/issues",
@@ -47,25 +92,50 @@ def register(mcp, resolver: InstanceResolver):
         if not issues:
             return f"No issues match query: `{query}`"
 
-        # Filter to issues with non-ASCII text
+        # Filter to issues with non-ASCII text that aren't already bilingual.
         to_translate = []
-        skipped = 0
+        skipped_english = 0
+        skipped_bilingual = 0
         for issue in issues:
             summary = issue.get("summary", "")
             desc = issue.get("description", "") or ""
-            if _has_non_ascii(summary) or _has_non_ascii(desc):
-                to_translate.append(issue)
-            else:
-                skipped += 1
+            summary_needs = _has_non_ascii(summary)
+            desc_needs = _has_non_ascii(desc)
+            if not summary_needs and not desc_needs:
+                skipped_english += 1
+                continue
+            # If summary is already English and the description is already
+            # bilingual, skip — it's in the desired final format.
+            if (
+                exclude_translated
+                and not summary_needs
+                and desc_needs
+                and _is_bilingual(desc, delimiter)
+            ):
+                skipped_bilingual += 1
+                continue
+            to_translate.append(issue)
 
         if not to_translate:
-            return f"No issues need translation (all {len(issues)} are already in target language)."
+            total_skipped = skipped_english + skipped_bilingual
+            if skipped_bilingual:
+                return (
+                    f"No issues need translation (all {total_skipped} skipped: "
+                    f"{skipped_english} already English, {skipped_bilingual} already bilingual)."
+                )
+            return f"No issues need translation (all {total_skipped} are already in target language)."
 
         # Build structured output for the LLM to translate
+        skipped_label = f"{skipped_english + skipped_bilingual} already in target language"
+        if skipped_bilingual:
+            skipped_label = (
+                f"{skipped_english + skipped_bilingual} already done "
+                f"({skipped_english} English, {skipped_bilingual} bilingual)"
+            )
         lines = [
             "## Issues for translation",
             f"**Query:** `{query}`",
-            f"**Issues to translate:** {len(to_translate)} (skipped {skipped} already in target language)",
+            f"**Issues to translate:** {len(to_translate)} (skipped {skipped_label})",
             "",
             "Translate the text below and call `apply_translations` with the results.",
             "Preserve: markdown, URLs, image refs, code blocks, @mentions, issue IDs, product names.",
@@ -224,9 +294,17 @@ def register(mcp, resolver: InstanceResolver):
                 if entry.get("description"):
                     new_desc = entry["description"]
                     if preserve_original and originals.get("description"):
-                        new_desc = (
-                            f"{new_desc}\n\n{delimiter}\n\n{originals['description']}"
-                        )
+                        orig_desc = originals["description"]
+                        if _is_bilingual(orig_desc, delimiter):
+                            # Already bilingual — replace just the EN section,
+                            # keep the original-language portion verbatim.
+                            # Prevents EN/----/EN/----/RU triple-content.
+                            _, ru_part = _split_bilingual(orig_desc, delimiter)
+                            new_desc = f"{new_desc}\n\n{delimiter}\n\n{ru_part}"
+                        else:
+                            new_desc = (
+                                f"{new_desc}\n\n{delimiter}\n\n{orig_desc}"
+                            )
                     payload["description"] = new_desc
 
                 if payload:
