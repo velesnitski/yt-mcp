@@ -7,7 +7,10 @@ from typing import Any
 ISSUE_FIELDS = (
     "idReadable,summary,created,updated,"
     "reporter(login,name),"
-    "customFields(name,value(presentation,name,text))"
+    # `login` must be requested here so user-typed custom fields (Assignee,
+    # etc.) return a stable identifier — `name` is the display string and
+    # mismatches activity-log authors (which always use login).
+    "customFields(name,value(login,presentation,name,text))"
 )
 
 ACTIVITY_FIELDS = (
