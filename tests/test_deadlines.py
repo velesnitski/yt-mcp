@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from yt_mcp.tools import deadlines
+from yt_mcp.tools.deadlines import config as dcfg
 
 
 # ---------- pure helpers ----------
@@ -207,15 +208,30 @@ class TestClassifyShift:
         out = deadlines._classify_shift(**args)
         assert out["classification"] == "unauthorized"
 
+    def test_unrelated_approver_comment_does_not_trigger_loose(self):
+        """REGRESSION: a comment by an approver with no approval keyword was
+        previously misclassified as `compliant_loose` solely because its
+        timestamp was before the shift. It must now be `unauthorized`."""
+        args = self._base_args()
+        args["comments"] = [{
+            "id": "c1",
+            "created": args["shift_ts"] - 3 * 86400 * 1000,  # 3 days before
+            "author": {"login": "bob.manager"},
+            "text": "deploying tonight",  # no keyword, unrelated content
+        }]
+        out = deadlines._classify_shift(**args)
+        assert out["classification"] == "unauthorized"
+
 
 # ---------- config loading ----------
 
 class TestConfigLoading:
     def test_returns_empty_when_no_file(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(deadlines, "_MANAGERS_FILE", tmp_path / "missing.json")
-        monkeypatch.setattr(deadlines, "_MANAGERS_SUGGESTED_FILE", tmp_path / "missing2.json")
-        out = deadlines._load_managers_config()
-        assert out["__source_file__"] == ""
+        monkeypatch.setattr(dcfg, "_MANAGERS_FILE", tmp_path / "missing.json")
+        monkeypatch.setattr(dcfg, "_MANAGERS_SUGGESTED_FILE", tmp_path / "missing2.json")
+        config, metadata = deadlines._load_managers_config()
+        assert config == {}
+        assert metadata["source_file"] == ""
 
     def test_loads_managers_json(self, tmp_path, monkeypatch):
         managers = {
@@ -224,19 +240,36 @@ class TestConfigLoading:
         }
         f = tmp_path / "managers.json"
         f.write_text(json.dumps(managers))
-        monkeypatch.setattr(deadlines, "_MANAGERS_FILE", f)
-        out = deadlines._load_managers_config()
-        assert out["__default__"] == "default.user"
-        assert out["alice.user"]["primary"] == "bob.manager"
+        monkeypatch.setattr(dcfg, "_MANAGERS_FILE", f)
+        config, metadata = deadlines._load_managers_config()
+        assert config["__default__"] == "default.user"
+        assert config["alice.user"]["primary"] == "bob.manager"
+        assert metadata["source_file"] == str(f)
 
     def test_falls_back_to_suggested(self, tmp_path, monkeypatch):
         suggested = {"alice.user": {"primary": "bob.manager", "also_accept": []}}
         f = tmp_path / "managers.suggested.json"
         f.write_text(json.dumps(suggested))
-        monkeypatch.setattr(deadlines, "_MANAGERS_FILE", tmp_path / "missing.json")
-        monkeypatch.setattr(deadlines, "_MANAGERS_SUGGESTED_FILE", f)
-        out = deadlines._load_managers_config()
-        assert out["alice.user"]["primary"] == "bob.manager"
+        monkeypatch.setattr(dcfg, "_MANAGERS_FILE", tmp_path / "missing.json")
+        monkeypatch.setattr(dcfg, "_MANAGERS_SUGGESTED_FILE", f)
+        config, metadata = deadlines._load_managers_config()
+        assert config["alice.user"]["primary"] == "bob.manager"
+        assert metadata["source_file"] == str(f)
+
+    def test_metadata_stripped_from_user_entries(self, tmp_path, monkeypatch):
+        """The `_metadata` key is split out — never bleeds into user-entry view."""
+        suggested = {
+            "_metadata": {"generated": "2026-05-12T00:00:00+00:00", "pms_excluded": ["pm.olga"]},
+            "alice.user": {"primary": "bob.manager"},
+        }
+        f = tmp_path / "managers.suggested.json"
+        f.write_text(json.dumps(suggested))
+        monkeypatch.setattr(dcfg, "_MANAGERS_FILE", tmp_path / "missing.json")
+        monkeypatch.setattr(dcfg, "_MANAGERS_SUGGESTED_FILE", f)
+        config, metadata = deadlines._load_managers_config()
+        assert "_metadata" not in config
+        assert config["alice.user"]["primary"] == "bob.manager"
+        assert metadata["pms_excluded"] == ["pm.olga"]
 
 
 class TestGetApprovers:
@@ -324,10 +357,10 @@ def _register_and_get(client):
 
 class TestAuditTool:
     def test_no_issues_returns_empty_message(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(deadlines, "_CONFIG_DIR", tmp_path)
-        monkeypatch.setattr(deadlines, "_MANAGERS_FILE", tmp_path / "managers.json")
-        monkeypatch.setattr(deadlines, "_MANAGERS_SUGGESTED_FILE", tmp_path / "managers.suggested.json")
-        monkeypatch.setattr(deadlines, "_AUDIT_LOG", tmp_path / "audit.log")
+        monkeypatch.setattr(dcfg, "_CONFIG_DIR", tmp_path)
+        monkeypatch.setattr(dcfg, "_MANAGERS_FILE", tmp_path / "managers.json")
+        monkeypatch.setattr(dcfg, "_MANAGERS_SUGGESTED_FILE", tmp_path / "managers.suggested.json")
+        monkeypatch.setattr(dcfg, "_AUDIT_LOG", tmp_path / "audit.log")
         client = _make_client(issues_list=[])
         tools = _register_and_get(client)
 
@@ -338,14 +371,14 @@ class TestAuditTool:
         assert "No issues match query" in out
 
     def test_unauthorized_shift_classified(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(deadlines, "_CONFIG_DIR", tmp_path)
+        monkeypatch.setattr(dcfg, "_CONFIG_DIR", tmp_path)
         # Write a managers config so the assignee has an approver mapping
         cfg = {"alice.user": {"primary": "bob.manager", "also_accept": []}}
         f = tmp_path / "managers.json"
         f.write_text(json.dumps(cfg))
-        monkeypatch.setattr(deadlines, "_MANAGERS_FILE", f)
-        monkeypatch.setattr(deadlines, "_MANAGERS_SUGGESTED_FILE", tmp_path / "x.json")
-        monkeypatch.setattr(deadlines, "_AUDIT_LOG", tmp_path / "audit.log")
+        monkeypatch.setattr(dcfg, "_MANAGERS_FILE", f)
+        monkeypatch.setattr(dcfg, "_MANAGERS_SUGGESTED_FILE", tmp_path / "x.json")
+        monkeypatch.setattr(dcfg, "_AUDIT_LOG", tmp_path / "audit.log")
 
         shift_ts = int(datetime(2026, 5, 1, tzinfo=timezone.utc).timestamp() * 1000)
         issues = [{
@@ -378,10 +411,10 @@ class TestAuditTool:
         assert "alice.user" in out
 
     def test_standup_excluded(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(deadlines, "_CONFIG_DIR", tmp_path)
-        monkeypatch.setattr(deadlines, "_MANAGERS_FILE", tmp_path / "m.json")
-        monkeypatch.setattr(deadlines, "_MANAGERS_SUGGESTED_FILE", tmp_path / "s.json")
-        monkeypatch.setattr(deadlines, "_AUDIT_LOG", tmp_path / "a.log")
+        monkeypatch.setattr(dcfg, "_CONFIG_DIR", tmp_path)
+        monkeypatch.setattr(dcfg, "_MANAGERS_FILE", tmp_path / "m.json")
+        monkeypatch.setattr(dcfg, "_MANAGERS_SUGGESTED_FILE", tmp_path / "s.json")
+        monkeypatch.setattr(dcfg, "_AUDIT_LOG", tmp_path / "a.log")
         issues = [{
             "idReadable": "ALPHA-2",
             "summary": "DevOps Daily 05.05.26",
@@ -401,13 +434,13 @@ class TestAuditTool:
 
 class TestScorecardTool:
     def test_missed_deadline_counted(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(deadlines, "_CONFIG_DIR", tmp_path)
+        monkeypatch.setattr(dcfg, "_CONFIG_DIR", tmp_path)
         cfg = {"alice.user": {"primary": "bob.manager", "also_accept": []}}
         f = tmp_path / "managers.json"
         f.write_text(json.dumps(cfg))
-        monkeypatch.setattr(deadlines, "_MANAGERS_FILE", f)
-        monkeypatch.setattr(deadlines, "_MANAGERS_SUGGESTED_FILE", tmp_path / "x.json")
-        monkeypatch.setattr(deadlines, "_AUDIT_LOG", tmp_path / "a.log")
+        monkeypatch.setattr(dcfg, "_MANAGERS_FILE", f)
+        monkeypatch.setattr(dcfg, "_MANAGERS_SUGGESTED_FILE", tmp_path / "x.json")
+        monkeypatch.setattr(dcfg, "_AUDIT_LOG", tmp_path / "a.log")
         # Issue with deadline in past, state != Done
         issues = [{
             "idReadable": "ALPHA-1",
@@ -426,14 +459,69 @@ class TestScorecardTool:
         # ALPHA-1 due 2026-04-15 is in Q2; we're at 2026-05-12, state In Progress → missed_no_extension
         assert "alice.user" in out
 
+    def test_miss_attribution_is_per_issue(self, tmp_path, monkeypatch):
+        """REGRESSION: a compliant shift on ISSUE-1 must not cause the miss on
+        ISSUE-2 to be reclassified as missed_after_extension. Previously the
+        scorecard used a per-user cumulative counter, silently under-counting
+        penalties whenever the user had any prior compliant shift."""
+        monkeypatch.setattr(dcfg, "_CONFIG_DIR", tmp_path)
+        cfg_data = {"alice.user": {"primary": "bob.manager", "also_accept": []}}
+        f = tmp_path / "managers.json"
+        f.write_text(json.dumps(cfg_data))
+        monkeypatch.setattr(dcfg, "_MANAGERS_FILE", f)
+        monkeypatch.setattr(dcfg, "_MANAGERS_SUGGESTED_FILE", tmp_path / "x.json")
+        monkeypatch.setattr(dcfg, "_AUDIT_LOG", tmp_path / "a.log")
+
+        # ISSUE-1: compliant_strict shift (Bob, the approver, did it himself)
+        # ISSUE-2: missed deadline, never had a shift. Should be missed_no_extension.
+        shift_ts = int(datetime(2026, 4, 20, tzinfo=timezone.utc).timestamp() * 1000)
+        issues = [
+            {
+                "idReadable": "ALPHA-1", "summary": "Task with approved shift",
+                "state": {"name": "In Progress"},
+                "reporter": {"login": "carol.pm"},
+                "customFields": [
+                    {"name": "Assignee", "value": {"login": "alice.user"}},
+                    {"name": "Due Date", "value": {"presentation": "2026-06-20"}},
+                ],
+            },
+            {
+                "idReadable": "ALPHA-2", "summary": "Task that just got missed",
+                "state": {"name": "In Progress"},
+                "reporter": {"login": "carol.pm"},
+                "customFields": [
+                    {"name": "Assignee", "value": {"login": "alice.user"}},
+                    {"name": "Due Date", "value": {"presentation": "2026-04-15"}},
+                ],
+            },
+        ]
+        activities = {
+            "ALPHA-1": [{
+                "id": "a1", "timestamp": shift_ts,
+                "author": {"login": "bob.manager"},
+                "field": {"name": "Due Date"},
+                "removed": [{"presentation": "2026-05-15"}],
+                "added": [{"presentation": "2026-06-20"}],
+            }],
+            "ALPHA-2": [],
+        }
+        client = _make_client(activities, {}, issues)
+        tools = _register_and_get(client)
+        import asyncio
+        out = asyncio.run(tools["deadline_scorecard"](quarter="2026Q2"))
+        # The miss on ALPHA-2 must be `missed_no_extension`, not
+        # `missed_after_extension`, because ALPHA-2 itself had no compliant shift.
+        assert "Missed (no approved extension):** 1" in out
+        assert "Missed after extension:" not in out
+
 
 class TestSuggesterTool:
     def test_writes_suggested_file(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(deadlines, "_CONFIG_DIR", tmp_path)
-        monkeypatch.setattr(deadlines, "_MANAGERS_FILE", tmp_path / "m.json")
+        monkeypatch.setattr(dcfg, "_CONFIG_DIR", tmp_path)
+        monkeypatch.setattr(dcfg, "_MANAGERS_FILE", tmp_path / "m.json")
         suggested_path = tmp_path / "managers.suggested.json"
-        monkeypatch.setattr(deadlines, "_MANAGERS_SUGGESTED_FILE", suggested_path)
-        monkeypatch.setattr(deadlines, "_AUDIT_LOG", tmp_path / "audit.log")
+        monkeypatch.setattr(dcfg, "_MANAGERS_SUGGESTED_FILE", suggested_path)
+        monkeypatch.setattr(dcfg, "_AUDIT_LOG", tmp_path / "audit.log")
 
         # alice.user has bob.manager as someone who edits her priorities + resolves her tasks
         issues = [
@@ -475,11 +563,11 @@ class TestSuggesterTool:
         assert "Manager suggester" in out
 
     def test_no_signal_marks_manual_review(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(deadlines, "_CONFIG_DIR", tmp_path)
-        monkeypatch.setattr(deadlines, "_MANAGERS_FILE", tmp_path / "m.json")
+        monkeypatch.setattr(dcfg, "_CONFIG_DIR", tmp_path)
+        monkeypatch.setattr(dcfg, "_MANAGERS_FILE", tmp_path / "m.json")
         suggested_path = tmp_path / "managers.suggested.json"
-        monkeypatch.setattr(deadlines, "_MANAGERS_SUGGESTED_FILE", suggested_path)
-        monkeypatch.setattr(deadlines, "_AUDIT_LOG", tmp_path / "audit.log")
+        monkeypatch.setattr(dcfg, "_MANAGERS_SUGGESTED_FILE", suggested_path)
+        monkeypatch.setattr(dcfg, "_AUDIT_LOG", tmp_path / "audit.log")
 
         issues = [{
             "idReadable": "ALPHA-1", "summary": "Lone task",
