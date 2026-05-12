@@ -1,8 +1,21 @@
 """Field selectors and async fetch helpers shared by the deadline tools."""
 
 import asyncio
+import logging
 import os
 from typing import Any
+
+import httpx
+
+_logger = logging.getLogger("yt_mcp")
+
+# YouTrack gracefully closes HTTP/2 connections after ~1000 streams. When a
+# batch hits the closed connection simultaneously, httpx raises
+# RemoteProtocolError. Retrying transparently gives the client pool a chance
+# to open a fresh connection. Three attempts with brief backoff is enough in
+# practice — if it fails 3x in a row, something else is wrong.
+_FETCH_RETRIES = 3
+_FETCH_RETRY_BACKOFF_SEC = 0.2
 
 
 # Cap parallel HTTP/2 streams against YouTrack. The shared client pool runs
@@ -31,24 +44,35 @@ async def fetch_issue_activities_and_comments(
     client: Any, issue_id: str,
 ) -> tuple[list[dict], list[dict]]:
     """Fetch CustomFieldCategory activities + comments for one issue, in parallel."""
-    try:
-        activities, comments = await asyncio.gather(
-            client.get(
-                f"/api/issues/{issue_id}/activities",
-                params={
-                    "fields": ACTIVITY_FIELDS,
-                    "categories": "CustomFieldCategory",
-                    "$top": "500",
-                },
-            ),
-            client.get(
-                f"/api/issues/{issue_id}/comments",
-                params={"fields": "id,text,created,author(login,name)", "$top": "200"},
-            ),
-        )
-        return activities or [], comments or []
-    except (ValueError, KeyError):
-        return [], []
+    for attempt in range(_FETCH_RETRIES):
+        try:
+            activities, comments = await asyncio.gather(
+                client.get(
+                    f"/api/issues/{issue_id}/activities",
+                    params={
+                        "fields": ACTIVITY_FIELDS,
+                        "categories": "CustomFieldCategory",
+                        "$top": "500",
+                    },
+                ),
+                client.get(
+                    f"/api/issues/{issue_id}/comments",
+                    params={"fields": "id,text,created,author(login,name)", "$top": "200"},
+                ),
+            )
+            return activities or [], comments or []
+        except (ValueError, KeyError):
+            return [], []
+        except httpx.RemoteProtocolError:
+            if attempt < _FETCH_RETRIES - 1:
+                await asyncio.sleep(_FETCH_RETRY_BACKOFF_SEC * (attempt + 1))
+                continue
+            _logger.warning(
+                "fetch_issue_activities_and_comments giving up on %s after %d retries",
+                issue_id, _FETCH_RETRIES,
+            )
+            return [], []
+    return [], []
 
 
 async def fetch_issue_activities_and_comments_bounded(
@@ -79,17 +103,28 @@ async def fetch_activities_only_bounded(
 
 async def fetch_activities_only(client: Any, issue_id: str) -> list[dict]:
     """Fetch CustomFieldCategory activities (no comments) for the suggester."""
-    try:
-        return await client.get(
-            f"/api/issues/{issue_id}/activities",
-            params={
-                "fields": ACTIVITY_FIELDS,
-                "categories": "CustomFieldCategory",
-                "$top": "500",
-            },
-        ) or []
-    except (ValueError, KeyError):
-        return []
+    for attempt in range(_FETCH_RETRIES):
+        try:
+            return await client.get(
+                f"/api/issues/{issue_id}/activities",
+                params={
+                    "fields": ACTIVITY_FIELDS,
+                    "categories": "CustomFieldCategory",
+                    "$top": "500",
+                },
+            ) or []
+        except (ValueError, KeyError):
+            return []
+        except httpx.RemoteProtocolError:
+            if attempt < _FETCH_RETRIES - 1:
+                await asyncio.sleep(_FETCH_RETRY_BACKOFF_SEC * (attempt + 1))
+                continue
+            _logger.warning(
+                "fetch_activities_only giving up on %s after %d retries",
+                issue_id, _FETCH_RETRIES,
+            )
+            return []
+    return []
 
 
 async def get_operator_login(client: Any) -> str:

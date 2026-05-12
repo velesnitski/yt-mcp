@@ -58,6 +58,20 @@ class TestDeadlineFieldDetection:
         assert deadlines._is_deadline_field("due_date")
         assert deadlines._is_deadline_field("due-date")
 
+    def test_trailing_decoration(self):
+        """REGRESSION: real YouTrack field names sometimes carry trailing
+        decorations like emoji ('Deadline ☠️') or qualifiers ('Due Date (soft)').
+        Previously the `$` anchor required nothing after the keyword."""
+        assert deadlines._is_deadline_field("Deadline ☠️")
+        assert deadlines._is_deadline_field("Due Date (soft)")
+        assert deadlines._is_deadline_field("deadline_v2")
+
+    def test_plural_not_matched(self):
+        """Word-boundary discipline: `deadlines` (plural) and `dueDate2` are
+        different fields and must not match."""
+        assert not deadlines._is_deadline_field("deadlines")
+        assert not deadlines._is_deadline_field("dueDate2")
+
     def test_russian_variants(self):
         assert deadlines._is_deadline_field("Дедлайн")
         assert deadlines._is_deadline_field("Срок")
@@ -109,6 +123,44 @@ class TestBoundedFetch:
             "concurrency limit should be conservative — YouTrack HTTP/2 "
             "stream pools are not generous"
         )
+
+
+class TestFetchRetry:
+    """REGRESSION: YouTrack closes HTTP/2 connections after ~1000 streams
+    (graceful, error_code:0). In-flight requests hit RemoteProtocolError
+    when a batch lands on the closing connection. Bounded concurrency
+    alone doesn't help — the fetch helper must retry on a fresh
+    connection from the pool."""
+
+    def test_retries_on_remote_protocol_error_then_succeeds(self):
+        import asyncio
+        import httpx
+        call_count = [0]
+
+        async def flaky_get(path, params=None):
+            call_count[0] += 1
+            if call_count[0] <= 2:
+                raise httpx.RemoteProtocolError("simulated stream exhaustion")
+            return [{"id": "a1", "field": {"name": "Due Date"}}]
+
+        mock = MagicMock()
+        mock.get = AsyncMock(side_effect=flaky_get)
+        result = asyncio.run(dfetch.fetch_activities_only(mock, "ALPHA-1"))
+        assert result == [{"id": "a1", "field": {"name": "Due Date"}}]
+        assert call_count[0] >= 2  # at least one retry happened
+
+    def test_gives_up_after_max_retries(self):
+        import asyncio
+        import httpx
+
+        async def always_fails(path, params=None):
+            raise httpx.RemoteProtocolError("persistent failure")
+
+        mock = MagicMock()
+        mock.get = AsyncMock(side_effect=always_fails)
+        result = asyncio.run(dfetch.fetch_activities_only(mock, "ALPHA-1"))
+        # Returns empty rather than propagating and crashing the whole audit
+        assert result == []
 
 
 class TestIdentityResolution:
