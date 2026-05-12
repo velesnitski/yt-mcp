@@ -8,6 +8,7 @@ import pytest
 
 from yt_mcp.tools import deadlines
 from yt_mcp.tools.deadlines import config as dcfg
+from yt_mcp.tools.deadlines import fetcher as dfetch
 
 
 # ---------- pure helpers ----------
@@ -72,6 +73,42 @@ class TestDeadlineExtraction:
     def test_activity_date_empty(self):
         assert deadlines._extract_activity_date(None) is None
         assert deadlines._extract_activity_date([]) is None
+
+
+class TestIdentityResolution:
+    """REGRESSION: assignee login must be extracted, not display name.
+
+    The activity API returns authors as logins (e.g. 'alice.user'), but
+    customField user-typed values can return either `login` or just `name`
+    (the display string). If `login` isn't requested in the field selector,
+    assignees would be silently identified by display name — breaking the
+    self-edit filter, PM consolidation, and the managers.json lookup.
+    """
+
+    def test_issue_fields_requests_login_for_customfields(self):
+        assert "value(login," in dfetch.ISSUE_FIELDS, (
+            "ISSUE_FIELDS must request `login` for customField values, "
+            "otherwise user-typed fields (Assignee, etc.) return only the "
+            "display name and create identity mismatches with activity authors."
+        )
+
+    def test_extract_assignee_prefers_login(self):
+        """When both login and name are present, login wins."""
+        issue = {
+            "customFields": [
+                {
+                    "name": "Assignee",
+                    "value": {"login": "alice.user", "name": "Alice User"},
+                }
+            ]
+        }
+        assert dfetch.extract_assignee_login(issue) == "alice.user"
+
+    def test_extract_assignee_falls_back_to_name(self):
+        """If login is missing (older YT response), fall back to name —
+        suboptimal but won't crash."""
+        issue = {"customFields": [{"name": "Assignee", "value": {"name": "Alice User"}}]}
+        assert dfetch.extract_assignee_login(issue) == "Alice User"
 
 
 class TestStandupExclusion:
