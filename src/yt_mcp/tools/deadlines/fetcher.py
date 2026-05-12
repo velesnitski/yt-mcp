@@ -1,7 +1,15 @@
 """Field selectors and async fetch helpers shared by the deadline tools."""
 
 import asyncio
+import os
 from typing import Any
+
+
+# Cap parallel HTTP/2 streams against YouTrack. The shared client pool runs
+# with max_connections=5 (client.py); without a semaphore, a 500-issue audit
+# fans out to ~1000 simultaneous requests and saturates the HTTP/2 stream
+# pool — observed in production as ConnectionTerminated last_stream_id:1999.
+_CONCURRENCY_LIMIT = int(os.environ.get("YT_MCP_FETCH_CONCURRENCY", "8"))
 
 
 ISSUE_FIELDS = (
@@ -41,6 +49,32 @@ async def fetch_issue_activities_and_comments(
         return activities or [], comments or []
     except (ValueError, KeyError):
         return [], []
+
+
+async def fetch_issue_activities_and_comments_bounded(
+    client: Any, issue_ids: list[str], limit: int | None = None,
+) -> list[tuple[list[dict], list[dict]]]:
+    """Same as `_and_comments` but bounded by a semaphore so a 500-issue
+    audit doesn't exhaust the HTTP/2 stream pool."""
+    sem = asyncio.Semaphore(limit or _CONCURRENCY_LIMIT)
+
+    async def _one(iid: str) -> tuple[list[dict], list[dict]]:
+        async with sem:
+            return await fetch_issue_activities_and_comments(client, iid)
+
+    return await asyncio.gather(*(_one(iid) for iid in issue_ids))
+
+
+async def fetch_activities_only_bounded(
+    client: Any, issue_ids: list[str], limit: int | None = None,
+) -> list[list[dict]]:
+    sem = asyncio.Semaphore(limit or _CONCURRENCY_LIMIT)
+
+    async def _one(iid: str) -> list[dict]:
+        async with sem:
+            return await fetch_activities_only(client, iid)
+
+    return await asyncio.gather(*(_one(iid) for iid in issue_ids))
 
 
 async def fetch_activities_only(client: Any, issue_id: str) -> list[dict]:

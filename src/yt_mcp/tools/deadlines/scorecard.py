@@ -1,6 +1,5 @@
 """deadline_scorecard tool — quarterly per-assignee compliance rollup."""
 
-import asyncio
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 
@@ -98,14 +97,13 @@ def register(mcp, resolver: InstanceResolver):
             issues = [i for i in issues if not _is_standup(i.get("summary", ""), standup_patterns)]
 
         ids = [i.get("idReadable", "") for i in issues if i.get("idReadable")]
-        results = await asyncio.gather(*(
-            fetcher.fetch_issue_activities_and_comments(client, iid) for iid in ids
-        ))
+        results = await fetcher.fetch_issue_activities_and_comments_bounded(client, ids)
         issue_by_id = {i.get("idReadable", ""): i for i in issues}
 
         per_user: dict[str, Counter] = defaultdict(Counter)
         per_user_details: dict[str, list[str]] = defaultdict(list)
         coverage_missing: set[str] = set()
+        observed_field_names: set[str] = set()
         now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
 
         for iid, (activities, comments) in zip(ids, results):
@@ -127,7 +125,10 @@ def register(mcp, resolver: InstanceResolver):
             # under-counting penalties.
             issue_buckets: set[str] = set()
             for a in activities:
-                if not _is_deadline_field((a.get("field") or {}).get("name", "")):
+                field_name = (a.get("field") or {}).get("name", "")
+                if field_name:
+                    observed_field_names.add(field_name)
+                if not _is_deadline_field(field_name):
                     continue
                 ts = a.get("timestamp", 0)
                 if ts < start_ms or ts > end_ms:
@@ -179,4 +180,5 @@ def register(mcp, resolver: InstanceResolver):
             coverage_missing,
             fallback_query_used=fallback_used,
             policy_effective_set=policy_effective_ms > 0,
+            observed_fields=observed_field_names,
         )

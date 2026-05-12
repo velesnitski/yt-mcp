@@ -1,6 +1,5 @@
 """suggest_managers tool — bootstrap manager mapping from activity heuristics."""
 
-import asyncio
 import json
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -62,9 +61,7 @@ def register(mcp, resolver: InstanceResolver):
             return f"## Manager suggester\nNo issues in lookback. Query: `{query}`"
 
         ids = [i.get("idReadable", "") for i in issues if i.get("idReadable")]
-        results = await asyncio.gather(*(
-            fetcher.fetch_activities_only(client, iid) for iid in ids
-        ))
+        results = await fetcher.fetch_activities_only_bounded(client, ids)
 
         # PM detection: top decile of reporter fanout, with a hard floor.
         reporter_assignees: dict[str, set[str]] = defaultdict(set)

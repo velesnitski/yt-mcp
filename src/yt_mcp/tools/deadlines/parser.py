@@ -6,8 +6,11 @@ from typing import Any
 
 
 _DEADLINE_FIELD_PATTERNS = (
-    re.compile(r"^(deadline|due\s*date|due|completion\s*date)$", re.IGNORECASE),
-    re.compile(r"^(дедлайн|срок|до|дата\s*выполнения)$", re.IGNORECASE),
+    # Permissive separator: handles "Due Date", "due-date", "due_date", and
+    # camelCase "dueDate" (which YouTrack emits for the built-in field) by
+    # allowing any non-word char OR nothing between "due" and "date".
+    re.compile(r"^(deadline|due[\W_]?date|due|completion[\W_]?date)$", re.IGNORECASE),
+    re.compile(r"^(дедлайн|срок|до|дата[\W_]?выполнения)$", re.IGNORECASE),
 )
 
 _APPROVAL_KEYWORDS = (

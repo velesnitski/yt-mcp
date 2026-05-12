@@ -11,6 +11,17 @@ from yt_mcp.tools.deadlines import config as dcfg
 from yt_mcp.tools.deadlines import fetcher as dfetch
 
 
+def _isolate_config(tmp_path, monkeypatch):
+    """Redirect every config path to tmp_path so tests can't read the
+    operator's real ~/.yt-mcp files (e.g. policy.json with a
+    policy_effective_date that would reclassify fixture shifts)."""
+    monkeypatch.setattr(dcfg, "_CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(dcfg, "_MANAGERS_FILE", tmp_path / "managers.json")
+    monkeypatch.setattr(dcfg, "_MANAGERS_SUGGESTED_FILE", tmp_path / "managers.suggested.json")
+    monkeypatch.setattr(dcfg, "_POLICY_FILE", tmp_path / "policy.json")
+    monkeypatch.setattr(dcfg, "_AUDIT_LOG", tmp_path / "audit.log")
+
+
 # ---------- pure helpers ----------
 
 class TestQuarterParsing:
@@ -38,6 +49,14 @@ class TestDeadlineFieldDetection:
         assert deadlines._is_deadline_field("Deadline")
         assert deadlines._is_deadline_field("Due Date")
         assert deadlines._is_deadline_field("due")
+
+    def test_camelcase_dueDate(self):
+        """REGRESSION: YouTrack emits `dueDate` for the built-in field; the
+        regex previously required whitespace between `due` and `date` so
+        camelCase was missed — observed as zero shifts in a real audit run."""
+        assert deadlines._is_deadline_field("dueDate")
+        assert deadlines._is_deadline_field("due_date")
+        assert deadlines._is_deadline_field("due-date")
 
     def test_russian_variants(self):
         assert deadlines._is_deadline_field("Дедлайн")
@@ -73,6 +92,23 @@ class TestDeadlineExtraction:
     def test_activity_date_empty(self):
         assert deadlines._extract_activity_date(None) is None
         assert deadlines._extract_activity_date([]) is None
+
+
+class TestBoundedFetch:
+    """REGRESSION: a 500-issue audit fanned out to ~1000 parallel HTTP/2
+    streams and hit ConnectionTerminated (last_stream_id:1999). The bounded
+    helpers cap concurrency via Semaphore."""
+
+    def test_helpers_exist_and_are_bounded(self):
+        # Tested at the surface level — concurrency itself is hard to
+        # assert deterministically. Verify the helpers exist and the limit
+        # constant is sane.
+        assert hasattr(dfetch, "fetch_issue_activities_and_comments_bounded")
+        assert hasattr(dfetch, "fetch_activities_only_bounded")
+        assert 1 <= dfetch._CONCURRENCY_LIMIT <= 50, (
+            "concurrency limit should be conservative — YouTrack HTTP/2 "
+            "stream pools are not generous"
+        )
 
 
 class TestIdentityResolution:
@@ -426,10 +462,7 @@ def _register_and_get(client):
 
 class TestAuditTool:
     def test_no_issues_returns_empty_message(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(dcfg, "_CONFIG_DIR", tmp_path)
-        monkeypatch.setattr(dcfg, "_MANAGERS_FILE", tmp_path / "managers.json")
-        monkeypatch.setattr(dcfg, "_MANAGERS_SUGGESTED_FILE", tmp_path / "managers.suggested.json")
-        monkeypatch.setattr(dcfg, "_AUDIT_LOG", tmp_path / "audit.log")
+        _isolate_config(tmp_path, monkeypatch)
         client = _make_client(issues_list=[])
         tools = _register_and_get(client)
 
@@ -440,14 +473,10 @@ class TestAuditTool:
         assert "No issues match query" in out
 
     def test_unauthorized_shift_classified(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(dcfg, "_CONFIG_DIR", tmp_path)
-        # Write a managers config so the assignee has an approver mapping
-        cfg = {"alice.user": {"primary": "bob.manager", "also_accept": []}}
-        f = tmp_path / "managers.json"
-        f.write_text(json.dumps(cfg))
-        monkeypatch.setattr(dcfg, "_MANAGERS_FILE", f)
-        monkeypatch.setattr(dcfg, "_MANAGERS_SUGGESTED_FILE", tmp_path / "x.json")
-        monkeypatch.setattr(dcfg, "_AUDIT_LOG", tmp_path / "audit.log")
+        _isolate_config(tmp_path, monkeypatch)
+        (tmp_path / "managers.json").write_text(json.dumps(
+            {"alice.user": {"primary": "bob.manager", "also_accept": []}}
+        ))
 
         shift_ts = int(datetime(2026, 5, 1, tzinfo=timezone.utc).timestamp() * 1000)
         issues = [{
@@ -480,10 +509,7 @@ class TestAuditTool:
         assert "alice.user" in out
 
     def test_standup_excluded(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(dcfg, "_CONFIG_DIR", tmp_path)
-        monkeypatch.setattr(dcfg, "_MANAGERS_FILE", tmp_path / "m.json")
-        monkeypatch.setattr(dcfg, "_MANAGERS_SUGGESTED_FILE", tmp_path / "s.json")
-        monkeypatch.setattr(dcfg, "_AUDIT_LOG", tmp_path / "a.log")
+        _isolate_config(tmp_path, monkeypatch)
         issues = [{
             "idReadable": "ALPHA-2",
             "summary": "DevOps Daily 05.05.26",
@@ -503,13 +529,10 @@ class TestAuditTool:
 
 class TestScorecardTool:
     def test_missed_deadline_counted(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(dcfg, "_CONFIG_DIR", tmp_path)
-        cfg = {"alice.user": {"primary": "bob.manager", "also_accept": []}}
-        f = tmp_path / "managers.json"
-        f.write_text(json.dumps(cfg))
-        monkeypatch.setattr(dcfg, "_MANAGERS_FILE", f)
-        monkeypatch.setattr(dcfg, "_MANAGERS_SUGGESTED_FILE", tmp_path / "x.json")
-        monkeypatch.setattr(dcfg, "_AUDIT_LOG", tmp_path / "a.log")
+        _isolate_config(tmp_path, monkeypatch)
+        (tmp_path / "managers.json").write_text(json.dumps(
+            {"alice.user": {"primary": "bob.manager", "also_accept": []}}
+        ))
         # Issue with deadline in past, state != Done
         issues = [{
             "idReadable": "ALPHA-1",
@@ -533,13 +556,10 @@ class TestScorecardTool:
         ISSUE-2 to be reclassified as missed_after_extension. Previously the
         scorecard used a per-user cumulative counter, silently under-counting
         penalties whenever the user had any prior compliant shift."""
-        monkeypatch.setattr(dcfg, "_CONFIG_DIR", tmp_path)
-        cfg_data = {"alice.user": {"primary": "bob.manager", "also_accept": []}}
-        f = tmp_path / "managers.json"
-        f.write_text(json.dumps(cfg_data))
-        monkeypatch.setattr(dcfg, "_MANAGERS_FILE", f)
-        monkeypatch.setattr(dcfg, "_MANAGERS_SUGGESTED_FILE", tmp_path / "x.json")
-        monkeypatch.setattr(dcfg, "_AUDIT_LOG", tmp_path / "a.log")
+        _isolate_config(tmp_path, monkeypatch)
+        (tmp_path / "managers.json").write_text(json.dumps(
+            {"alice.user": {"primary": "bob.manager", "also_accept": []}}
+        ))
 
         # ISSUE-1: compliant_strict shift (Bob, the approver, did it himself)
         # ISSUE-2: missed deadline, never had a shift. Should be missed_no_extension.
@@ -586,11 +606,8 @@ class TestScorecardTool:
 
 class TestSuggesterTool:
     def test_writes_suggested_file(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(dcfg, "_CONFIG_DIR", tmp_path)
-        monkeypatch.setattr(dcfg, "_MANAGERS_FILE", tmp_path / "m.json")
+        _isolate_config(tmp_path, monkeypatch)
         suggested_path = tmp_path / "managers.suggested.json"
-        monkeypatch.setattr(dcfg, "_MANAGERS_SUGGESTED_FILE", suggested_path)
-        monkeypatch.setattr(dcfg, "_AUDIT_LOG", tmp_path / "audit.log")
 
         # alice.user has bob.manager as someone who edits her priorities + resolves her tasks
         issues = [
@@ -633,15 +650,10 @@ class TestSuggesterTool:
 
     def test_manual_pms_extend_auto_excluded_set(self, tmp_path, monkeypatch):
         """policy.json `manual_pms` list adds to the auto-detected PM set."""
-        monkeypatch.setattr(dcfg, "_CONFIG_DIR", tmp_path)
-        monkeypatch.setattr(dcfg, "_MANAGERS_FILE", tmp_path / "m.json")
+        _isolate_config(tmp_path, monkeypatch)
         suggested_path = tmp_path / "managers.suggested.json"
-        monkeypatch.setattr(dcfg, "_MANAGERS_SUGGESTED_FILE", suggested_path)
-        monkeypatch.setattr(dcfg, "_AUDIT_LOG", tmp_path / "audit.log")
         # policy.json declares charlie.pm as a manual PM even though fanout is low
-        policy = tmp_path / "policy.json"
-        policy.write_text(json.dumps({"manual_pms": ["charlie.pm"]}))
-        monkeypatch.setattr(dcfg, "_POLICY_FILE", policy)
+        (tmp_path / "policy.json").write_text(json.dumps({"manual_pms": ["charlie.pm"]}))
 
         issues = [{
             "idReadable": "ALPHA-1", "summary": "Task",
@@ -667,12 +679,8 @@ class TestSuggesterTool:
 
     def test_bot_account_filtered_from_candidates(self, tmp_path, monkeypatch):
         """A `systemuser@`-style login must not appear as approver candidate."""
-        monkeypatch.setattr(dcfg, "_CONFIG_DIR", tmp_path)
-        monkeypatch.setattr(dcfg, "_MANAGERS_FILE", tmp_path / "m.json")
+        _isolate_config(tmp_path, monkeypatch)
         suggested_path = tmp_path / "managers.suggested.json"
-        monkeypatch.setattr(dcfg, "_MANAGERS_SUGGESTED_FILE", suggested_path)
-        monkeypatch.setattr(dcfg, "_AUDIT_LOG", tmp_path / "audit.log")
-        monkeypatch.setattr(dcfg, "_POLICY_FILE", tmp_path / "no-policy.json")
 
         issues = [{
             "idReadable": "ALPHA-1", "summary": "Task",
@@ -697,11 +705,8 @@ class TestSuggesterTool:
         assert "systemuser@" not in all_listed
 
     def test_no_signal_marks_manual_review(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(dcfg, "_CONFIG_DIR", tmp_path)
-        monkeypatch.setattr(dcfg, "_MANAGERS_FILE", tmp_path / "m.json")
+        _isolate_config(tmp_path, monkeypatch)
         suggested_path = tmp_path / "managers.suggested.json"
-        monkeypatch.setattr(dcfg, "_MANAGERS_SUGGESTED_FILE", suggested_path)
-        monkeypatch.setattr(dcfg, "_AUDIT_LOG", tmp_path / "audit.log")
 
         issues = [{
             "idReadable": "ALPHA-1", "summary": "Lone task",

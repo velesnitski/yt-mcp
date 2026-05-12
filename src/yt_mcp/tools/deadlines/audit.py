@@ -1,7 +1,5 @@
 """audit_deadline_changes tool — forensic view of every Due-Date shift."""
 
-import asyncio
-
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.tools.deadlines import config as cfg
 from yt_mcp.tools.deadlines import fetcher
@@ -76,13 +74,12 @@ def register(mcp, resolver: InstanceResolver):
             issues = [i for i in issues if not _is_standup(i.get("summary", ""), standup_patterns)]
 
         ids = [i.get("idReadable", "") for i in issues if i.get("idReadable")]
-        results = await asyncio.gather(*(
-            fetcher.fetch_issue_activities_and_comments(client, iid) for iid in ids
-        ))
+        results = await fetcher.fetch_issue_activities_and_comments_bounded(client, ids)
         issue_by_id = {i.get("idReadable", ""): i for i in issues}
 
         rows: list[dict] = []
         coverage_missing: set[str] = set()
+        observed_field_names: set[str] = set()
 
         for iid, (activities, comments) in zip(ids, results):
             issue = issue_by_id.get(iid, {})
@@ -95,7 +92,10 @@ def register(mcp, resolver: InstanceResolver):
             if not approvers:
                 coverage_missing.add(target_login)
             for a in activities:
-                if not _is_deadline_field((a.get("field") or {}).get("name", "")):
+                field_name = (a.get("field") or {}).get("name", "")
+                if field_name:
+                    observed_field_names.add(field_name)
+                if not _is_deadline_field(field_name):
                     continue
                 ts = a.get("timestamp", 0)
                 if ts < start_ms or ts > end_ms:
@@ -132,4 +132,5 @@ def register(mcp, resolver: InstanceResolver):
             metadata.get("source_file", ""),
             coverage_missing,
             policy_effective_set=policy_effective_ms > 0,
+            observed_fields=observed_field_names,
         )

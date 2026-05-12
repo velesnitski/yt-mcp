@@ -17,8 +17,32 @@ def _bucket_emoji(c: str) -> str:
     }.get(c, "?")
 
 
+def _deadline_field_hint(observed_fields: set[str]) -> list[str]:
+    """If no deadline shifts were found, surface the deadline-looking field
+    names actually present so the operator can extend the regex patterns."""
+    import re
+    candidate = re.compile(r"deadline|due|completion|срок|дедлайн", re.IGNORECASE)
+    matches = sorted(f for f in observed_fields if candidate.search(f))
+    if matches:
+        return [
+            "⚠ No deadline shifts matched, but these deadline-looking fields "
+            f"appeared in the activity log: {', '.join(matches[:10])}. If one "
+            "of these is the actual field, extend `_DEADLINE_FIELD_PATTERNS` "
+            "in `tools/deadlines/parser.py`."
+        ]
+    if observed_fields:
+        return [
+            f"_(sampled {len(observed_fields)} unique field names in the "
+            "activity log; none matched deadline patterns. Field may not be "
+            "tracked, or activity falls under a non-CustomFieldCategory.)_"
+        ]
+    return []
+
+
 def render_audit(rows, operator, query, strict, source_file, coverage_missing,
-                  policy_effective_set: bool) -> str:
+                  policy_effective_set: bool,
+                  observed_fields: set[str] | None = None) -> str:
+    observed_fields = observed_fields or set()
     counts = Counter(r["classification"] for r in rows)
     lines = [
         "## Deadline audit",
@@ -39,6 +63,8 @@ def render_audit(rows, operator, query, strict, source_file, coverage_missing,
     ):
         if counts.get(bucket):
             lines.append(f"- {_bucket_emoji(bucket)} **{bucket}**: {counts[bucket]}")
+    if not rows:
+        lines.extend(_deadline_field_hint(observed_fields))
     lines.append("")
     for cls_filter in ("unauthorized", "approver_unknown", "compliant_loose"):
         section = [r for r in rows if r["classification"] == cls_filter]
@@ -73,7 +99,8 @@ def render_audit(rows, operator, query, strict, source_file, coverage_missing,
 
 def render_scorecard(per_user, per_user_details, quarter, operator, strict,
                       source_file, coverage_missing, fallback_query_used: bool,
-                      policy_effective_set: bool) -> str:
+                      policy_effective_set: bool,
+                      observed_fields: set[str] | None = None) -> str:
     lines = [
         f"## Deadline scorecard — {quarter}",
         f"**Operator:** {operator} | **Strict:** {strict} | "
@@ -92,6 +119,7 @@ def render_scorecard(per_user, per_user_details, quarter, operator, strict,
     lines.append("")
     if not per_user:
         lines.append("_No deadline activity in scope._")
+        lines.extend(_deadline_field_hint(observed_fields or set()))
         return compact_lines(lines)
 
     def _penalty(u: str) -> int:
