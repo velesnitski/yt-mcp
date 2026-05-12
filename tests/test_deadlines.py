@@ -111,6 +111,38 @@ class TestIdentityResolution:
         assert dfetch.extract_assignee_login(issue) == "Alice User"
 
 
+class TestBotDetection:
+    def test_default_patterns_catch_systemuser_at(self):
+        """`systemuser@` style appeared as also_accept candidate in real data."""
+        patterns = deadlines._compile_standup_patterns({})  # not used here
+        from yt_mcp.tools.deadlines.parser import _compile_bot_patterns, _is_bot
+        patterns = _compile_bot_patterns({})
+        assert _is_bot("systemuser@", patterns)
+
+    def test_default_patterns_catch_bot_prefixes(self):
+        from yt_mcp.tools.deadlines.parser import _compile_bot_patterns, _is_bot
+        patterns = _compile_bot_patterns({})
+        for login in ("bot.notify", "bot-deploy", "bot_cron",
+                       "service.runner", "automation",
+                       "noreply", "integration.gh", "webhook"):
+            assert _is_bot(login, patterns), f"{login} should be bot"
+
+    def test_human_logins_not_matched(self):
+        from yt_mcp.tools.deadlines.parser import _compile_bot_patterns, _is_bot
+        patterns = _compile_bot_patterns({})
+        for login in ("alice.user", "bob.manager", "carol.lead",
+                       "systemuser",  # without trailing @
+                       "robotnik"):
+            assert not _is_bot(login, patterns), f"{login} should not be bot"
+
+    def test_custom_patterns_via_policy(self):
+        from yt_mcp.tools.deadlines.parser import _compile_bot_patterns, _is_bot
+        patterns = _compile_bot_patterns({"bot_patterns": [r"^x\."]})
+        assert _is_bot("x.runner", patterns)
+        # Default patterns are replaced, not extended:
+        assert not _is_bot("bot.foo", patterns)
+
+
 class TestStandupExclusion:
     def test_default_patterns_match_devops_daily(self):
         patterns = deadlines._compile_standup_patterns({})
@@ -598,6 +630,71 @@ class TestSuggesterTool:
         # with only 1 assignee she shouldn't qualify
         assert "alice.user" in written
         assert "Manager suggester" in out
+
+    def test_manual_pms_extend_auto_excluded_set(self, tmp_path, monkeypatch):
+        """policy.json `manual_pms` list adds to the auto-detected PM set."""
+        monkeypatch.setattr(dcfg, "_CONFIG_DIR", tmp_path)
+        monkeypatch.setattr(dcfg, "_MANAGERS_FILE", tmp_path / "m.json")
+        suggested_path = tmp_path / "managers.suggested.json"
+        monkeypatch.setattr(dcfg, "_MANAGERS_SUGGESTED_FILE", suggested_path)
+        monkeypatch.setattr(dcfg, "_AUDIT_LOG", tmp_path / "audit.log")
+        # policy.json declares charlie.pm as a manual PM even though fanout is low
+        policy = tmp_path / "policy.json"
+        policy.write_text(json.dumps({"manual_pms": ["charlie.pm"]}))
+        monkeypatch.setattr(dcfg, "_POLICY_FILE", policy)
+
+        issues = [{
+            "idReadable": "ALPHA-1", "summary": "Task",
+            "reporter": {"login": "charlie.pm"},
+            "customFields": [{"name": "Assignee", "value": {"login": "alice.user"}}],
+        }]
+        # charlie.pm edits alice's priorities — without manual_pms, would
+        # be suggested as alice's manager
+        activities = {"ALPHA-1": [{
+            "field": {"name": "Priority"},
+            "author": {"login": "charlie.pm"},
+            "added": [{"name": "High"}], "removed": [{"name": "Normal"}],
+        }]}
+        client = _make_client(activities, {}, issues)
+        tools = _register_and_get(client)
+        import asyncio
+        asyncio.run(tools["suggest_managers"](lookback_days=90))
+        written = json.loads(suggested_path.read_text())
+        assert "charlie.pm" in written["_metadata"]["pms_excluded"]
+        # alice has no other candidates, so falls to manual_review
+        assert written["alice.user"]["primary"] is None
+        assert written["alice.user"]["manual_review"] is True
+
+    def test_bot_account_filtered_from_candidates(self, tmp_path, monkeypatch):
+        """A `systemuser@`-style login must not appear as approver candidate."""
+        monkeypatch.setattr(dcfg, "_CONFIG_DIR", tmp_path)
+        monkeypatch.setattr(dcfg, "_MANAGERS_FILE", tmp_path / "m.json")
+        suggested_path = tmp_path / "managers.suggested.json"
+        monkeypatch.setattr(dcfg, "_MANAGERS_SUGGESTED_FILE", suggested_path)
+        monkeypatch.setattr(dcfg, "_AUDIT_LOG", tmp_path / "audit.log")
+        monkeypatch.setattr(dcfg, "_POLICY_FILE", tmp_path / "no-policy.json")
+
+        issues = [{
+            "idReadable": "ALPHA-1", "summary": "Task",
+            "reporter": {"login": "carol.user"},
+            "customFields": [{"name": "Assignee", "value": {"login": "alice.user"}}],
+        }]
+        activities = {"ALPHA-1": [
+            {"field": {"name": "Priority"}, "author": {"login": "bob.manager"},
+             "added": [{"name": "High"}], "removed": [{"name": "Normal"}]},
+            {"field": {"name": "Priority"}, "author": {"login": "systemuser@"},
+             "added": [{"name": "Critical"}], "removed": [{"name": "High"}]},
+        ]}
+        client = _make_client(activities, {}, issues)
+        tools = _register_and_get(client)
+        import asyncio
+        asyncio.run(tools["suggest_managers"](lookback_days=90))
+        written = json.loads(suggested_path.read_text())
+        entry = written["alice.user"]
+        # Only bob.manager survives — systemuser@ filtered out
+        assert entry["primary"] == "bob.manager"
+        all_listed = [entry["primary"]] + entry.get("also_accept", [])
+        assert "systemuser@" not in all_listed
 
     def test_no_signal_marks_manual_review(self, tmp_path, monkeypatch):
         monkeypatch.setattr(dcfg, "_CONFIG_DIR", tmp_path)

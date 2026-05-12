@@ -24,6 +24,20 @@ _DEFAULT_STANDUP_PATTERNS = (
     r"(?i)решение\s+текущих\s+проблем",
 )
 
+# Service/bot accounts. Conservative defaults — the `@$` pattern catches the
+# `systemuser@` style YouTrack uses; the rest are common naming conventions.
+# Operators can override via policy.json:bot_patterns (regex list).
+_DEFAULT_BOT_PATTERNS = (
+    r"@$",
+    r"^bot[\._-]",
+    r"[\._-]bot$",
+    r"^service[\._-]",
+    r"^automation",
+    r"^noreply",
+    r"^integration[\._-]",
+    r"^webhook",
+)
+
 _DONE_STATES = frozenset({
     "done", "closed", "resolved", "fixed", "completed", "released", "verified",
 })
@@ -90,6 +104,17 @@ def _compile_standup_patterns(policy: dict) -> list[re.Pattern]:
 
 def _is_standup(summary: str, patterns: list[re.Pattern]) -> bool:
     return any(p.search(summary or "") for p in patterns)
+
+
+def _compile_bot_patterns(policy: dict) -> list[re.Pattern]:
+    patterns = policy.get("bot_patterns") or list(_DEFAULT_BOT_PATTERNS)
+    return [re.compile(p) for p in patterns]
+
+
+def _is_bot(login: str, patterns: list[re.Pattern]) -> bool:
+    if not login:
+        return False
+    return any(p.search(login) for p in patterns)
 
 
 def _classify_shift(
