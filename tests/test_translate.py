@@ -1,4 +1,12 @@
-from yt_mcp.tools.translate import _has_non_ascii, _save_field
+from unittest.mock import AsyncMock, MagicMock
+
+from yt_mcp.tools import translate
+from yt_mcp.tools.translate import (
+    _has_non_ascii,
+    _is_bilingual,
+    _save_field,
+    _split_bilingual,
+)
 
 
 class TestHasNonAscii:
@@ -194,3 +202,227 @@ class TestBlockSplitting:
         )
         blocks = self._split(text)
         assert len(blocks) == 2
+
+
+class TestSplitBilingual:
+    """REGRESSION: split on standalone `----` line only — not on '----'
+    appearing inside text. Whitespace adjacent to delimiter is stripped."""
+
+    def test_standalone_delimiter(self):
+        desc = "English here\n\n----\n\nРусский текст"
+        top, bottom = _split_bilingual(desc)
+        assert top == "English here"
+        assert bottom == "Русский текст"
+
+    def test_no_delimiter(self):
+        top, bottom = _split_bilingual("Just English content")
+        assert top == "Just English content"
+        assert bottom == ""
+
+    def test_empty_input(self):
+        assert _split_bilingual("") == ("", "")
+
+    def test_inline_dashes_not_split(self):
+        """`text with ---- inline` should not be treated as the delimiter."""
+        desc = "Step 1 ---- step 2 ---- step 3"
+        top, bottom = _split_bilingual(desc)
+        # No standalone delimiter line, so whole thing is top
+        assert top == desc
+        assert bottom == ""
+
+    def test_custom_delimiter(self):
+        desc = "Top\n\n===\n\nBottom"
+        top, bottom = _split_bilingual(desc, "===")
+        assert top == "Top"
+        assert bottom == "Bottom"
+
+
+class TestIsBilingual:
+    """Detect descriptions already in EN + delimiter + RU bilingual format."""
+
+    def test_real_bilingual(self):
+        desc = "English summary here\n\n----\n\nРусский текст здесь"
+        assert _is_bilingual(desc) is True
+
+    def test_english_only(self):
+        assert _is_bilingual("Just English content, no delimiter") is False
+
+    def test_russian_only(self):
+        assert _is_bilingual("Только русский текст") is False
+
+    def test_delimiter_with_empty_bottom(self):
+        desc = "Top content\n\n----\n\n"
+        assert _is_bilingual(desc) is False
+
+    def test_delimiter_with_empty_top(self):
+        desc = "\n----\nBottom content"
+        assert _is_bilingual(desc) is False
+
+    def test_bilingual_with_english_below(self):
+        """If bottom has no non-ASCII, it's not bilingual translation."""
+        desc = "English top\n\n----\n\nMore English below"
+        assert _is_bilingual(desc) is False
+
+    def test_inline_dashes_not_bilingual(self):
+        """Inline `----` mid-line doesn't count as delimiter."""
+        desc = "Item 1 ---- item 2 — both Russian: тест"
+        assert _is_bilingual(desc) is False
+
+    def test_empty_or_none(self):
+        assert _is_bilingual("") is False
+        assert _is_bilingual(None or "") is False
+
+
+# ---------- end-to-end via mock client ----------
+
+def _register_translate_tools():
+    """Spin up the translate tools with a captured mock client/resolver."""
+    captured = {}
+    client = MagicMock()
+    client.get = AsyncMock()
+    client.post = AsyncMock(return_value={})
+    client.execute_command = AsyncMock()
+    client.update_comment = AsyncMock(return_value={})
+    resolver = MagicMock()
+    resolver.resolve = MagicMock(return_value=client)
+
+    tools = {}
+
+    class FakeMcp:
+        def tool(self):
+            def decorator(fn):
+                tools[fn.__name__] = fn
+                return fn
+            return decorator
+
+    translate.register(FakeMcp(), resolver)
+    captured["client"] = client
+    captured["tools"] = tools
+    return captured
+
+
+class TestExcludeTranslated:
+    """REGRESSION: `exclude_translated=True` (default) appends
+    `tag: -yt-translate-*` to the query so prior batches don't reappear.
+    Spares operators from maintaining a comma list of N batch tags."""
+
+    def test_wildcard_appended_to_query(self):
+        import asyncio
+        ctx = _register_translate_tools()
+        ctx["client"].get = AsyncMock(return_value=[])
+
+        asyncio.run(ctx["tools"]["get_issues_for_translation"](
+            query="project: ALPHA #Unresolved",
+        ))
+
+        called_params = ctx["client"].get.call_args.kwargs["params"]
+        assert "tag: -yt-translate-*" in called_params["query"]
+
+    def test_disabled_via_param(self):
+        import asyncio
+        ctx = _register_translate_tools()
+        ctx["client"].get = AsyncMock(return_value=[])
+
+        asyncio.run(ctx["tools"]["get_issues_for_translation"](
+            query="project: ALPHA #Unresolved",
+            exclude_translated=False,
+        ))
+
+        called_params = ctx["client"].get.call_args.kwargs["params"]
+        assert "yt-translate" not in called_params["query"]
+
+    def test_caller_tag_filter_respected(self):
+        """If the caller supplied their own tag clause, don't auto-append."""
+        import asyncio
+        ctx = _register_translate_tools()
+        ctx["client"].get = AsyncMock(return_value=[])
+
+        asyncio.run(ctx["tools"]["get_issues_for_translation"](
+            query="project: ALPHA tag: critical",
+        ))
+
+        called_params = ctx["client"].get.call_args.kwargs["params"]
+        assert "yt-translate" not in called_params["query"]
+
+
+class TestBilingualDetection:
+    """REGRESSION: issues already in `EN + ---- + RU` format would be flagged
+    for translation and, with `preserve_original=true`, get triple-content
+    (EN + ---- + EN + ---- + RU). Now they're skipped at fetch time."""
+
+    def test_skipped_when_already_bilingual(self):
+        import asyncio
+        ctx = _register_translate_tools()
+        ctx["client"].get = AsyncMock(return_value=[
+            {
+                "idReadable": "ALPHA-1",
+                "summary": "Already English title",
+                "description": "English body\n\n----\n\nРусский текст",
+            },
+        ])
+
+        out = asyncio.run(ctx["tools"]["get_issues_for_translation"](
+            query="project: ALPHA",
+            include_comments=False,
+        ))
+        assert "1 already bilingual" in out
+
+    def test_translated_when_summary_still_russian(self):
+        """Bilingual desc + Russian summary still needs translation."""
+        import asyncio
+        ctx = _register_translate_tools()
+        ctx["client"].get = AsyncMock(return_value=[
+            {
+                "idReadable": "ALPHA-2",
+                "summary": "Русское название",
+                "description": "English body\n\n----\n\nРусский текст",
+            },
+        ])
+
+        out = asyncio.run(ctx["tools"]["get_issues_for_translation"](
+            query="project: ALPHA",
+            include_comments=False,
+        ))
+        # Summary still needs translation, so issue IS included
+        assert "ALPHA-2" in out
+        assert "Issues to translate:** 1" in out
+
+
+class TestPreserveOriginalSmartMerge:
+    """REGRESSION: `preserve_original=true` against an already-bilingual
+    description previously created EN/----/EN/----/RU triple content.
+    Now it extracts the original-language portion and only the EN section
+    is replaced."""
+
+    def test_smart_merge_on_already_bilingual(self):
+        import asyncio
+        ctx = _register_translate_tools()
+        # Return the same issue both for the initial fetch (in originals
+        # gathering inside apply_translations) and for the post call.
+        ctx["client"].get = AsyncMock(return_value={
+            "description": "Old English\n\n----\n\nРусский текст",
+        })
+
+        block = (
+            "ISSUE: ALPHA-1\n"
+            "SUMMARY: New translated title\n"
+            "DESCRIPTION:\nNew English content\n"
+        )
+        asyncio.run(ctx["tools"]["apply_translations"](
+            translations=block,
+            batch_tag="yt-translate-test",
+            preserve_original=True,
+        ))
+
+        # Find the description POST call
+        posts = [c for c in ctx["client"].post.call_args_list
+                  if "ALPHA-1" in str(c.args) and "description" in str(c.kwargs)]
+        assert posts, "Description POST should have been called"
+        new_desc = posts[0].kwargs["json"]["description"]
+        # Should contain the NEW English + delimiter + ORIGINAL Russian only
+        assert "New English content" in new_desc
+        assert "Русский текст" in new_desc
+        # Should NOT contain the old English (was replaced)
+        assert "Old English" not in new_desc
+        # Delimiter must appear exactly once (top-level), not multiple times
+        assert new_desc.count("\n----\n") == 1
