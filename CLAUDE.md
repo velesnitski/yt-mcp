@@ -1,11 +1,11 @@
 # yt-mcp
 
-YouTrack MCP server. 72 tools across 17 modules.
+YouTrack MCP server. 73 tools across 18 modules.
 
 ## Build & test
 
 ```bash
-uv run python -m pytest tests/ -q     # run all tests (285)
+uv run python -m pytest tests/ -q     # run all tests (328+)
 uv run python -m pytest tests/ -v      # verbose
 uv pip install -e .                     # editable install
 ```
@@ -33,6 +33,7 @@ src/yt_mcp/
     bulk.py          # bulk preview, execute, rollback with batch tags
     translate.py     # translation workflow with batch rollback
     deadlines/       # deadline audit/scorecard + manager-mapping suggester (package)
+    pulse.py         # team pulse: lookback velocity + forward queue + insight flags
     impact.py        # dependency graph, deadline impact analysis
     dashboard.py     # scoring-based dashboards (active, blocked, team, multi-team)
     monitoring.py    # digest, at-risk, task creation checks, project health

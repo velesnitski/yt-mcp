@@ -26,6 +26,9 @@ _DEFAULT_STANDUP_PATTERNS = (
     r"(?i)\bдейли\b",
     r"(?i)\bстендап\b",
     r"(?i)решение\s+текущих\s+проблем",
+    # Recurring team status reports ("<group> Team. Report DD.MM.YYYY",
+    # "<group> Team Report …") — periodic meta-tasks, not real work.
+    r"(?i)\bteam[\.\s]+report\b",
 )
 
 # Service/bot accounts. Conservative defaults — the `@$` pattern catches the
