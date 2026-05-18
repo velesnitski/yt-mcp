@@ -210,6 +210,13 @@ def _scrub_event(event: dict, hint: dict) -> dict | None:
         if exc is not None and _is_user_input_error(exc):
             return None
 
+    # Fallback: events captured via LoggingIntegration carry no exc_info (the
+    # logger.error() call fires before `raise`), so check the log message too.
+    logentry = event.get("logentry") or {}
+    log_msg = logentry.get("formatted") or logentry.get("message") or ""
+    if log_msg and any(p in log_msg for p in _USER_INPUT_VALUE_ERROR_PATTERNS):
+        return None
+
     if "extra" in event:
         for key in list(event["extra"].keys()):
             key_lower = key.lower()

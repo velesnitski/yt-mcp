@@ -44,7 +44,10 @@ class YouTrackClient:
                 f"YouTrack {'query' if resp.status_code == 400 else 'not found'} error "
                 f"({resp.status_code}): {error_msg}"
             )
-            _logger.error(
+            # warning, not error: 400/404 = bad caller input (invalid query
+            # syntax, missing issue), not a yt-mcp bug. Sentry LoggingIntegration
+            # only escalates >=ERROR to events; warnings stay as breadcrumbs.
+            _logger.warning(
                 str(error),
                 extra={"error_type": "youtrack_api", "tool": resp.request.url.path},
             )
