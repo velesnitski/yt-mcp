@@ -453,7 +453,10 @@ def _format_issue_line(issue: dict, score: float | None = None, now_ms: int = 0)
 
 # --- Insights ------------------------------------------------------------
 
-def compute_insights(metrics: dict, pipeline_counts: dict, triaged: list[dict], now_ms: int) -> list[str]:
+def compute_insights(
+    metrics: dict, pipeline_counts: dict, triaged: list[dict], now_ms: int,
+    lookback_days: int = 30,
+) -> list[str]:
     """Heuristic flags from velocity + pipeline state. Empty list when healthy."""
     flags: list[str] = []
     closed = metrics["closed"]
@@ -468,7 +471,8 @@ def compute_insights(metrics: dict, pipeline_counts: dict, triaged: list[dict], 
         if reopened / closed > 0.2:
             flags.append(f"🐛 Quality concern — {reopened} reopened / {closed} closed ({reopened*100//closed}% reopen rate)")
 
-    in_flight = pipeline_counts.get("in_progress", 0) + pipeline_counts.get("for_review", 0)
+    in_progress = pipeline_counts.get("in_progress", 0)
+    in_flight = in_progress + pipeline_counts.get("for_review", 0)
     pipeline_total = (
         in_flight
         + pipeline_counts.get("ready_for_test", 0)
@@ -477,8 +481,24 @@ def compute_insights(metrics: dict, pipeline_counts: dict, triaged: list[dict], 
     if closed > 0:
         if in_flight < closed / 3:
             flags.append(f"💤 Team underloaded — only {in_flight} in flight vs {closed} closed in lookback")
+        # WIP overload = devs juggling too many concurrent items. Measured
+        # against weekly velocity, not total throughput — a team that closes
+        # 28/30d has weekly_velocity ≈ 6.5 and a healthy WIP cap of ~13.
+        weekly_velocity = closed / max(1.0, lookback_days / 7.0)
+        if weekly_velocity > 0 and in_progress > weekly_velocity * 2:
+            flags.append(
+                f"🚧 WIP overload — {in_progress} in progress vs "
+                f"{weekly_velocity:.1f}/wk velocity (cap ~{int(weekly_velocity * 2)})"
+            )
+        # Pipeline overload = clog downstream of dev (test queue, review queue).
+        # Distinct from WIP — e.g. a team with 5 in_progress / 6 for_review /
+        # 34 ready_for_test flags pipeline congestion without falsely
+        # accusing devs of overcommitting at the dev stage.
         if pipeline_total > closed * 2:
-            flags.append(f"🚧 WIP overload — {pipeline_total} in pipeline vs {closed} closed in lookback")
+            flags.append(
+                f"🪣 Pipeline overload — {pipeline_total} in pipeline vs "
+                f"{closed} closed in lookback"
+            )
 
     # Bottleneck: any one downstream column has ≥3 more items than the next.
     order = ("in_progress", "for_review", "ready_for_test", "on_testing", "ready_for_release")
@@ -541,7 +561,8 @@ def register(mcp, resolver: InstanceResolver):
           - Forward: ready-to-pull, pipeline-unblockers, recent incoming
 
         Heuristic flags surface "should I act?" signals: backlog growth,
-        reopen rate, WIP overload, bottlenecks, deadline cliff, stale queue.
+        reopen rate, WIP overload (concurrent dev work), pipeline overload
+        (downstream-of-dev clog), bottlenecks, deadline cliff, stale queue.
 
         Args:
             board_name: Board name (partial match), ID, or URL.
@@ -764,7 +785,10 @@ def register(mcp, resolver: InstanceResolver):
             "incoming": incoming_count,
             "reopened": reopened_count,
         }
-        insights = compute_insights(metrics, pipeline_counts, triaged_filtered + re_entry_filtered, now_ms)
+        insights = compute_insights(
+            metrics, pipeline_counts, triaged_filtered + re_entry_filtered,
+            now_ms, lookback_days,
+        )
 
         # 7) Build the JSON-friendly payload once; markdown renderer reads it.
         team_balanced, team_pool = _build_team_balanced(
