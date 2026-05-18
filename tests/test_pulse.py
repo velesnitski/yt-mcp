@@ -25,6 +25,10 @@ from yt_mcp.tools.pulse import (
     _COLUMN_PATTERNS_match_any,
     _issue_to_dict,
     _render_markdown,
+    _is_active,
+    _is_too_overdue,
+    _filter_active,
+    _filter_not_too_overdue,
 )
 from yt_mcp.tools.deadlines.parser import (
     _DEFAULT_STANDUP_PATTERNS, _compile_standup_patterns,
@@ -542,3 +546,102 @@ class TestFormatJsonOutput:
         assert parsed["insights"] == ["📈 Backlog growing"]
         # Non-ASCII (emoji) preserved
         assert "📈" in s
+
+
+# --- Stale (max_idle_days) and overdue (max_overdue_days) filters ----------
+
+class TestIsActive:
+    def test_recent_update_is_active(self):
+        i = _issue(updated=NOW_MS - 5 * DAY_MS)
+        assert _is_active(i, 60, NOW_MS) is True
+
+    def test_old_update_is_inactive(self):
+        i = _issue(updated=NOW_MS - 90 * DAY_MS)
+        assert _is_active(i, 60, NOW_MS) is False
+
+    def test_at_exact_threshold_is_active(self):
+        # 60 days exactly — boundary kept (≤ check)
+        i = _issue(updated=NOW_MS - 60 * DAY_MS)
+        assert _is_active(i, 60, NOW_MS) is True
+
+    def test_one_day_past_threshold_is_inactive(self):
+        i = _issue(updated=NOW_MS - 61 * DAY_MS)
+        assert _is_active(i, 60, NOW_MS) is False
+
+    def test_zero_disables_filter(self):
+        ancient = _issue(updated=NOW_MS - 365 * DAY_MS)
+        assert _is_active(ancient, 0, NOW_MS) is True
+
+    def test_missing_updated_is_kept(self):
+        # Surface ambiguous data rather than silently dropping
+        i = {"idReadable": "PROJ-1", "summary": "x", "customFields": []}
+        assert _is_active(i, 60, NOW_MS) is True
+
+    def test_falls_back_to_created_when_updated_absent(self):
+        i = {"idReadable": "PROJ-1", "summary": "x", "customFields": [],
+             "created": NOW_MS - 90 * DAY_MS}
+        assert _is_active(i, 60, NOW_MS) is False
+
+
+class TestIsTooOverdue:
+    def test_no_deadline_is_not_overdue(self):
+        assert _is_too_overdue(_issue(), 30, NOW_MS) is False
+
+    def test_future_deadline_is_not_overdue(self):
+        i = _issue(cf_deadline="2026-06-18")  # ~31d in the future
+        assert _is_too_overdue(i, 30, NOW_MS) is False
+
+    def test_recently_overdue_is_kept(self):
+        # 5d past deadline, threshold 30 → keep
+        i = _issue(cf_deadline="2026-05-13")
+        assert _is_too_overdue(i, 30, NOW_MS) is False
+
+    def test_deeply_overdue_dropped(self):
+        # 60d past deadline, threshold 30 → drop
+        i = _issue(cf_deadline="2026-03-19")
+        assert _is_too_overdue(i, 30, NOW_MS) is True
+
+    def test_zero_disables_filter(self):
+        i = _issue(cf_deadline="2025-01-01")  # 500+ days past
+        assert _is_too_overdue(i, 0, NOW_MS) is False
+
+
+class TestFilterActiveBatch:
+    def test_filters_inactive_out(self):
+        recent = _issue(id="PROJ-1", updated=NOW_MS - 5 * DAY_MS)
+        ancient = _issue(id="PROJ-2", updated=NOW_MS - 200 * DAY_MS)
+        kept = _filter_active([recent, ancient], 60, NOW_MS)
+        ids = [i["idReadable"] for i in kept]
+        assert ids == ["PROJ-1"]
+
+    def test_zero_keeps_everything(self):
+        recent = _issue(id="PROJ-1", updated=NOW_MS - 5 * DAY_MS)
+        ancient = _issue(id="PROJ-2", updated=NOW_MS - 200 * DAY_MS)
+        kept = _filter_active([recent, ancient], 0, NOW_MS)
+        assert len(kept) == 2
+
+
+class TestFilterNotTooOverdueBatch:
+    def test_filters_deeply_overdue_out(self):
+        ok = _issue(id="PROJ-1")  # no deadline → kept
+        recently_late = _issue(id="PROJ-2", cf_deadline="2026-05-15")  # 3d late → kept
+        zombie = _issue(id="PROJ-3", cf_deadline="2026-02-01")          # 100+d late → dropped
+        kept = _filter_not_too_overdue([ok, recently_late, zombie], 30, NOW_MS)
+        ids = {i["idReadable"] for i in kept}
+        assert ids == {"PROJ-1", "PROJ-2"}
+
+    def test_zero_keeps_everything(self):
+        zombie = _issue(id="PROJ-1", cf_deadline="2025-01-01")
+        assert _filter_not_too_overdue([zombie], 0, NOW_MS) == [zombie]
+
+
+class TestFilterSemanticBoundaries:
+    """Confirm filters don't accidentally clobber the keep-on-uncertain rule."""
+
+    def test_no_updated_or_created_is_kept(self):
+        weird = {"idReadable": "PROJ-1", "summary": "no timestamps", "customFields": []}
+        assert _is_active(weird, 60, NOW_MS) is True
+
+    def test_no_deadline_not_dropped_by_overdue_filter(self):
+        no_dl = _issue(id="PROJ-1")
+        assert _filter_not_too_overdue([no_dl], 30, NOW_MS) == [no_dl]
