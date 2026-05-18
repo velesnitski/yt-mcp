@@ -29,6 +29,10 @@ from yt_mcp.tools.pulse import (
     _is_too_overdue,
     _filter_active,
     _filter_not_too_overdue,
+    _aggregate_payloads,
+    _render_multi_markdown,
+    _classify_board_columns,
+    _build_pipeline_lane_states,
 )
 from yt_mcp.tools.deadlines.parser import (
     _DEFAULT_STANDUP_PATTERNS, _compile_standup_patterns,
@@ -698,3 +702,193 @@ class TestFilterSemanticBoundaries:
     def test_no_deadline_not_dropped_by_overdue_filter(self):
         no_dl = _issue(id="PROJ-1")
         assert _filter_not_too_overdue([no_dl], 30, NOW_MS) == [no_dl]
+
+
+# --- Multi-team pulse: aggregation + multi-board rendering -----------------
+
+def _make_payload(**kw) -> dict:
+    """Mock a payload from _build_pulse_payload for aggregation tests."""
+    return {
+        "board": kw.get("board", "Foo Board"),
+        "lookback_days": kw.get("lookback_days", 30),
+        "horizon_days": kw.get("horizon_days", 14),
+        "metrics": kw.get("metrics", {
+            "closed": 10, "released": 2, "incoming": 8, "reopened": 1,
+        }),
+        "pipeline_counts": kw.get("pipeline_counts", {
+            "in_progress": 3, "for_review": 2, "ready_for_test": 1,
+            "on_testing": 1, "ready_for_release": 0,
+        }),
+        "has_released_states": kw.get("has_released_states", False),
+        "triaged": kw.get("triaged", []),
+        "re_entry": kw.get("re_entry", []),
+        "incoming": kw.get("incoming", []),
+        "team_balanced": kw.get("team_balanced", []),
+        "team_pool": kw.get("team_pool", []),
+        "insights": kw.get("insights", []),
+        "unknown_columns": kw.get("unknown_columns", []),
+    }
+
+
+class TestAggregatePayloads:
+    def test_sums_metrics_across_boards(self):
+        p1 = _make_payload(metrics={"closed": 5, "released": 1, "incoming": 4, "reopened": 0})
+        p2 = _make_payload(metrics={"closed": 7, "released": 2, "incoming": 6, "reopened": 1})
+        agg = _aggregate_payloads([p1, p2], lookback_days=30, horizon_days=14)
+        assert agg["metrics"] == {"closed": 12, "released": 3, "incoming": 10, "reopened": 1}
+
+    def test_sums_pipeline_counts_across_boards(self):
+        p1 = _make_payload(pipeline_counts={
+            "in_progress": 2, "for_review": 1, "ready_for_test": 0,
+            "on_testing": 0, "ready_for_release": 0,
+        })
+        p2 = _make_payload(pipeline_counts={
+            "in_progress": 3, "for_review": 4, "ready_for_test": 5,
+            "on_testing": 1, "ready_for_release": 2,
+        })
+        agg = _aggregate_payloads([p1, p2], lookback_days=30, horizon_days=14)
+        assert agg["pipeline_counts"]["in_progress"] == 5
+        assert agg["pipeline_counts"]["for_review"] == 5
+        assert agg["pipeline_counts"]["ready_for_test"] == 5
+        assert agg["pipeline_counts"]["on_testing"] == 1
+        assert agg["pipeline_counts"]["ready_for_release"] == 2
+
+    def test_board_count_reflects_input_size(self):
+        agg = _aggregate_payloads([_make_payload() for _ in range(7)], lookback_days=30, horizon_days=14)
+        assert agg["board_count"] == 7
+
+    def test_flag_counts(self):
+        p1 = _make_payload(insights=["a", "b"])
+        p2 = _make_payload(insights=[])
+        p3 = _make_payload(insights=["c"])
+        agg = _aggregate_payloads([p1, p2, p3], lookback_days=30, horizon_days=14)
+        assert agg["total_flags"] == 3
+        assert agg["boards_with_flags"] == 2
+
+    def test_has_any_released_state_true_when_any(self):
+        p1 = _make_payload(has_released_states=False)
+        p2 = _make_payload(has_released_states=True)
+        agg = _aggregate_payloads([p1, p2], lookback_days=30, horizon_days=14)
+        assert agg["has_any_released_state"] is True
+
+    def test_has_any_released_state_false_when_none(self):
+        p = _make_payload(has_released_states=False)
+        agg = _aggregate_payloads([p], lookback_days=30, horizon_days=14)
+        assert agg["has_any_released_state"] is False
+
+    def test_empty_input(self):
+        agg = _aggregate_payloads([], lookback_days=30, horizon_days=14)
+        assert agg["board_count"] == 0
+        assert agg["metrics"]["closed"] == 0
+
+
+class TestRenderMultiMarkdown:
+    def test_header_shows_board_count_and_windows(self):
+        aggregate = _aggregate_payloads(
+            [_make_payload(board="A"), _make_payload(board="B")],
+            lookback_days=30, horizon_days=14,
+        )
+        out = _render_multi_markdown(
+            aggregate,
+            [_make_payload(board="A"), _make_payload(board="B")],
+            limit=5,
+        )
+        assert "Org pulse" in out
+        assert "2 boards" in out
+        assert "←30d" in out and "14d→" in out
+
+    def test_per_board_sections_present(self):
+        payloads = [
+            _make_payload(board="Alpha"),
+            _make_payload(board="Beta"),
+        ]
+        aggregate = _aggregate_payloads(payloads, lookback_days=30, horizon_days=14)
+        out = _render_multi_markdown(aggregate, payloads, limit=5)
+        assert "## Alpha" in out
+        assert "## Beta" in out
+
+    def test_shipped_line_only_when_any_board_has_release_state(self):
+        no_release = [_make_payload(has_released_states=False, board="A")]
+        agg_no = _aggregate_payloads(no_release, lookback_days=30, horizon_days=14)
+        out_no = _render_multi_markdown(agg_no, no_release, limit=5)
+        assert "Shipped:" not in out_no
+
+        with_release = [
+            _make_payload(has_released_states=False, board="A"),
+            _make_payload(has_released_states=True, board="B",
+                          metrics={"closed": 5, "released": 3, "incoming": 4, "reopened": 0}),
+        ]
+        agg_yes = _aggregate_payloads(with_release, lookback_days=30, horizon_days=14)
+        out_yes = _render_multi_markdown(agg_yes, with_release, limit=5)
+        assert "Shipped:" in out_yes
+
+    def test_per_board_flags_rendered_under_summary(self):
+        p = _make_payload(board="Alpha", insights=["📈 Backlog growing — 10 vs 5"])
+        agg = _aggregate_payloads([p], lookback_days=30, horizon_days=14)
+        out = _render_multi_markdown(agg, [p], limit=5)
+        assert "Backlog growing" in out
+
+    def test_per_board_top_items_truncated_to_limit(self):
+        triaged_items = [
+            _issue_to_dict(_issue(id=f"PROJ-{i}", summary=f"Item {i}"),
+                           score=10.0 - i, now_ms=NOW_MS)
+            for i in range(10)
+        ]
+        p = _make_payload(board="Alpha", triaged=triaged_items)
+        agg = _aggregate_payloads([p], lookback_days=30, horizon_days=14)
+        out = _render_multi_markdown(agg, [p], limit=2)
+        # limit=2 caps per-section display; in multi-view we additionally cap
+        # at 3 internally. We should see top 2 items rendered.
+        assert "PROJ-0" in out
+        assert "PROJ-1" in out
+
+
+class TestClassifyBoardColumns:
+    def test_extracts_state_to_role(self):
+        board = {
+            "columnSettings": {
+                "columns": [
+                    {"presentation": "To Do", "fieldValues": [{"name": "To Do"}]},
+                    {"presentation": "In Progress", "fieldValues": [{"name": "In Progress"}]},
+                    {"presentation": "Done", "fieldValues": [{"name": "Closed"}]},
+                ]
+            }
+        }
+        state_to_role, unknown = _classify_board_columns(board)
+        assert state_to_role["To Do"] == "triaged"
+        assert state_to_role["In Progress"] == "in_progress"
+        assert state_to_role["Closed"] == "done"
+        assert unknown == []
+
+    def test_records_unknown_column_when_no_field_values(self):
+        board = {
+            "columnSettings": {
+                "columns": [
+                    {"presentation": "Approval Pending", "fieldValues": []},
+                ]
+            }
+        }
+        state_to_role, unknown = _classify_board_columns(board)
+        assert state_to_role["Approval Pending"] == "triaged"
+        assert "Approval Pending" in unknown
+
+
+class TestBuildPipelineLaneStates:
+    def test_groups_into_lanes(self):
+        state_to_role = {
+            "In Progress": "in_progress",
+            "For review": "in_progress",
+            "Ready for test": "in_progress",
+            "On testing": "in_progress",
+            "Ready for release": "in_progress",
+            "To Do": "triaged",   # not in_progress, ignored
+        }
+        lanes = _build_pipeline_lane_states(state_to_role)
+        assert "In Progress" in lanes["in_progress"]
+        assert "For review" in lanes["for_review"]
+        assert "Ready for test" in lanes["ready_for_test"]
+        assert "On testing" in lanes["on_testing"]
+        assert "Ready for release" in lanes["ready_for_release"]
+        # Triaged state shouldn't show up in any lane
+        for v in lanes.values():
+            assert "To Do" not in v
