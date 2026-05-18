@@ -203,3 +203,51 @@ do `json.loads()`.
 
 Tests: 395 → 413 (+18 covering `build_lookback_clause`, `_issue_to_dict`,
 the payload-based renderer, and the JSON round-trip).
+
+## v1.9.0 — Stale & overdue filtering
+
+Downstream reporting (`velesnitski/youtrack-reports`) discovered the raw
+pipeline buckets are full of "100–200d-idle ghosts" — items technically
+in `In Progress`/`For review`/`On testing` but with no activity in
+months. They inflate WIP counts and dilute the velocity-ratio insight
+flags. Measured impact of adding a 60-day idle filter on real data:
+
+| Board                       | Before → After |
+|-----------------------------|----------------|
+| Desktop (one product)       | 200 → 81       |
+| Frontend                    | 88 → 48        |
+| WordPress                   | 65 → 52        |
+| QA (sub-product)            | 15 → 7         |
+
+A second filter — drop items >30d past their deadline — addresses
+deeply-overdue ghosts that aren't realistically next-up: they need a
+different conversation than what pulse provides.
+
+**Two new params, both opt-out via 0:**
+
+- `max_idle_days: int = 60` — drop pipeline (`in_progress`, `for_review`,
+  `ready_for_test`, `on_testing`, `ready_for_release`) and `re_entry`
+  items not updated within this window. Triaged/incoming stay
+  unfiltered (the existing `stale_triaged` insight surfaces them as a
+  flag rather than dropping silently).
+- `max_overdue_days: int = 30` — drop items from all forward sections
+  whose `Deadline ☠️` is past by more than this window.
+
+**Safety:** missing `updated` field is treated as active (surface
+ambiguous data rather than silently drop); items without a deadline are
+never filtered by the overdue rule.
+
+**Side effect:** the post-filter pipeline counts feed `compute_insights`,
+so velocity ratios (`incoming > closed × 1.3`, `WIP overload`,
+`underloaded`) become honest signals instead of distorted by abandoned
+tickets. This is the primary motivation cited by the downstream
+consumer.
+
+Tests: 413 → 431 (+18 covering boundary cases, opt-out, missing-field
+safety, and the batch filter helpers).
+
+### Why minor bump (1.9.0), not patch
+
+The defaults change behavior of existing calls — operators relying on
+the wider unfiltered output need to know. Both filters can be disabled
+with `=0` for full backwards compatibility.

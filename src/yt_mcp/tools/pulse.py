@@ -180,6 +180,48 @@ def _filter_issues(issues: list[dict], standup_patterns) -> list[dict]:
     return keep
 
 
+# --- Stale / overdue filters --------------------------------------------------
+#
+# Downstream reporting (velesnitski/youtrack-reports) discovered the raw
+# pipeline buckets are full of "100–200d-idle ghosts" — items technically in
+# `In Progress`/`For review`/`On testing` but with no activity in months. They
+# inflate WIP counts and dilute the velocity-ratio insight flags. Filtering
+# them out matched real-world team activity (e.g. 200 → 81 on one board).
+#
+# `max_idle_days=0` disables the filter (escape hatch for forensic reviews).
+# Missing `updated` is treated as active — surface, don't silently drop.
+
+def _is_active(issue: dict, max_idle_days: int, now_ms: int) -> bool:
+    """True if issue was updated within `max_idle_days`. Disabled when 0/None."""
+    if not max_idle_days:
+        return True
+    updated = issue.get("updated") or issue.get("created")
+    if not updated:
+        return True  # missing field — keep (safer than dropping)
+    return _days_between_ms(now_ms, updated) <= max_idle_days
+
+
+def _is_too_overdue(issue: dict, max_overdue_days: int, now_ms: int) -> bool:
+    """True if deadline is past by more than `max_overdue_days`. Items deeply
+    overdue aren't realistically "next up" — they need a different conversation
+    than a pulse report."""
+    if not max_overdue_days:
+        return False
+    dl = _extract_deadline_ms(issue)
+    if dl is None:
+        return False
+    days_past = -_days_between_ms(dl, now_ms)  # positive iff overdue
+    return days_past > max_overdue_days
+
+
+def _filter_active(issues: list[dict], max_idle_days: int, now_ms: int) -> list[dict]:
+    return [i for i in issues if _is_active(i, max_idle_days, now_ms)]
+
+
+def _filter_not_too_overdue(issues: list[dict], max_overdue_days: int, now_ms: int) -> list[dict]:
+    return [i for i in issues if not _is_too_overdue(i, max_overdue_days, now_ms)]
+
+
 # --- Field selectors -----------------------------------------------------
 
 PULSE_ISSUE_FIELDS = (
@@ -485,6 +527,8 @@ def register(mcp, resolver: InstanceResolver):
         lookback_days: int = 30,
         limit: int = 10,
         format: str = "report",
+        max_idle_days: int = 60,
+        max_overdue_days: int = 30,
         instance: str = "",
     ) -> str:
         """Team pulse for a board: what shipped in the last {lookback_days}d
@@ -507,6 +551,13 @@ def register(mcp, resolver: InstanceResolver):
             format: "report" (default, markdown) or "json" (JSON-stringified
                 payload for programmatic consumption — board, metrics,
                 pipeline_counts, ranked section lists, team_balanced, insights).
+            max_idle_days: Drop pipeline + re_entry items not updated within
+                this many days (default 60). Pass 0 to disable. Justified by
+                real-data measurement showing 50%+ noise from abandoned tickets
+                that still technically sit in In Progress/For review states.
+            max_overdue_days: Drop forward items whose deadline is past by more
+                than this many days (default 30). Pass 0 to disable. Deeply
+                overdue items need a different conversation than "next up".
             instance: YouTrack instance (optional).
         """
         client = resolver.resolve(instance, board_name)
@@ -661,10 +712,32 @@ def register(mcp, resolver: InstanceResolver):
         except (ValueError, KeyError):
             reopened_count = 0
 
-        # 4) Apply filters (standup + blocked-by) to forward sections.
-        triaged_filtered = _filter_issues(triaged_issues, standup_patterns)
-        re_entry_filtered = _filter_issues(re_entry_issues, standup_patterns)
-        incoming_filtered = _filter_issues(incoming_issues, standup_patterns)
+        # 4) Apply filters (standup + blocked-by + stale + deep-overdue) to sections.
+        # Idle-filter applies to pipeline + re_entry (workflow-in-flight items).
+        # Triaged/incoming stay unfiltered for idle — they're explicitly placed
+        # and the existing "stale_triaged" insight surfaces them as a flag, not
+        # a silent drop. Overdue filter applies to all forward sections.
+        triaged_filtered = _filter_not_too_overdue(
+            _filter_issues(triaged_issues, standup_patterns),
+            max_overdue_days, now_ms,
+        )
+        re_entry_filtered = _filter_not_too_overdue(
+            _filter_active(
+                _filter_issues(re_entry_issues, standup_patterns),
+                max_idle_days, now_ms,
+            ),
+            max_overdue_days, now_ms,
+        )
+        incoming_filtered = _filter_not_too_overdue(
+            _filter_issues(incoming_issues, standup_patterns),
+            max_overdue_days, now_ms,
+        )
+        # Pipeline buckets: drop ghosts not touched in max_idle_days.
+        in_progress_issues = _filter_active(in_progress_issues, max_idle_days, now_ms)
+        for_review_issues = _filter_active(for_review_issues, max_idle_days, now_ms)
+        ready_for_test_issues = _filter_active(ready_for_test_issues, max_idle_days, now_ms)
+        on_testing_issues = _filter_active(on_testing_issues, max_idle_days, now_ms)
+        ready_for_release_issues = _filter_active(ready_for_release_issues, max_idle_days, now_ms)
 
         # 5) Score & rank forward sections.
         def _rank(items: list[dict]) -> list[tuple[float, dict, dict]]:
@@ -677,7 +750,7 @@ def register(mcp, resolver: InstanceResolver):
         re_entry_ranked = _rank(re_entry_filtered)
         incoming_ranked = _rank(incoming_filtered)
 
-        # 6) Pipeline counts for insights.
+        # 6) Pipeline counts for insights (post-filter — honest velocity ratios).
         pipeline_counts = {
             "in_progress": len(in_progress_issues),
             "for_review": len(for_review_issues),
