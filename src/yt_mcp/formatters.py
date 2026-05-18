@@ -98,6 +98,26 @@ def _resolve_assignee(issue: dict) -> str:
     return cf_assignee or "Unassigned"
 
 
+def _resolve_assignee_login(issue: dict) -> str | None:
+    """Get assignee login (YouTrack username) for live `Assignee:` query
+    filters. YouTrack's `Assignee:` syntax requires the login string, NOT
+    the display name. Returns None when no login is resolvable so callers
+    can fall back to ID-list queries."""
+    a = issue.get("assignee")
+    if isinstance(a, dict) and a.get("login"):
+        return a["login"]
+    for cf in issue.get("customFields", []):
+        if cf.get("name") == "Assignee":
+            v = cf.get("value")
+            if isinstance(v, dict) and v.get("login"):
+                return v["login"]
+            if isinstance(v, list) and v:
+                first = v[0]
+                if isinstance(first, dict) and first.get("login"):
+                    return first["login"]
+    return None
+
+
 def format_issue_list(issues: list) -> str:
     if not issues:
         return "No issues found."

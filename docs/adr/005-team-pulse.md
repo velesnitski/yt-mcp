@@ -342,3 +342,24 @@ multi-markdown rendering, board-column classifier, lane grouping).
 New tool surface, no breakage. Existing `get_team_pulse` behavior is
 unchanged — it now uses the same `_build_pulse_payload` helper but
 returns the same shape.
+
+## v1.10.1 — `assignee_login` in JSON output
+
+YouTrack's `Assignee:` query filter requires the user's **login**
+(e.g. `alice.smith`), not the display name. The pulse JSON
+output exposed only the display `assignee` field, forcing downstream
+consumers to fall back to ID-list workarounds when building
+live drilldown URLs — the rendered list was frozen to fetch-time.
+
+**Resolution:** `_issue_to_dict` now adds `"assignee_login": str | None`
+alongside the existing `"assignee"` (name). Resolved via a new shared
+helper `_resolve_assignee_login(issue)` in `formatters.py` that walks
+top-level `assignee.login` → `customFields.Assignee.value.login`. Returns
+`None` when no login is resolvable (display-name-only assignee — fall
+back to ID-list).
+
+Other tools (`get_top_active_issues`, `get_team_dashboard`, etc.) could
+adopt the same helper later; for v1.10.1 the change is pulse-scoped.
+
+Tests: 450 → 454 (+4). Coverage: login from top-level, login from
+custom field, None when unassigned, None when display-name-only.

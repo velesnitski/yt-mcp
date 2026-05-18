@@ -22,8 +22,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from yt_mcp.formatters import (
-    _resolve_state, _resolve_assignee, _get_custom_field,
-    compact_lines,
+    _resolve_state, _resolve_assignee, _resolve_assignee_login,
+    _get_custom_field, compact_lines,
 )
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.tools.deadlines.parser import (
@@ -295,6 +295,10 @@ def _issue_to_dict(issue: dict, score: float | None = None,
         "summary": issue.get("summary", "") or "",
         "state": _resolve_state(issue),
         "assignee": _resolve_assignee(issue),
+        # YouTrack `Assignee:` query filter needs the login, not display name —
+        # so consumers can build live drilldown URLs without falling back to
+        # frozen ID-lists. None when no login is resolvable.
+        "assignee_login": _resolve_assignee_login(issue),
         "severity": _get_custom_field(issue, "Severity"),
         "type": _get_custom_field(issue, "Type"),
         "priority": _get_custom_field(issue, "Priority"),
