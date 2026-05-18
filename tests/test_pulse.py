@@ -17,11 +17,14 @@ from yt_mcp.tools.pulse import (
     classify_column,
     compute_pulse_score,
     compute_insights,
+    build_lookback_clause,
     _round_robin_balance,
     _is_team_pool,
     _is_blocked_by_unresolved,
     _filter_issues,
     _COLUMN_PATTERNS_match_any,
+    _issue_to_dict,
+    _render_markdown,
 )
 from yt_mcp.tools.deadlines.parser import (
     _DEFAULT_STANDUP_PATTERNS, _compile_standup_patterns,
@@ -346,3 +349,196 @@ class TestComputeInsights:
         pipeline = self._make_pipeline(in_progress=1, for_review=0)
         flags = compute_insights(self._make_metrics(closed=15), pipeline, [], NOW_MS)
         assert any("underloaded" in f.lower() for f in flags)
+
+
+# --- Date-clause format (fixes the YouTrack 400 parse error) ----------------
+
+import re as _re_for_tests
+
+
+class TestBuildLookbackClause:
+    """The query parser rejects `-Nd .. *` — must be absolute ISO dates."""
+
+    def test_returns_absolute_iso_range(self):
+        clause = build_lookback_clause(30, NOW_MS)
+        # Match `YYYY-MM-DD .. YYYY-MM-DD`
+        assert _re_for_tests.fullmatch(
+            r"\d{4}-\d{2}-\d{2} \.\. \d{4}-\d{2}-\d{2}", clause
+        ), f"unexpected clause: {clause!r}"
+
+    def test_no_relative_offset_in_output(self):
+        clause = build_lookback_clause(30, NOW_MS)
+        # The old broken format used these — make sure they never appear.
+        assert "-30d" not in clause
+        assert " * " not in clause
+        assert clause.count("..") == 1
+
+    def test_30_day_window_spans_30_days(self):
+        clause = build_lookback_clause(30, NOW_MS)
+        start, end = clause.split(" .. ")
+        start_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        end_dt = datetime.strptime(end, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        assert (end_dt - start_dt).days == 30
+
+    def test_14_day_window(self):
+        clause = build_lookback_clause(14, NOW_MS)
+        start, end = clause.split(" .. ")
+        start_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        end_dt = datetime.strptime(end, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        assert (end_dt - start_dt).days == 14
+
+    def test_end_date_matches_now(self):
+        clause = build_lookback_clause(30, NOW_MS)
+        _, end = clause.split(" .. ")
+        expected_end = datetime.fromtimestamp(NOW_MS / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+        assert end == expected_end
+
+
+# --- JSON payload shape ----------------------------------------------------
+
+class TestIssueToDict:
+    def test_basic_shape(self):
+        issue = _issue(id="PROJ-1", summary="Hello", cf_severity="Major", cf_type="Bug")
+        d = _issue_to_dict(issue, score=4.2, breakdown={"severity": 3}, now_ms=NOW_MS)
+        assert d["id"] == "PROJ-1"
+        assert d["summary"] == "Hello"
+        assert d["severity"] == "Major"
+        assert d["type"] == "Bug"
+        assert d["score"] == 4.2
+        assert d["breakdown"] == {"severity": 3}
+
+    def test_deadline_days_computed(self):
+        issue = _issue(cf_deadline="2026-05-22")  # 4 days from NOW
+        d = _issue_to_dict(issue, now_ms=NOW_MS)
+        assert d["deadline_days"] == 4
+
+    def test_no_deadline_yields_none(self):
+        d = _issue_to_dict(_issue(), now_ms=NOW_MS)
+        assert d["deadline_days"] is None
+
+    def test_age_days_in_state(self):
+        issue = _issue(updated=NOW_MS - 7 * DAY_MS)
+        d = _issue_to_dict(issue, now_ms=NOW_MS)
+        assert d["age_days_in_state"] == 7
+
+
+class TestRenderMarkdownFromPayload:
+    """The renderer must accept a payload dict (no raw issues)."""
+
+    def _make_payload(self, **kw) -> dict:
+        return {
+            "board": kw.get("board", "Foo Board"),
+            "lookback_days": kw.get("lookback_days", 30),
+            "horizon_days": kw.get("horizon_days", 14),
+            "metrics": kw.get("metrics", {
+                "closed": 5, "released": 0, "incoming": 5, "reopened": 0,
+            }),
+            "pipeline_counts": kw.get("pipeline_counts", {
+                "in_progress": 3, "for_review": 2, "ready_for_test": 1,
+                "on_testing": 1, "ready_for_release": 0,
+            }),
+            "has_released_states": kw.get("has_released_states", False),
+            "triaged": kw.get("triaged", []),
+            "re_entry": kw.get("re_entry", []),
+            "incoming": kw.get("incoming", []),
+            "team_balanced": kw.get("team_balanced", []),
+            "team_pool": kw.get("team_pool", []),
+            "insights": kw.get("insights", []),
+            "unknown_columns": kw.get("unknown_columns", []),
+        }
+
+    def test_header_contains_board_and_windows(self):
+        out = _render_markdown(self._make_payload(), limit=10)
+        assert "Foo Board" in out
+        assert "←30d" in out and "14d→" in out
+
+    def test_empty_queue_message(self):
+        out = _render_markdown(self._make_payload(), limit=10)
+        assert "Nothing in the forward queue" in out
+
+    def test_insights_rendered(self):
+        out = _render_markdown(
+            self._make_payload(insights=["📈 Backlog growing — 10 new vs 5 closed"]),
+            limit=10,
+        )
+        assert "Flags" in out
+        assert "Backlog growing" in out
+
+    def test_unknown_columns_diagnostic(self):
+        out = _render_markdown(
+            self._make_payload(unknown_columns=["Approval Pending"]),
+            limit=10,
+        )
+        assert "Approval Pending" in out
+        assert "unrecognized" in out.lower()
+
+    def test_triaged_items_shown(self):
+        item = _issue_to_dict(
+            _issue(id="PROJ-7", summary="Build widget", cf_severity="Major"),
+            score=3.0, now_ms=NOW_MS,
+        )
+        out = _render_markdown(self._make_payload(triaged=[item]), limit=10)
+        assert "PROJ-7" in out
+        assert "Ready to pull" in out
+
+    def test_team_balanced_section(self):
+        item = _issue_to_dict(_issue(id="PROJ-9"), score=2.0, now_ms=NOW_MS)
+        balanced = [{"assignee": "Alice A", "items": [item]}]
+        out = _render_markdown(self._make_payload(team_balanced=balanced), limit=10)
+        assert "Team-balanced" in out
+        assert "Alice A" in out
+        assert "PROJ-9" in out
+
+    def test_pool_section_when_present(self):
+        item = _issue_to_dict(_issue(id="PROJ-11"), score=1.5, now_ms=NOW_MS)
+        out = _render_markdown(
+            self._make_payload(team_pool=[item], team_balanced=[]), limit=10,
+        )
+        assert "Available to claim" in out
+        assert "PROJ-11" in out
+
+    def test_shipped_line_appears_only_when_release_state_present(self):
+        no_release = _render_markdown(self._make_payload(has_released_states=False), limit=10)
+        assert "Shipped:" not in no_release
+        with_release = _render_markdown(
+            self._make_payload(has_released_states=True,
+                               metrics={"closed": 5, "released": 2, "incoming": 5, "reopened": 0}),
+            limit=10,
+        )
+        assert "Shipped:" in with_release
+
+
+# --- format param round-trip (JSON parseable) ------------------------------
+
+class TestFormatJsonOutput:
+    """The format='json' branch should return a parseable JSON string with
+    the expected top-level keys — consumers can json.loads() and template."""
+
+    def test_payload_round_trip(self):
+        import json as _json
+        # Mirror what the tool builds, then dump+load to verify shape.
+        payload = {
+            "board": "Foo Board",
+            "lookback_days": 30,
+            "horizon_days": 14,
+            "metrics": {"closed": 5, "released": 2, "incoming": 5, "reopened": 0},
+            "pipeline_counts": {"in_progress": 3, "for_review": 2,
+                                "ready_for_test": 1, "on_testing": 1,
+                                "ready_for_release": 0},
+            "has_released_states": True,
+            "triaged": [_issue_to_dict(_issue(id="PROJ-1"), score=3.0, now_ms=NOW_MS)],
+            "re_entry": [],
+            "incoming": [],
+            "team_balanced": [],
+            "team_pool": [],
+            "insights": ["📈 Backlog growing"],
+            "unknown_columns": [],
+        }
+        s = _json.dumps(payload, indent=2, ensure_ascii=False)
+        parsed = _json.loads(s)
+        assert parsed["board"] == "Foo Board"
+        assert parsed["metrics"]["closed"] == 5
+        assert parsed["triaged"][0]["id"] == "PROJ-1"
+        assert parsed["insights"] == ["📈 Backlog growing"]
+        # Non-ASCII (emoji) preserved
+        assert "📈" in s

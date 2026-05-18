@@ -16,8 +16,9 @@ guidance.
 """
 
 import asyncio
+import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from yt_mcp.formatters import (
@@ -71,6 +72,18 @@ _TYPE_BONUS = {"bug": 2, "tech task": 1}
 _PRIORITY_TIEBREAK = {"high": 1.0, "medium": 0.5, "med": 0.5}
 
 _DAY_MS = 86400 * 1000
+
+
+def build_lookback_clause(lookback_days: int, now_ms: int) -> str:
+    """Absolute-date range for a YouTrack `resolved:`/`created:` query.
+
+    Returns `YYYY-MM-DD .. YYYY-MM-DD`. We previously used `-Nd .. *` but
+    YouTrack rejects the `*` upper bound and bare relative-offset bounds are
+    version-dependent — absolute ISO dates are portable.
+    """
+    end_dt = datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc)
+    start_dt = end_dt - timedelta(days=lookback_days)
+    return f"{start_dt.strftime('%Y-%m-%d')} .. {end_dt.strftime('%Y-%m-%d')}"
 
 
 def _days_between_ms(later_ms: int, earlier_ms: int) -> float:
@@ -228,6 +241,156 @@ def _round_robin_balance(items: list[tuple[dict, float]]) -> dict[str, list[tupl
     return ordered
 
 
+def _issue_to_dict(issue: dict, score: float | None = None,
+                   breakdown: dict | None = None, now_ms: int = 0) -> dict:
+    """Serialize an issue + score into a JSON-friendly dict for the JSON output."""
+    updated = issue.get("updated") or issue.get("created") or now_ms
+    age_days = int(_days_between_ms(now_ms, updated)) if now_ms else 0
+    dl_ms = _extract_deadline_ms(issue)
+    dl_days = int(_days_between_ms(dl_ms, now_ms)) if (dl_ms and now_ms) else None
+    out: dict = {
+        "id": issue.get("idReadable", "?"),
+        "summary": issue.get("summary", "") or "",
+        "state": _resolve_state(issue),
+        "assignee": _resolve_assignee(issue),
+        "severity": _get_custom_field(issue, "Severity"),
+        "type": _get_custom_field(issue, "Type"),
+        "priority": _get_custom_field(issue, "Priority"),
+        "age_days_in_state": age_days,
+        "deadline_days": dl_days,
+    }
+    if score is not None:
+        out["score"] = round(score, 2)
+    if breakdown is not None:
+        out["breakdown"] = breakdown
+    return out
+
+
+def _build_team_balanced(re_entry_ranked, triaged_ranked, limit: int, now_ms: int):
+    """Round-robin top forward items across assignees, returning
+    JSON-friendly per-user lists plus a 'pool' (unassigned + team-pool) list.
+
+    Each item is an issue-dict from `_issue_to_dict` with score embedded."""
+    combined = (
+        [(i, t) for t, _b, i in re_entry_ranked]
+        + [(i, t) for t, _b, i in triaged_ranked]
+    )[: limit * 2]
+    if not combined:
+        return [], []
+    balanced = _round_robin_balance(combined)
+    per_user = []
+    pool_serialized = [_issue_to_dict(issue, score, now_ms=now_ms)
+                       for issue, score in balanced.get("__pool__", [])]
+    for user, items in balanced.items():
+        if user == "__pool__":
+            continue
+        serialized = [_issue_to_dict(issue, score, now_ms=now_ms)
+                      for issue, score in items]
+        per_user.append({"assignee": user, "items": serialized})
+    return per_user, pool_serialized
+
+
+def _render_markdown(payload: dict, limit: int) -> str:
+    """Render a payload dict into the markdown report."""
+    board_display = payload["board"]
+    lookback_days = payload["lookback_days"]
+    horizon_days = payload["horizon_days"]
+    metrics = payload["metrics"]
+    pipeline_counts = payload["pipeline_counts"]
+    insights = payload["insights"]
+    unknown_columns = payload.get("unknown_columns", [])
+    re_entry_items = payload["re_entry"]
+    triaged_items = payload["triaged"]
+    incoming_items = payload["incoming"]
+    team_balanced = payload["team_balanced"]
+    pool = payload["team_pool"]
+    has_released = payload.get("has_released_states", False)
+
+    lines: list[str] = []
+    lines.append(f"# {board_display} — Team pulse  (←{lookback_days}d  |  {horizon_days}d→)")
+    lines.append("")
+
+    lines.append("## At a glance")
+    lines.append(f"- **Throughput:**    {metrics['closed']} closed / {lookback_days}d")
+    if has_released:
+        lines.append(f"- **Shipped:**       {metrics['released']} released / {lookback_days}d")
+    lines.append(
+        f"- **Pipeline now:**  {pipeline_counts['in_progress']} in progress · "
+        f"{pipeline_counts['for_review']} in review · "
+        f"{pipeline_counts['ready_for_test'] + pipeline_counts['on_testing']} on test · "
+        f"{pipeline_counts['ready_for_release']} ready to ship"
+    )
+    lines.append(f"- **Incoming:**      {metrics['incoming']} new in {lookback_days}d")
+    lines.append(f"- **Reopened:**      {metrics['reopened']} in {lookback_days}d")
+    lines.append("")
+
+    if insights:
+        lines.append("### Flags")
+        for f in insights:
+            lines.append(f"- {f}")
+        lines.append("")
+
+    if unknown_columns:
+        lines.append(
+            f"_Diagnostic: unrecognized columns treated as `triaged`: "
+            f"{', '.join(unknown_columns)}_"
+        )
+        lines.append("")
+
+    lines.append(f"## → Coming in next {horizon_days}d")
+    lines.append("")
+    if re_entry_items:
+        lines.append(f"### Pipeline-unblockers (re-entry) — {len(re_entry_items)}")
+        for it in re_entry_items[:limit]:
+            lines.append(_format_issue_line_from_dict(it))
+        lines.append("")
+    if triaged_items:
+        lines.append(f"### Ready to pull (triaged) — {len(triaged_items)}")
+        for it in triaged_items[:limit]:
+            lines.append(_format_issue_line_from_dict(it))
+        lines.append("")
+    if incoming_items:
+        lines.append(f"### Incoming — needs PM triage (last {lookback_days}d) — {len(incoming_items)}")
+        for it in incoming_items[:limit]:
+            lines.append(_format_issue_line_from_dict(it))
+        lines.append("")
+
+    if team_balanced or pool:
+        lines.append(f"## Team-balanced (next {horizon_days}d)")
+        lines.append("")
+        for entry in team_balanced:
+            lines.append(f"### {entry['assignee']}")
+            for d in entry["items"]:
+                lines.append(_format_issue_line_from_dict(d))
+            lines.append("")
+        if pool:
+            lines.append("### Available to claim (Team pool / unassigned)")
+            for d in pool:
+                lines.append(_format_issue_line_from_dict(d))
+            lines.append("")
+
+    if not (re_entry_items or triaged_items or incoming_items):
+        lines.append("_Nothing in the forward queue — every column upstream of In Progress is empty._")
+        lines.append("")
+
+    return compact_lines(lines)
+
+
+def _format_issue_line_from_dict(d: dict) -> str:
+    extras = [
+        f"{d.get('severity') or '-'}",
+        f"{d.get('type') or '-'}",
+        f"{d.get('age_days_in_state', 0)}d in {d.get('state', '?')}",
+    ]
+    dl = d.get("deadline_days")
+    if dl is not None:
+        marker = f"deadline in {dl}d" if dl >= 0 else f"overdue {-dl}d"
+        extras.append(marker)
+    score_str = f" (s:{d['score']:.1f})" if "score" in d and d["score"] is not None else ""
+    summary = (d.get("summary") or "?")[:90]
+    return f"- **{d['id']}**{score_str} — {summary} [{', '.join(extras)}]"
+
+
 def _format_issue_line(issue: dict, score: float | None = None, now_ms: int = 0) -> str:
     iid = issue.get("idReadable", "?")
     summary = (issue.get("summary", "") or "?")[:90]
@@ -321,6 +484,7 @@ def register(mcp, resolver: InstanceResolver):
         horizon_days: int = 14,
         lookback_days: int = 30,
         limit: int = 10,
+        format: str = "report",
         instance: str = "",
     ) -> str:
         """Team pulse for a board: what shipped in the last {lookback_days}d
@@ -340,6 +504,9 @@ def register(mcp, resolver: InstanceResolver):
             horizon_days: Forward planning window (default 14).
             lookback_days: Backward velocity window (default 30 — smooths weekly variance).
             limit: Max items per section (default 10).
+            format: "report" (default, markdown) or "json" (JSON-stringified
+                payload for programmatic consumption — board, metrics,
+                pipeline_counts, ranked section lists, team_balanced, insights).
             instance: YouTrack instance (optional).
         """
         client = resolver.resolve(instance, board_name)
@@ -432,7 +599,7 @@ def register(mcp, resolver: InstanceResolver):
             return len(data or [])
 
         # Lookback queries — use `resolved:` for closed (exact) and `created:` for incoming.
-        lookback_clause = f"-{lookback_days}d .. *"
+        lookback_clause = build_lookback_clause(lookback_days, now_ms)
         closed_q = f"{project_clause} resolved: {lookback_clause}"
         incoming_q = f"{project_clause} created: {lookback_clause} #Unresolved"
         # Released = resolved AND state matches release-like name. Done lane has
@@ -526,85 +693,29 @@ def register(mcp, resolver: InstanceResolver):
         }
         insights = compute_insights(metrics, pipeline_counts, triaged_filtered + re_entry_filtered, now_ms)
 
-        # 7) Render.
-        lines: list[str] = []
-        lines.append(f"# {board_display} — Team pulse  (←{lookback_days}d  |  {horizon_days}d→)")
-        lines.append("")
-
-        lines.append("## At a glance")
-        lines.append(f"- **Throughput:**    {closed_count} closed / {lookback_days}d")
-        if released_states:
-            lines.append(f"- **Shipped:**       {released_count} released / {lookback_days}d")
-        lines.append(
-            f"- **Pipeline now:**  {pipeline_counts['in_progress']} in progress · "
-            f"{pipeline_counts['for_review']} in review · "
-            f"{pipeline_counts['ready_for_test'] + pipeline_counts['on_testing']} on test · "
-            f"{pipeline_counts['ready_for_release']} ready to ship"
+        # 7) Build the JSON-friendly payload once; markdown renderer reads it.
+        team_balanced, team_pool = _build_team_balanced(
+            re_entry_ranked, triaged_ranked, limit, now_ms,
         )
-        lines.append(f"- **Incoming:**      {incoming_count} new in {lookback_days}d")
-        lines.append(f"- **Reopened:**      {reopened_count} in {lookback_days}d")
-        lines.append("")
+        payload = {
+            "board": board_display,
+            "lookback_days": lookback_days,
+            "horizon_days": horizon_days,
+            "metrics": metrics,
+            "pipeline_counts": pipeline_counts,
+            "has_released_states": bool(released_states),
+            "triaged": [_issue_to_dict(i, t, b, now_ms) for t, b, i in triaged_ranked],
+            "re_entry": [_issue_to_dict(i, t, b, now_ms) for t, b, i in re_entry_ranked],
+            "incoming": [_issue_to_dict(i, t, b, now_ms) for t, b, i in incoming_ranked],
+            "team_balanced": team_balanced,
+            "team_pool": team_pool,
+            "insights": insights,
+            "unknown_columns": unknown_columns,
+        }
 
-        if insights:
-            lines.append("### Flags")
-            for f in insights:
-                lines.append(f"- {f}")
-            lines.append("")
-
-        if unknown_columns:
-            lines.append(
-                f"_Diagnostic: unrecognized columns treated as `triaged`: "
-                f"{', '.join(unknown_columns)}_"
-            )
-            lines.append("")
-
-        # Forward sections
-        lines.append(f"## → Coming in next {horizon_days}d")
-        lines.append("")
-        if re_entry_ranked:
-            lines.append(f"### Pipeline-unblockers (re-entry) — {len(re_entry_ranked)}")
-            for total, _bd, issue in re_entry_ranked[:limit]:
-                lines.append(_format_issue_line(issue, total, now_ms))
-            lines.append("")
-        if triaged_ranked:
-            lines.append(f"### Ready to pull (triaged) — {len(triaged_ranked)}")
-            for total, _bd, issue in triaged_ranked[:limit]:
-                lines.append(_format_issue_line(issue, total, now_ms))
-            lines.append("")
-        if incoming_ranked:
-            lines.append(f"### Incoming — needs PM triage (last {lookback_days}d) — {len(incoming_ranked)}")
-            for total, _bd, issue in incoming_ranked[:limit]:
-                lines.append(_format_issue_line(issue, total, now_ms))
-            lines.append("")
-
-        # Team-balanced view
-        combined = (
-            [(i, t) for t, _b, i in re_entry_ranked]
-            + [(i, t) for t, _b, i in triaged_ranked]
-        )[:limit * 2]
-        if combined:
-            balanced = _round_robin_balance(combined)
-            lines.append(f"## Team-balanced (next {horizon_days}d)")
-            lines.append("")
-            for user, items in balanced.items():
-                if user == "__pool__":
-                    continue
-                lines.append(f"### {user}")
-                for issue, score in items:
-                    lines.append(_format_issue_line(issue, score, now_ms))
-                lines.append("")
-            pool = balanced.get("__pool__")
-            if pool:
-                lines.append("### Available to claim (Team pool / unassigned)")
-                for issue, score in pool:
-                    lines.append(_format_issue_line(issue, score, now_ms))
-                lines.append("")
-
-        if not (re_entry_ranked or triaged_ranked or incoming_ranked):
-            lines.append("_Nothing in the forward queue — every column upstream of In Progress is empty._")
-            lines.append("")
-
-        return compact_lines(lines)
+        if format == "json":
+            return json.dumps(payload, indent=2, ensure_ascii=False)
+        return _render_markdown(payload, limit)
 
 
 def _COLUMN_PATTERNS_match_any(name: str) -> bool:

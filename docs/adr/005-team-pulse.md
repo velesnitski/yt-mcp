@@ -153,3 +153,53 @@ Drop from all forward sections:
   the deadline tool — both share `_DEFAULT_STANDUP_PATTERNS`.
 - Unknown columns produce a diagnostic line rather than silent drop, so
   workflow drift is observable from the report.
+
+## Post-ship fixes (v1.8.1)
+
+Two integration blockers surfaced when wiring the tool into the
+downstream reports pipeline.
+
+### 1. YouTrack query parse error on lookback clause
+
+The original implementation built `resolved: -30d .. *`. YouTrack rejects
+this with `400 Can't parse search query`: the `*` upper-bound wildcard
+isn't valid in date ranges, and bare relative-offset bounds (`-30d`) are
+inconsistently supported across YT versions.
+
+**Fix:** new helper `build_lookback_clause(lookback_days, now_ms)`
+returns an absolute ISO range `YYYY-MM-DD .. YYYY-MM-DD`. All five
+lookback queries (`closed`, `incoming`, `incoming-recency`, `released`,
+`reopened`) consume it. Absolute dates are portable across YT versions.
+
+### 2. `format` parameter for downstream programmatic consumption
+
+The HTML-email reports project needs structured data, not markdown.
+Today's markdown-only return forced consumers to re-parse the rendered
+output.
+
+**Fix:** added `format: str = "report"` param. Default preserves
+markdown for chat use; `format="json"` returns
+`json.dumps(payload, indent=2, ensure_ascii=False)` with the dict shape:
+
+```
+{
+  "board": ..., "lookback_days": ..., "horizon_days": ...,
+  "metrics":          {closed, released, incoming, reopened},
+  "pipeline_counts":  {in_progress, for_review, ready_for_test, on_testing, ready_for_release},
+  "triaged":          [{id, summary, severity, type, score, breakdown, ...}],
+  "re_entry":         [...],
+  "incoming":         [...],
+  "team_balanced":    [{assignee, items: [...]}],
+  "team_pool":        [...],
+  "insights":         ["📈 ...", ...],
+  "unknown_columns":  [...],
+}
+```
+
+The payload is assembled once; both `format` branches read from the same
+dict, so the markdown renderer and the JSON output stay in sync by
+construction. Always returns `str` for MCP wire compatibility — callers
+do `json.loads()`.
+
+Tests: 395 → 413 (+18 covering `build_lookback_clause`, `_issue_to_dict`,
+the payload-based renderer, and the JSON round-trip).
