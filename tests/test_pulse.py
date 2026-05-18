@@ -473,6 +473,37 @@ class TestIssueToDict:
         d = _issue_to_dict(issue, now_ms=NOW_MS)
         assert d["deadline_days"] == 4
 
+    def test_assignee_login_from_top_level_field(self):
+        issue = {
+            "idReadable": "PROJ-1", "summary": "x", "customFields": [],
+            "assignee": {"login": "alice.a", "name": "Alice A"},
+        }
+        d = _issue_to_dict(issue, now_ms=NOW_MS)
+        assert d["assignee"] == "Alice A"
+        assert d["assignee_login"] == "alice.a"
+
+    def test_assignee_login_from_custom_field(self):
+        # Some YT projects put Assignee in customFields rather than top-level
+        issue = _issue(id="PROJ-1", cf_assignee="Bob B")
+        d = _issue_to_dict(issue, now_ms=NOW_MS)
+        assert d["assignee"] == "Bob B"
+        assert d["assignee_login"] == "bob.b"
+
+    def test_assignee_login_none_when_unassigned(self):
+        d = _issue_to_dict(_issue(id="PROJ-1"), now_ms=NOW_MS)
+        assert d["assignee"] == "Unassigned"
+        assert d["assignee_login"] is None
+
+    def test_assignee_login_none_when_only_name_present(self):
+        # Sometimes the API returns name without login (display-only assignee)
+        issue = {
+            "idReadable": "PROJ-1", "summary": "x", "customFields": [],
+            "assignee": {"name": "Charlie C"},  # no login
+        }
+        d = _issue_to_dict(issue, now_ms=NOW_MS)
+        assert d["assignee"] == "Charlie C"
+        assert d["assignee_login"] is None
+
     def test_no_deadline_yields_none(self):
         d = _issue_to_dict(_issue(), now_ms=NOW_MS)
         assert d["deadline_days"] is None
