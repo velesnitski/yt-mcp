@@ -582,237 +582,114 @@ def register(mcp, resolver: InstanceResolver):
             instance: YouTrack instance (optional).
         """
         client = resolver.resolve(instance, board_name)
-
-        # 1) Resolve the board → get projects, column structure, state→role mapping.
-        boards = await client.get(
-            "/api/agiles",
-            params={"fields": BOARD_FIELDS},
-        )
-        query_lower = board_name.lower()
-        matches = [b for b in boards if query_lower in b.get("name", "").lower()]
-        if not matches:
-            return f"No agile board matching '{board_name}'."
-        if len(matches) > 1:
-            names = ", ".join(f"'{b.get('name')}'" for b in matches)
-            return f"Multiple boards match '{board_name}': {names}. Be more specific."
-        board = matches[0]
-        board_display = board.get("name", board_name)
-        projects = [p.get("shortName", "") for p in board.get("projects", []) if p.get("shortName")]
-        if not projects:
-            return f"Board '{board_display}' has no projects bound."
-
-        # Column → role mapping (auto-classify, log unknowns)
-        col_settings = board.get("columnSettings") or {}
-        columns = col_settings.get("columns") or []
-        state_to_role: dict[str, str] = {}
-        unknown_columns: list[str] = []
-        for col in columns:
-            for fv in col.get("fieldValues") or []:
-                state_name = fv.get("name") or ""
-                if not state_name:
-                    continue
-                role = classify_column(state_name)
-                state_to_role[state_name] = role
-            # Also classify the column presentation itself in case fieldValues empty.
-            pres = col.get("presentation") or ""
-            if pres and not col.get("fieldValues"):
-                role = classify_column(pres)
-                state_to_role[pres] = role
-                if role == "triaged" and not _COLUMN_PATTERNS_match_any(pres):
-                    unknown_columns.append(pres)
-
+        board, err = await _resolve_board_for_pulse(client, board_name)
+        if not board:
+            return err
         now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
-        standup_patterns = _compile_standup_patterns({})
-
-        # 2) Build the project clause once.
-        if len(projects) == 1:
-            project_clause = f"project: {projects[0]}"
-        else:
-            project_clause = "(" + " or ".join(f"project: {p}" for p in projects) + ")"
-
-        # 3) Fetch forward sections (triaged + re_entry + incoming) and pipeline + done in parallel.
-        triaged_states = [s for s, r in state_to_role.items() if r == "triaged"]
-        re_entry_states = [s for s, r in state_to_role.items() if r == "re_entry"]
-        incoming_states = [s for s, r in state_to_role.items() if r == "incoming"]
-
-        # Each pipeline lane separately for bottleneck detection
-        pipeline_lanes = {
-            "in_progress": re.compile(r"(?i)in\s+progress"),
-            "for_review": re.compile(r"(?i)for\s+review|in\s+review"),
-            "ready_for_test": re.compile(r"(?i)ready\s+for\s+test"),
-            "on_testing": re.compile(r"(?i)on\s+testing"),
-            "ready_for_release": re.compile(r"(?i)ready\s+for\s+release"),
-        }
-        lane_states: dict[str, list[str]] = {k: [] for k in pipeline_lanes}
-        for state, role in state_to_role.items():
-            if role != "in_progress":
-                continue
-            for lane, pat in pipeline_lanes.items():
-                if pat.search(state):
-                    lane_states[lane].append(state)
-                    break
-
-        async def _fetch_by_states(states: list[str], recency_clause: str = "") -> list[dict]:
-            if not states:
-                return []
-            state_clause = "State: " + ", ".join(f"{{{s}}}" for s in states)
-            q = f"{project_clause} {state_clause} #Unresolved {recency_clause}".strip()
-            data = await client.get(
-                "/api/issues",
-                params={"query": q, "fields": PULSE_ISSUE_FIELDS, "$top": "200"},
-            )
-            return data or []
-
-        async def _count_by_query(query: str) -> int:
-            data = await client.get(
-                "/api/issues",
-                params={"query": query, "fields": "idReadable", "$top": "500"},
-            )
-            return len(data or [])
-
-        # Lookback queries — use `resolved:` for closed (exact) and `created:` for incoming.
-        lookback_clause = build_lookback_clause(lookback_days, now_ms)
-        closed_q = f"{project_clause} resolved: {lookback_clause}"
-        incoming_q = f"{project_clause} created: {lookback_clause} #Unresolved"
-        # Released = resolved AND state matches release-like name. Done lane has
-        # patterns "released", "closed", etc. — count via state filter where
-        # available, else fall back to a 0 with a note.
-        released_states = [s for s, r in state_to_role.items() if r == "done" and "release" in s.lower()]
-
-        recency_clause_incoming = f"created: {lookback_clause}"
-
-        # All fetches in parallel
-        (
-            triaged_issues,
-            re_entry_issues,
-            incoming_issues,
-            in_progress_issues,
-            for_review_issues,
-            ready_for_test_issues,
-            on_testing_issues,
-            ready_for_release_issues,
-            closed_count,
-            incoming_count,
-            released_count,
-        ) = await asyncio.gather(
-            _fetch_by_states(triaged_states),
-            _fetch_by_states(re_entry_states),
-            _fetch_by_states(incoming_states, recency_clause_incoming),
-            _fetch_by_states(lane_states["in_progress"]),
-            _fetch_by_states(lane_states["for_review"]),
-            _fetch_by_states(lane_states["ready_for_test"]),
-            _fetch_by_states(lane_states["on_testing"]),
-            _fetch_by_states(lane_states["ready_for_release"]),
-            _count_by_query(closed_q),
-            _count_by_query(incoming_q),
-            _count_by_query(f"{project_clause} resolved: {lookback_clause} "
-                            + ("State: " + ", ".join(f"{{{s}}}" for s in released_states) if released_states else ""))
-            if released_states else asyncio.sleep(0, result=0),
+        payload = await _build_pulse_payload(
+            client, board, horizon_days, lookback_days, limit,
+            max_idle_days, max_overdue_days, now_ms,
         )
-
-        # Reopened in lookback: items with ReopenCount > 0 AND updated in window.
-        # Cheap heuristic — exact would need activities. We query for items where
-        # ReopenCount exists and updated falls in the window, then filter.
-        reopened_count = 0
-        try:
-            reopened_data = await client.get(
-                "/api/issues",
-                params={
-                    "query": f"{project_clause} updated: {lookback_clause} has: ReopenCount",
-                    "fields": "idReadable,customFields(name,value(text,name,presentation))",
-                    "$top": "500",
-                },
-            )
-            for it in reopened_data or []:
-                rc = _get_custom_field(it, "ReopenCount")
-                try:
-                    if rc and int(str(rc)) > 0:
-                        reopened_count += 1
-                except (ValueError, TypeError):
-                    continue
-        except (ValueError, KeyError):
-            reopened_count = 0
-
-        # 4) Apply filters (standup + blocked-by + stale + deep-overdue) to sections.
-        # Idle-filter applies to pipeline + re_entry (workflow-in-flight items).
-        # Triaged/incoming stay unfiltered for idle — they're explicitly placed
-        # and the existing "stale_triaged" insight surfaces them as a flag, not
-        # a silent drop. Overdue filter applies to all forward sections.
-        triaged_filtered = _filter_not_too_overdue(
-            _filter_issues(triaged_issues, standup_patterns),
-            max_overdue_days, now_ms,
-        )
-        re_entry_filtered = _filter_not_too_overdue(
-            _filter_active(
-                _filter_issues(re_entry_issues, standup_patterns),
-                max_idle_days, now_ms,
-            ),
-            max_overdue_days, now_ms,
-        )
-        incoming_filtered = _filter_not_too_overdue(
-            _filter_issues(incoming_issues, standup_patterns),
-            max_overdue_days, now_ms,
-        )
-        # Pipeline buckets: drop ghosts not touched in max_idle_days.
-        in_progress_issues = _filter_active(in_progress_issues, max_idle_days, now_ms)
-        for_review_issues = _filter_active(for_review_issues, max_idle_days, now_ms)
-        ready_for_test_issues = _filter_active(ready_for_test_issues, max_idle_days, now_ms)
-        on_testing_issues = _filter_active(on_testing_issues, max_idle_days, now_ms)
-        ready_for_release_issues = _filter_active(ready_for_release_issues, max_idle_days, now_ms)
-
-        # 5) Score & rank forward sections.
-        def _rank(items: list[dict]) -> list[tuple[float, dict, dict]]:
-            scored = [(*compute_pulse_score(i, now_ms), i) for i in items]
-            # scored is [(total, breakdown, issue), ...]
-            scored.sort(key=lambda x: x[0], reverse=True)
-            return scored
-
-        triaged_ranked = _rank(triaged_filtered)
-        re_entry_ranked = _rank(re_entry_filtered)
-        incoming_ranked = _rank(incoming_filtered)
-
-        # 6) Pipeline counts for insights (post-filter — honest velocity ratios).
-        pipeline_counts = {
-            "in_progress": len(in_progress_issues),
-            "for_review": len(for_review_issues),
-            "ready_for_test": len(ready_for_test_issues),
-            "on_testing": len(on_testing_issues),
-            "ready_for_release": len(ready_for_release_issues),
-        }
-        metrics = {
-            "closed": closed_count,
-            "released": released_count,
-            "incoming": incoming_count,
-            "reopened": reopened_count,
-        }
-        insights = compute_insights(
-            metrics, pipeline_counts, triaged_filtered + re_entry_filtered,
-            now_ms, lookback_days,
-        )
-
-        # 7) Build the JSON-friendly payload once; markdown renderer reads it.
-        team_balanced, team_pool = _build_team_balanced(
-            re_entry_ranked, triaged_ranked, limit, now_ms,
-        )
-        payload = {
-            "board": board_display,
-            "lookback_days": lookback_days,
-            "horizon_days": horizon_days,
-            "metrics": metrics,
-            "pipeline_counts": pipeline_counts,
-            "has_released_states": bool(released_states),
-            "triaged": [_issue_to_dict(i, t, b, now_ms) for t, b, i in triaged_ranked],
-            "re_entry": [_issue_to_dict(i, t, b, now_ms) for t, b, i in re_entry_ranked],
-            "incoming": [_issue_to_dict(i, t, b, now_ms) for t, b, i in incoming_ranked],
-            "team_balanced": team_balanced,
-            "team_pool": team_pool,
-            "insights": insights,
-            "unknown_columns": unknown_columns,
-        }
-
+        if isinstance(payload, str):
+            return payload  # error string (e.g. "Board has no projects")
         if format == "json":
             return json.dumps(payload, indent=2, ensure_ascii=False)
         return _render_markdown(payload, limit)
+
+    @mcp.tool()
+    async def get_multi_team_pulse(
+        boards: str,
+        horizon_days: int = 14,
+        lookback_days: int = 30,
+        limit: int = 5,
+        format: str = "report",
+        max_idle_days: int = 60,
+        max_overdue_days: int = 30,
+        instance: str = "",
+    ) -> str:
+        """Parallel pulse across multiple boards with aggregated org-wide view.
+
+        Same per-board logic as `get_team_pulse`, fanned out via asyncio.gather
+        so 7 boards take ~one board's worth of time instead of seven. Failed
+        boards (no projects, unresolvable name) are listed in the output but
+        don't kill the rest.
+
+        Output adds an org-wide aggregate (summed metrics + pipeline counts +
+        flag counts across boards) above per-board summaries.
+
+        Args:
+            boards: Comma-separated board names (partial match each).
+            horizon_days: Forward planning window (default 14).
+            lookback_days: Backward velocity window (default 30).
+            limit: Max items per section per board (default 5 — multi-board
+                view defaults lower than single-board to keep output compact).
+            format: "report" (default, markdown) or "json" (parseable payload
+                with `aggregate` + `boards` keys).
+            max_idle_days: Drop pipeline + re_entry items not updated within
+                this many days (default 60). Pass 0 to disable.
+            max_overdue_days: Drop forward items past their deadline by more
+                than this many days (default 30). Pass 0 to disable.
+            instance: YouTrack instance (optional).
+        """
+        client = resolver.resolve(instance)
+        board_names = [b.strip() for b in (boards or "").split(",") if b.strip()]
+        if not board_names:
+            return "No board names provided. Pass comma-separated board names."
+
+        now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
+
+        # Resolve all boards in parallel
+        resolutions = await asyncio.gather(
+            *(_resolve_board_for_pulse(client, name) for name in board_names)
+        )
+        resolved: list[tuple[str, dict]] = []
+        errors: list[str] = []
+        for name, (board, err) in zip(board_names, resolutions):
+            if board:
+                resolved.append((name, board))
+            else:
+                errors.append(f"`{name}`: {err}")
+
+        if not resolved:
+            return "No boards could be resolved:\n" + "\n".join(f"- {e}" for e in errors)
+
+        # Build payloads in parallel
+        results = await asyncio.gather(
+            *(
+                _build_pulse_payload(
+                    client, board, horizon_days, lookback_days, limit,
+                    max_idle_days, max_overdue_days, now_ms,
+                )
+                for _name, board in resolved
+            ),
+            return_exceptions=True,
+        )
+
+        payloads: list[dict] = []
+        for (name, _board), result in zip(resolved, results):
+            if isinstance(result, dict):
+                payloads.append(result)
+            elif isinstance(result, str):
+                errors.append(f"`{name}`: {result}")
+            else:
+                # asyncio.gather captured an exception
+                errors.append(f"`{name}`: {type(result).__name__}: {result}")
+
+        if not payloads:
+            return "All boards failed:\n" + "\n".join(f"- {e}" for e in errors)
+
+        aggregate = _aggregate_payloads(payloads, lookback_days, horizon_days)
+
+        if format == "json":
+            out = {"aggregate": aggregate, "boards": payloads}
+            if errors:
+                out["errors"] = errors
+            return json.dumps(out, indent=2, ensure_ascii=False)
+
+        md = _render_multi_markdown(aggregate, payloads, limit)
+        if errors:
+            md += "\n\n_Errors:_\n" + "\n".join(f"- {e}" for e in errors)
+        return md
 
 
 def _COLUMN_PATTERNS_match_any(name: str) -> bool:
@@ -821,3 +698,300 @@ def _COLUMN_PATTERNS_match_any(name: str) -> bool:
         if pat.search(name):
             return True
     return False
+
+
+# --- Cross-tool helpers (reused by get_team_pulse + get_multi_team_pulse) ----
+
+async def _resolve_board_for_pulse(client, board_name: str) -> tuple[dict | None, str]:
+    """Find an agile board by partial-name match. Returns (board, err_msg).
+    Multi-match returns (None, err_msg)."""
+    boards = await client.get("/api/agiles", params={"fields": BOARD_FIELDS})
+    query_lower = board_name.lower()
+    matches = [b for b in boards if query_lower in b.get("name", "").lower()]
+    if not matches:
+        return None, f"No agile board matching '{board_name}'."
+    if len(matches) > 1:
+        names = ", ".join(f"'{b.get('name')}'" for b in matches)
+        return None, f"Multiple boards match '{board_name}': {names}. Be more specific."
+    return matches[0], ""
+
+
+def _build_pipeline_lane_states(state_to_role: dict[str, str]) -> dict[str, list[str]]:
+    """Group in_progress-role states into pipeline lanes for bottleneck detection."""
+    pipeline_lanes = {
+        "in_progress": re.compile(r"(?i)in\s+progress"),
+        "for_review": re.compile(r"(?i)for\s+review|in\s+review"),
+        "ready_for_test": re.compile(r"(?i)ready\s+for\s+test"),
+        "on_testing": re.compile(r"(?i)on\s+testing"),
+        "ready_for_release": re.compile(r"(?i)ready\s+for\s+release"),
+    }
+    lane_states: dict[str, list[str]] = {k: [] for k in pipeline_lanes}
+    for state, role in state_to_role.items():
+        if role != "in_progress":
+            continue
+        for lane, pat in pipeline_lanes.items():
+            if pat.search(state):
+                lane_states[lane].append(state)
+                break
+    return lane_states
+
+
+def _classify_board_columns(board: dict) -> tuple[dict[str, str], list[str]]:
+    """Map board's state values to roles. Returns (state→role, unknown_columns)."""
+    col_settings = board.get("columnSettings") or {}
+    columns = col_settings.get("columns") or []
+    state_to_role: dict[str, str] = {}
+    unknown_columns: list[str] = []
+    for col in columns:
+        for fv in col.get("fieldValues") or []:
+            state_name = fv.get("name") or ""
+            if not state_name:
+                continue
+            role = classify_column(state_name)
+            state_to_role[state_name] = role
+        pres = col.get("presentation") or ""
+        if pres and not col.get("fieldValues"):
+            role = classify_column(pres)
+            state_to_role[pres] = role
+            if role == "triaged" and not _COLUMN_PATTERNS_match_any(pres):
+                unknown_columns.append(pres)
+    return state_to_role, unknown_columns
+
+
+async def _build_pulse_payload(
+    client, board: dict,
+    horizon_days: int, lookback_days: int, limit: int,
+    max_idle_days: int, max_overdue_days: int, now_ms: int,
+) -> dict | str:
+    """Full per-board pulse pipeline. Returns the JSON-friendly payload dict,
+    or an error message string if the board can't be processed."""
+    board_display = board.get("name", "?")
+    projects = [p.get("shortName", "") for p in board.get("projects", []) if p.get("shortName")]
+    if not projects:
+        return f"Board '{board_display}' has no projects bound."
+
+    state_to_role, unknown_columns = _classify_board_columns(board)
+    standup_patterns = _compile_standup_patterns({})
+
+    if len(projects) == 1:
+        project_clause = f"project: {projects[0]}"
+    else:
+        project_clause = "(" + " or ".join(f"project: {p}" for p in projects) + ")"
+
+    triaged_states = [s for s, r in state_to_role.items() if r == "triaged"]
+    re_entry_states = [s for s, r in state_to_role.items() if r == "re_entry"]
+    incoming_states = [s for s, r in state_to_role.items() if r == "incoming"]
+    lane_states = _build_pipeline_lane_states(state_to_role)
+
+    async def _fetch_by_states(states: list[str], recency_clause: str = "") -> list[dict]:
+        if not states:
+            return []
+        state_clause = "State: " + ", ".join(f"{{{s}}}" for s in states)
+        q = f"{project_clause} {state_clause} #Unresolved {recency_clause}".strip()
+        data = await client.get(
+            "/api/issues",
+            params={"query": q, "fields": PULSE_ISSUE_FIELDS, "$top": "200"},
+        )
+        return data or []
+
+    async def _count_by_query(query: str) -> int:
+        data = await client.get(
+            "/api/issues",
+            params={"query": query, "fields": "idReadable", "$top": "500"},
+        )
+        return len(data or [])
+
+    lookback_clause = build_lookback_clause(lookback_days, now_ms)
+    closed_q = f"{project_clause} resolved: {lookback_clause}"
+    incoming_q = f"{project_clause} created: {lookback_clause} #Unresolved"
+    released_states = [s for s, r in state_to_role.items() if r == "done" and "release" in s.lower()]
+    recency_clause_incoming = f"created: {lookback_clause}"
+
+    (
+        triaged_issues, re_entry_issues, incoming_issues,
+        in_progress_issues, for_review_issues, ready_for_test_issues,
+        on_testing_issues, ready_for_release_issues,
+        closed_count, incoming_count, released_count,
+    ) = await asyncio.gather(
+        _fetch_by_states(triaged_states),
+        _fetch_by_states(re_entry_states),
+        _fetch_by_states(incoming_states, recency_clause_incoming),
+        _fetch_by_states(lane_states["in_progress"]),
+        _fetch_by_states(lane_states["for_review"]),
+        _fetch_by_states(lane_states["ready_for_test"]),
+        _fetch_by_states(lane_states["on_testing"]),
+        _fetch_by_states(lane_states["ready_for_release"]),
+        _count_by_query(closed_q),
+        _count_by_query(incoming_q),
+        _count_by_query(
+            f"{project_clause} resolved: {lookback_clause} "
+            + ("State: " + ", ".join(f"{{{s}}}" for s in released_states) if released_states else "")
+        ) if released_states else asyncio.sleep(0, result=0),
+    )
+
+    reopened_count = 0
+    try:
+        reopened_data = await client.get(
+            "/api/issues",
+            params={
+                "query": f"{project_clause} updated: {lookback_clause} has: ReopenCount",
+                "fields": "idReadable,customFields(name,value(text,name,presentation))",
+                "$top": "500",
+            },
+        )
+        for it in reopened_data or []:
+            rc = _get_custom_field(it, "ReopenCount")
+            try:
+                if rc and int(str(rc)) > 0:
+                    reopened_count += 1
+            except (ValueError, TypeError):
+                continue
+    except (ValueError, KeyError):
+        reopened_count = 0
+
+    # Filters: standup/blocked-by/stale/overdue
+    triaged_filtered = _filter_not_too_overdue(
+        _filter_issues(triaged_issues, standup_patterns), max_overdue_days, now_ms,
+    )
+    re_entry_filtered = _filter_not_too_overdue(
+        _filter_active(_filter_issues(re_entry_issues, standup_patterns), max_idle_days, now_ms),
+        max_overdue_days, now_ms,
+    )
+    incoming_filtered = _filter_not_too_overdue(
+        _filter_issues(incoming_issues, standup_patterns), max_overdue_days, now_ms,
+    )
+    in_progress_issues = _filter_active(in_progress_issues, max_idle_days, now_ms)
+    for_review_issues = _filter_active(for_review_issues, max_idle_days, now_ms)
+    ready_for_test_issues = _filter_active(ready_for_test_issues, max_idle_days, now_ms)
+    on_testing_issues = _filter_active(on_testing_issues, max_idle_days, now_ms)
+    ready_for_release_issues = _filter_active(ready_for_release_issues, max_idle_days, now_ms)
+
+    def _rank(items: list[dict]) -> list[tuple[float, dict, dict]]:
+        scored = [(*compute_pulse_score(i, now_ms), i) for i in items]
+        scored.sort(key=lambda x: x[0], reverse=True)
+        return scored
+
+    triaged_ranked = _rank(triaged_filtered)
+    re_entry_ranked = _rank(re_entry_filtered)
+    incoming_ranked = _rank(incoming_filtered)
+
+    pipeline_counts = {
+        "in_progress": len(in_progress_issues),
+        "for_review": len(for_review_issues),
+        "ready_for_test": len(ready_for_test_issues),
+        "on_testing": len(on_testing_issues),
+        "ready_for_release": len(ready_for_release_issues),
+    }
+    metrics = {
+        "closed": closed_count, "released": released_count,
+        "incoming": incoming_count, "reopened": reopened_count,
+    }
+    insights = compute_insights(
+        metrics, pipeline_counts, triaged_filtered + re_entry_filtered,
+        now_ms, lookback_days,
+    )
+    team_balanced, team_pool = _build_team_balanced(
+        re_entry_ranked, triaged_ranked, limit, now_ms,
+    )
+    return {
+        "board": board_display,
+        "lookback_days": lookback_days,
+        "horizon_days": horizon_days,
+        "metrics": metrics,
+        "pipeline_counts": pipeline_counts,
+        "has_released_states": bool(released_states),
+        "triaged": [_issue_to_dict(i, t, b, now_ms) for t, b, i in triaged_ranked],
+        "re_entry": [_issue_to_dict(i, t, b, now_ms) for t, b, i in re_entry_ranked],
+        "incoming": [_issue_to_dict(i, t, b, now_ms) for t, b, i in incoming_ranked],
+        "team_balanced": team_balanced,
+        "team_pool": team_pool,
+        "insights": insights,
+        "unknown_columns": unknown_columns,
+    }
+
+
+def _aggregate_payloads(payloads: list[dict], lookback_days: int, horizon_days: int) -> dict:
+    """Sum metrics + pipeline counts across boards; collect per-board flag totals."""
+    agg_metrics = {"closed": 0, "released": 0, "incoming": 0, "reopened": 0}
+    agg_pipeline = {
+        "in_progress": 0, "for_review": 0,
+        "ready_for_test": 0, "on_testing": 0, "ready_for_release": 0,
+    }
+    boards_with_flags = 0
+    total_flags = 0
+    boards_with_released = 0
+    for p in payloads:
+        for k in agg_metrics:
+            agg_metrics[k] += p["metrics"].get(k, 0)
+        for k in agg_pipeline:
+            agg_pipeline[k] += p["pipeline_counts"].get(k, 0)
+        if p.get("insights"):
+            boards_with_flags += 1
+            total_flags += len(p["insights"])
+        if p.get("has_released_states"):
+            boards_with_released += 1
+    return {
+        "lookback_days": lookback_days,
+        "horizon_days": horizon_days,
+        "board_count": len(payloads),
+        "metrics": agg_metrics,
+        "pipeline_counts": agg_pipeline,
+        "boards_with_flags": boards_with_flags,
+        "total_flags": total_flags,
+        "has_any_released_state": boards_with_released > 0,
+    }
+
+
+def _render_multi_markdown(aggregate: dict, payloads: list[dict], limit: int) -> str:
+    """Compact org-wide markdown: header sums + per-board sections (truncated)."""
+    lb = aggregate["lookback_days"]
+    hz = aggregate["horizon_days"]
+    m = aggregate["metrics"]
+    pc = aggregate["pipeline_counts"]
+    n = aggregate["board_count"]
+
+    lines: list[str] = []
+    lines.append(f"# Org pulse — {n} boards  (←{lb}d  |  {hz}d→)")
+    lines.append("")
+    lines.append("## At a glance (combined)")
+    lines.append(f"- **Throughput:**    {m['closed']} closed / {lb}d")
+    if aggregate["has_any_released_state"]:
+        lines.append(f"- **Shipped:**       {m['released']} released / {lb}d")
+    lines.append(
+        f"- **Pipeline now:**  {pc['in_progress']} in progress · "
+        f"{pc['for_review']} in review · "
+        f"{pc['ready_for_test'] + pc['on_testing']} on test · "
+        f"{pc['ready_for_release']} ready to ship"
+    )
+    lines.append(f"- **Incoming:**      {m['incoming']} new in {lb}d")
+    lines.append(f"- **Reopened:**      {m['reopened']} in {lb}d")
+    lines.append(f"- **Flags:**         {aggregate['total_flags']} across {aggregate['boards_with_flags']}/{n} boards")
+    lines.append("")
+
+    for p in payloads:
+        board = p["board"]
+        bm = p["metrics"]
+        bpc = p["pipeline_counts"]
+        lines.append(f"## {board}")
+        lines.append(
+            f"- closed {bm['closed']} · incoming {bm['incoming']} · "
+            f"reopened {bm['reopened']} · "
+            f"WIP {bpc['in_progress']} · review {bpc['for_review']} · "
+            f"test {bpc['ready_for_test'] + bpc['on_testing']}"
+        )
+        if p.get("insights"):
+            for f in p["insights"]:
+                lines.append(f"  - {f}")
+        # Top forward items (truncated per board)
+        top_n = max(1, min(limit, 3))
+        if p.get("re_entry"):
+            lines.append(f"  - **Re-entry top {min(top_n, len(p['re_entry']))}:**")
+            for it in p["re_entry"][:top_n]:
+                lines.append(f"    - {it['id']} — {it['summary'][:60]}")
+        if p.get("triaged"):
+            lines.append(f"  - **Ready to pull top {min(top_n, len(p['triaged']))}:**")
+            for it in p["triaged"][:top_n]:
+                lines.append(f"    - {it['id']} — {it['summary'][:60]}")
+        lines.append("")
+
+    return compact_lines(lines)

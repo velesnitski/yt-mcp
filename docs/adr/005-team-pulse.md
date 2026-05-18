@@ -289,3 +289,56 @@ column is the culprit when pipeline overload fires.
 Tests: 431 → 435 (+4 covering the downstream-clog false-positive case,
 pipeline overload independent of WIP, both flags firing together, and
 the `lookback_days` parameter affecting velocity).
+
+## v1.10.0 — Multi-team parallel pulse
+
+The downstream reports project renders 7 boards in one email. Calling
+`get_team_pulse` seven times sequentially over the network is ~7× the
+latency of one — most of which is HTTP/2 stream wait time, not compute.
+
+**New tool:** `get_multi_team_pulse(boards, ...)` accepts a
+comma-separated board list, resolves all boards in parallel, then fans
+out the per-board `_build_pulse_payload` via `asyncio.gather`. With
+httpx's `max_connections=5` already throttling concurrency at the
+transport layer, all per-board fetches are bounded automatically — no
+extra semaphore needed.
+
+**Refactor:** the single-board logic that was inline in `get_team_pulse`
+is now a module-level helper `_build_pulse_payload(client, board, ...)`.
+Both single-board and multi-board tools call it identically. Board
+resolution is similarly factored out into `_resolve_board_for_pulse`.
+
+**Aggregation:** `_aggregate_payloads` sums metrics and pipeline counts
+across boards, plus a flag-count rollup ("N flags across M/K boards").
+The multi-board markdown renderer leads with the aggregate, then a
+compact per-board section (truncated to ~3 forward items per board) so
+the org-wide view stays readable.
+
+**Resilience:** `asyncio.gather(return_exceptions=True)` ensures one
+broken board (missing projects, transient API failure) doesn't kill the
+whole call. Failures land in an `errors` list in the JSON output or an
+"_Errors:_" block in markdown.
+
+**JSON shape:**
+
+```
+{
+  "aggregate": {
+    "board_count": ..., "lookback_days": ..., "horizon_days": ...,
+    "metrics": {closed, released, incoming, reopened},
+    "pipeline_counts": {in_progress, for_review, ready_for_test, on_testing, ready_for_release},
+    "boards_with_flags": ..., "total_flags": ..., "has_any_released_state": ...
+  },
+  "boards": [<per-board payload>, ...],
+  "errors": [...]  # only when present
+}
+```
+
+Tool count: 73 → 74. Tests: 435 → 450 (+15 covering aggregation math,
+multi-markdown rendering, board-column classifier, lane grouping).
+
+### Why minor bump (1.10.0)
+
+New tool surface, no breakage. Existing `get_team_pulse` behavior is
+unchanged — it now uses the same `_build_pulse_payload` helper but
+returns the same shape.
