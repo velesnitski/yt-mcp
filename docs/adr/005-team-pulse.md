@@ -251,3 +251,41 @@ safety, and the batch filter helpers).
 The defaults change behavior of existing calls — operators relying on
 the wider unfiltered output need to know. Both filters can be disabled
 with `=0` for full backwards compatibility.
+
+## v1.9.1 — Split "WIP overload" into WIP + Pipeline overload
+
+The original flag was labelled "WIP overload" but the math summed the
+entire pipeline (in_progress + for_review + ready_for_test + on_testing).
+This conflated two distinct operational problems:
+
+- **WIP overload** = devs juggling too many concurrent items at the
+  dev-work stage. The fix is reduce in-progress count / focus.
+- **Pipeline overload** = downstream-of-dev clog (test queue or review
+  queue backed up). The fix is unblock the QA/review side, not change
+  what devs are doing.
+
+The downstream consumer caught this with a real-shape example: a team
+running 5 in_progress + 6 for_review + 34 ready_for_test at ~28
+closed/30d. Dev capacity (5) is fine; the test queue (34) is the
+problem. The old flag would have said "WIP overload" with a number that
+included the test queue — pointing operators at the wrong fix.
+
+**Resolution:**
+
+```
+🚧 WIP overload     — in_progress count vs weekly_velocity × 2
+🪣 Pipeline overload — pipeline_total vs closed × 2 (was the old flag)
+```
+
+`compute_insights` signature gains `lookback_days: int = 30` so it can
+compute `weekly_velocity = closed / (lookback_days / 7)`. The "WIP cap"
+is two weeks of velocity — a team closing 14/30d has cap ≈ 6.5
+concurrent items.
+
+Both flags can fire together when both conditions are met. The
+bottleneck flag (separate) continues to identify *which* downstream
+column is the culprit when pipeline overload fires.
+
+Tests: 431 → 435 (+4 covering the downstream-clog false-positive case,
+pipeline overload independent of WIP, both flags firing together, and
+the `lookback_days` parameter affecting velocity).

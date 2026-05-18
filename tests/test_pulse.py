@@ -296,10 +296,12 @@ class TestRoundRobinBalance:
 
 class TestComputeInsights:
     def _make_metrics(self, **kw):
-        return {"closed": kw.get("closed", 5), "released": kw.get("released", 0),
-                "incoming": kw.get("incoming", 5), "reopened": kw.get("reopened", 0)}
+        return {"closed": kw.get("closed", 14), "released": kw.get("released", 0),
+                "incoming": kw.get("incoming", 14), "reopened": kw.get("reopened", 0)}
 
     def _make_pipeline(self, **kw):
+        # Default pipeline reflects a healthy 14-closed-per-30d team:
+        # weekly_velocity ≈ 3.3, WIP cap ≈ 6, pipeline_total cap = 28.
         return {
             "in_progress": kw.get("in_progress", 3),
             "for_review": kw.get("for_review", 2),
@@ -317,13 +319,13 @@ class TestComputeInsights:
         assert any("velocity unknown" in f.lower() or "no work closed" in f.lower() for f in flags)
 
     def test_backlog_growing(self):
-        # incoming=10, closed=5 → 2× rate
-        flags = compute_insights(self._make_metrics(incoming=10, closed=5), self._make_pipeline(), [], NOW_MS)
+        # incoming=30, closed=14 → 2.1× rate (>1.3 threshold)
+        flags = compute_insights(self._make_metrics(incoming=30, closed=14), self._make_pipeline(), [], NOW_MS)
         assert any("backlog growing" in f.lower() for f in flags)
 
     def test_quality_concern(self):
-        # 3 reopens / 5 closed = 60%
-        flags = compute_insights(self._make_metrics(reopened=3, closed=5), self._make_pipeline(), [], NOW_MS)
+        # 4 reopens / 14 closed ≈ 28% (>20% threshold)
+        flags = compute_insights(self._make_metrics(reopened=4, closed=14), self._make_pipeline(), [], NOW_MS)
         assert any("quality" in f.lower() for f in flags)
 
     def test_bottleneck_detected(self):
@@ -342,11 +344,62 @@ class TestComputeInsights:
         flags = compute_insights(self._make_metrics(), self._make_pipeline(), triaged, NOW_MS)
         assert any("stale triaged" in f.lower() for f in flags)
 
-    def test_wip_overload(self):
-        # pipeline_total = 4+4+3+3+0 = 14 vs closed=5 (2.8×) → overload
-        pipeline = self._make_pipeline(in_progress=4, for_review=4, ready_for_test=3, on_testing=3)
+    def test_wip_overload_concurrent_dev_work(self):
+        """True WIP overload: devs juggling too many concurrent items.
+        weekly_velocity ≈ 1.2, WIP cap = 2.4 — in_progress=10 should fire."""
+        pipeline = self._make_pipeline(in_progress=10, for_review=0, ready_for_test=0, on_testing=0)
         flags = compute_insights(self._make_metrics(closed=5), pipeline, [], NOW_MS)
+        assert any("wip overload" in f.lower() and "in progress" in f.lower() for f in flags)
+
+    def test_pipeline_overload_downstream_clog(self):
+        """Pipeline overload (downstream-of-dev): heavy test queue.
+        Same closed=14 baseline, but ready_for_test bloats pipeline_total."""
+        pipeline = self._make_pipeline(in_progress=3, for_review=3, ready_for_test=25, on_testing=3)
+        flags = compute_insights(self._make_metrics(closed=14), pipeline, [], NOW_MS)
+        assert any("pipeline overload" in f.lower() for f in flags)
+
+    def test_downstream_clog_shape_does_not_false_flag_wip(self):
+        """Real-world shape: 5 in_progress + 6 for_review + 34 ready_for_test
+        at ~28 closed/30d. The old "WIP overload" label was misleading because
+        the math summed downstream-of-dev queues. With the split, WIP (which
+        only counts in_progress) must NOT fire when devs are at 5 with a
+        weekly_velocity of 6.5 (cap 13). The downstream clog should be
+        surfaced by the bottleneck flag instead, not a misnamed WIP flag."""
+        pipeline = self._make_pipeline(
+            in_progress=5, for_review=6, ready_for_test=34, on_testing=0,
+        )
+        flags = compute_insights(self._make_metrics(closed=28, incoming=28), pipeline, [], NOW_MS)
+        wip_flags = [f for f in flags if "wip overload" in f.lower()]
+        assert wip_flags == [], f"unexpected WIP overload flag: {wip_flags}"
+        # Bottleneck flag should still surface the test-queue congestion
+        assert any("bottleneck" in f.lower() for f in flags), (
+            f"expected bottleneck flag to catch the test queue: {flags}"
+        )
+
+    def test_both_flags_fire_when_both_conditions_met(self):
+        # High in_progress AND high pipeline_total
+        pipeline = self._make_pipeline(in_progress=10, for_review=5, ready_for_test=20, on_testing=5)
+        flags = compute_insights(self._make_metrics(closed=10), pipeline, [], NOW_MS)
         assert any("wip overload" in f.lower() for f in flags)
+        assert any("pipeline overload" in f.lower() for f in flags)
+
+    def test_lookback_days_affects_velocity_calc(self):
+        """Same closed count over a shorter window → higher weekly velocity →
+        higher WIP cap. The same in_progress count should NOT fire on a
+        14d window what it would fire on a 30d window."""
+        pipeline = self._make_pipeline(in_progress=4)
+        # 30d window: closed=10 → 2.3/wk → cap 4.6 → in_progress=4 is OK
+        flags_30 = compute_insights(self._make_metrics(closed=10), pipeline, [], NOW_MS, lookback_days=30)
+        # 14d window: closed=10 → 5/wk → cap 10 → also fine
+        flags_14 = compute_insights(self._make_metrics(closed=10), pipeline, [], NOW_MS, lookback_days=14)
+        # Now flip — in_progress high enough to fire on 30d but not on 14d
+        pipeline_high = self._make_pipeline(in_progress=8)
+        flags_high_30 = compute_insights(self._make_metrics(closed=10), pipeline_high, [], NOW_MS, lookback_days=30)
+        flags_high_14 = compute_insights(self._make_metrics(closed=10), pipeline_high, [], NOW_MS, lookback_days=14)
+        # 30d: in_progress=8 > cap 4.6 → fires
+        assert any("wip overload" in f.lower() for f in flags_high_30)
+        # 14d: in_progress=8 < cap 10 → no fire
+        assert not any("wip overload" in f.lower() for f in flags_high_14)
 
     def test_team_underloaded(self):
         # in_flight=1 vs closed=15 → underloaded (1 < 15/3=5)
