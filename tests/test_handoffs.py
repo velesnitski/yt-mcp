@@ -395,3 +395,18 @@ class TestSortByDaysStuck:
 
         items.sort(key=key)
         assert items[0]["id"] == "B"
+
+
+class TestHandoffStateClauseShape:
+    """Regression test for the v1.11.0 → v1.11.1 fix. The original handoffs.py
+    built `(State: {A} or State: {B})` which YT rejects with 400. The fix
+    switches to YT's comma-list idiom `State: {A}, {B}, {C}`."""
+
+    def test_state_clause_uses_comma_list_not_or(self):
+        from yt_mcp.formatters import build_state_clause
+        states = ["For Review", "Ready for Test", "On testing"]
+        clause = build_state_clause(states)
+        assert " or " not in clause, (
+            "OR-joined state clauses fail with 400 on YT — must use comma-list"
+        )
+        assert "State: {For Review}, {Ready for Test}, {On testing}" == clause

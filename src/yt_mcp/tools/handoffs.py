@@ -20,7 +20,7 @@ from typing import Any
 
 from yt_mcp.formatters import (
     _resolve_state, _resolve_assignee, _resolve_assignee_login,
-    _get_custom_field, compact_lines,
+    _get_custom_field, compact_lines, build_state_clause,
 )
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.tools.deadlines.fetcher import fetch_activities_only_bounded
@@ -194,9 +194,12 @@ async def _build_stuck_payload(
     if len(projects) == 1:
         project_clause = f"project: {projects[0]}"
     else:
-        project_clause = "(" + " or ".join(f"project: {p}" for p in projects) + ")"
+        # YT accepts comma-list for `project:` filters — same idiom as State
+        # (see formatters.build_state_clause). OR-joined repeated-field
+        # filters trigger 400 "Can't parse search query" on some YT versions.
+        project_clause = "project: " + ", ".join(projects)
 
-    state_clause = "(" + " or ".join(f"State: {{{s}}}" for s in receiving_states) + ")"
+    state_clause = build_state_clause(receiving_states)
     query = f"{project_clause} {state_clause} #Unresolved"
 
     issues = await client.get(

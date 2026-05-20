@@ -1,3 +1,6 @@
+from datetime import datetime, timezone
+import re
+
 from yt_mcp.formatters import (
     _get_custom_field,
     _resolve_state,
@@ -8,6 +11,8 @@ from yt_mcp.formatters import (
     format_issue_detail,
     format_value,
     parse_issue_id,
+    build_state_clause,
+    build_absolute_date_clause,
 )
 
 
@@ -233,3 +238,70 @@ class TestFormatValue:
 
     def test_empty_list(self):
         assert format_value([]) == "(empty)"
+
+
+# --- build_state_clause: YT comma-list idiom (avoids 400 from OR-list) ----
+
+class TestBuildStateClause:
+    """The OR-joined form (State: {A} or State: {B}) triggers YouTrack 400
+    'Can't parse search query' on some versions/projects. The comma-list
+    form is what works in practice — and is what pulse uses successfully."""
+
+    def test_single_state_wrapped_in_braces(self):
+        assert build_state_clause(["For Review"]) == "State: {For Review}"
+
+    def test_multi_state_comma_joined_each_wrapped(self):
+        out = build_state_clause(["For Review", "Ready for Test", "On testing"])
+        assert out == "State: {For Review}, {Ready for Test}, {On testing}"
+
+    def test_no_or_keyword_in_output(self):
+        out = build_state_clause(["A", "B", "C"])
+        # Critical: must NOT contain ` or ` joining clauses — that's the bug shape
+        assert " or " not in out
+
+    def test_single_word_state_still_wrapped(self):
+        # Even simple names get {} for consistency (YT tolerates it)
+        assert build_state_clause(["Submitted"]) == "State: {Submitted}"
+
+    def test_empty_returns_empty_string(self):
+        assert build_state_clause([]) == ""
+
+    def test_state_with_special_chars_wrapped(self):
+        # Emoji / unicode / punctuation must all be inside the braces
+        out = build_state_clause(["Deadline ☠️"])
+        assert out == "State: {Deadline ☠️}"
+
+
+# --- build_absolute_date_clause: portable across YT versions ----
+
+class TestBuildAbsoluteDateClause:
+    """Relative date bounds (`-Nd`, `{minus Nd} .. Today`) are unreliable
+    across YT versions. Absolute ISO dates work everywhere."""
+
+    NOW_MS = int(datetime(2026, 5, 18, tzinfo=timezone.utc).timestamp() * 1000)
+
+    def test_returns_iso_date_range(self):
+        clause = build_absolute_date_clause(30, self.NOW_MS)
+        assert re.fullmatch(
+            r"\d{4}-\d{2}-\d{2} \.\. \d{4}-\d{2}-\d{2}", clause
+        ), f"unexpected clause: {clause!r}"
+
+    def test_no_relative_offset_in_output(self):
+        clause = build_absolute_date_clause(30, self.NOW_MS)
+        assert "-30d" not in clause
+        assert "minus" not in clause.lower()
+        assert "today" not in clause.lower()
+        assert " * " not in clause
+
+    def test_window_spans_correct_number_of_days(self):
+        clause = build_absolute_date_clause(14, self.NOW_MS)
+        start, end = clause.split(" .. ")
+        start_dt = datetime.strptime(start, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        end_dt = datetime.strptime(end, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        assert (end_dt - start_dt).days == 14
+
+    def test_end_date_matches_now(self):
+        clause = build_absolute_date_clause(30, self.NOW_MS)
+        _, end = clause.split(" .. ")
+        expected = datetime.fromtimestamp(self.NOW_MS / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+        assert end == expected

@@ -3,7 +3,7 @@ import asyncio
 from datetime import datetime, timezone
 
 from yt_mcp.resolver import InstanceResolver
-from yt_mcp.formatters import compact_lines
+from yt_mcp.formatters import compact_lines, build_state_clause, build_absolute_date_clause
 
 # Department auto-detection from project shortname.
 # Generic patterns — no company names, just technical role conventions.
@@ -184,18 +184,21 @@ def register(mcp, resolver: InstanceResolver):
         state_list = [s.strip() for s in states.split(",") if s.strip()] or list(_DEFAULT_HANDOFF_STATES)
         proj_list = [p.strip() for p in projects.split(",") if p.strip()]
 
-        # Build query: (proj: A OR proj: B) AND (State: X OR State: Y)
+        # Build query using YT's comma-list idiom — OR-joined repeated-field
+        # filters trigger 400 "Can't parse search query" on some YT versions.
         proj_clause = ""
         if proj_list:
-            proj_clause = " ".join(f"project: {p}" for p in proj_list)
-            if len(proj_list) > 1:
-                proj_clause = "(" + " or ".join(f"project: {p}" for p in proj_list) + ")"
-        state_clause = "(" + " or ".join(
-            f"State: {{{s}}}" if " " in s else f"State: {s}" for s in state_list
-        ) + ")"
+            if len(proj_list) == 1:
+                proj_clause = f"project: {proj_list[0]}"
+            else:
+                proj_clause = "project: " + ", ".join(proj_list)
+        state_clause = build_state_clause(state_list)
         recency_clause = ""
         if active_within_days > 0:
-            recency_clause = f" updated: {{minus {active_within_days}d}} .. Today"
+            # Absolute ISO dates — `{minus Nd} .. Today` is unreliable across
+            # YT versions (same fix as the v1.8.1 pulse lookback clause).
+            now_ms = int(datetime.now(tz=timezone.utc).timestamp() * 1000)
+            recency_clause = f" updated: {build_absolute_date_clause(active_within_days, now_ms)}"
         query = f"{proj_clause} {state_clause} #Unresolved{recency_clause}".strip()
 
         data = await client.get(

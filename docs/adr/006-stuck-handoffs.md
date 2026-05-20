@@ -169,3 +169,41 @@ pattern as pulse's `format="json"`:
 - The finer-grained role classifier is local to this module; pulse's
   classifier stays as-is. If future tools also need it, candidate for
   promotion to a shared module — defer until the second consumer.
+
+## v1.11.1 — Query construction fix (BLOCKER)
+
+The v1.11.0 ship fired 400 "Can't parse search query" on every call
+because the state filter was built as
+`(State: {A} or State: {B} or State: {C})` — YouTrack rejects this
+OR-joined repeated-field form on many versions/projects. The same bug
+also affected the older `get_handoff_snapshot` (which had been
+unreliable for the same reason).
+
+Pulse always worked because it builds the same filter differently:
+`State: {A}, {B}, {C}` — YT's comma-list idiom for multi-value
+filters. Once the difference was identified, the fix was mechanical.
+
+**Resolution:**
+
+- New shared helper `formatters.build_state_clause(states)` returns the
+  comma-list form. Both `handoffs.py` and `journey.py:get_handoff_snapshot`
+  use it.
+- Same fix applied to the multi-project clause (`project: A, B, C`
+  instead of `(project: A or project: B)`).
+- Also fixed `get_handoff_snapshot`'s `updated: {minus Nd} .. Today`
+  to use absolute ISO dates via a new `build_absolute_date_clause`
+  helper (relative bounds are version-dependent — the same lesson from
+  the v1.8.1 pulse fix, now generalized).
+
+Tests: 519 → 530 (+11). New `TestBuildStateClause` and
+`TestBuildAbsoluteDateClause` in `test_formatters.py`, plus a regression
+test in `test_handoffs.py` that asserts no `" or "` keyword appears in
+the rendered state clause.
+
+### Lesson
+
+When extracting a "shared helper" pattern across tools, default to
+the form that already has battle-tested miles on it. Pulse's
+comma-list approach was the right one — we just didn't recognize it
+as the working idiom vs the broken OR-list pattern that was copied
+from earlier code.

@@ -14,6 +14,31 @@ def escape_query_value(value: str) -> str:
     return value.replace("\\", "").replace("{", "").replace("}", "")
 
 
+def build_state_clause(states: list[str]) -> str:
+    """Build a `State:` clause in YT's comma-list idiom.
+
+    YouTrack accepts `State: {A}, {B}, {C}` (comma-list) but rejects
+    `(State: {A} or State: {B})` (OR-joined repeated-field) on many
+    versions/projects — surfaces as 400 "Can't parse search query".
+
+    Empty input returns empty string; the caller can compose conditionally.
+    """
+    if not states:
+        return ""
+    return "State: " + ", ".join(f"{{{s}}}" for s in states)
+
+
+def build_absolute_date_clause(days_ago: int, now_ms: int) -> str:
+    """Absolute-date range `YYYY-MM-DD .. YYYY-MM-DD` for `updated:` /
+    `created:` / `resolved:` filters. Relative bounds like `-30d` or
+    `{minus 14d}` are version-dependent in YT — absolute dates work
+    everywhere."""
+    from datetime import datetime, timedelta, timezone
+    end_dt = datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc)
+    start_dt = end_dt - timedelta(days=days_ago)
+    return f"{start_dt.strftime('%Y-%m-%d')} .. {end_dt.strftime('%Y-%m-%d')}"
+
+
 def compact_lines(lines: list[str]) -> str:
     """Join lines, stripping markdown if compact mode is on."""
     text = "\n".join(lines)
