@@ -1,6 +1,6 @@
 # yt-mcp
 
-YouTrack MCP server. 74 tools across 18 modules.
+YouTrack MCP server. 75 tools across 19 modules.
 
 ## Build & test
 
@@ -34,6 +34,7 @@ src/yt_mcp/
     translate.py     # translation workflow with batch rollback
     deadlines/       # deadline audit/scorecard + manager-mapping suggester (package)
     pulse.py         # team pulse (single + multi-board parallel) + insight flags
+    handoffs.py      # stuck-handoff detection: cross-team transition stalls
     impact.py        # dependency graph, deadline impact analysis
     dashboard.py     # scoring-based dashboards (active, blocked, team, multi-team)
     monitoring.py    # digest, at-risk, task creation checks, project health
