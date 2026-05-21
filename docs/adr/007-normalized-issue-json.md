@@ -124,3 +124,40 @@ Why this is safe:
 
 All four use `format="report"` (default) / `format="json"` — operators
 get one API surface to remember.
+
+## v1.11.3 — Batch `get_issues(ids, ...)`
+
+Pulse-style enrichment passes need ~20 issues per run (e.g. 3 picks ×
+7 teams). With single `get_issue` calls that's 20 round-trips per
+report — slow, and the existing OR-query trick was being open-coded by
+every consumer.
+
+New tool: `get_issues(ids, fields="", format="report", include_comments=False)`.
+
+- Accepts a comma-separated ID list; URLs are stripped to bare IDs.
+- Composes one `#A or #B or #C` query — single round-trip.
+- Reuses `get_issue`'s expanded default field set + `normalize_issue`
+  for consistent JSON shape (array of normalized dicts).
+- `fields="..."` override returns raw YT response array (no
+  normalization — same contract as `get_issue`).
+- `format="report"` returns a compact list with a count header and a
+  "missing" line for IDs that didn't come back.
+- `include_comments=False` by default (batch mode rarely needs them
+  and they bloat the response). Pass `True` to include.
+- Caps at 100 IDs per call — YT URL length limits batch fetches.
+  Larger lists should be split across multiple calls. Returns a
+  friendly error instead of silently truncating.
+
+Tool count: 75 → 76. Tests: 543 → 554 (+11 covering OR-query
+composition, URL stripping, ID-count cap, JSON normalization vs raw
+override, report-mode missing-ID listing, comments toggle).
+
+The fifth member of the JSON pattern family:
+
+| Tool                       | Version | Shape                                          |
+|----------------------------|---------|------------------------------------------------|
+| `get_team_pulse`           | 1.8.1   | board + metrics + sections + insights          |
+| `get_multi_team_pulse`     | 1.10.0  | aggregate + boards[] + errors[]                |
+| `get_stuck_handoffs`       | 1.11.0  | stuck[] + by_transition + by_receiving_assignee |
+| `get_issue`                | 1.11.2  | normalized issue (id, state, custom_fields, …) |
+| `get_issues`               | 1.11.3  | array of normalized issues                     |

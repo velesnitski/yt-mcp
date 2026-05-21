@@ -207,3 +207,140 @@ class TestNormalizeIssueJSONRoundtrip:
         out = normalize_issue(_yt_issue())
         s = json.dumps(out, indent=2, ensure_ascii=False)
         assert "☠️" in s
+
+
+# --- get_issues batch tool: OR-query composition + ID parsing ---
+
+from unittest.mock import AsyncMock, MagicMock
+
+from mcp.server.fastmcp import FastMCP
+from yt_mcp.resolver import InstanceResolver
+from yt_mcp.config import YouTrackConfig
+from yt_mcp.tools.issues import register as _register_issues
+
+
+def _get_tool_fn(mcp, name):
+    """Pull the unwrapped function out of FastMCP for direct await."""
+    return mcp._tool_manager._tools[name].fn
+
+
+def _make_mcp_with_mock(mock_response: list[dict]):
+    """Spin up a real FastMCP with the issues tools registered, but with
+    a resolver that returns a client whose .get() yields `mock_response`."""
+    mcp = FastMCP("test")
+    client = MagicMock()
+    client.get = AsyncMock(return_value=mock_response)
+    resolver = MagicMock(spec=InstanceResolver)
+    resolver.resolve = MagicMock(return_value=client)
+    _register_issues(mcp, resolver)
+    return mcp, client
+
+
+def _params_of(client) -> dict:
+    """Pull the `params` kwarg from the most recent client.get call."""
+    return client.get.call_args.kwargs.get("params") or client.get.call_args[0][1]
+
+
+class TestGetIssuesBatch:
+    @pytest.mark.asyncio
+    async def test_empty_ids_returns_error_message(self):
+        mcp, client = _make_mcp_with_mock([])
+        out = await _get_tool_fn(mcp, "get_issues")(ids="")
+        assert "No issue IDs" in out
+        client.get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_whitespace_only_ids_returns_error(self):
+        mcp, client = _make_mcp_with_mock([])
+        out = await _get_tool_fn(mcp, "get_issues")(ids=" , ,  ")
+        assert "No issue IDs" in out
+        client.get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_composes_or_query(self):
+        mcp, client = _make_mcp_with_mock([
+            {"idReadable": "PROJ-1", "summary": "a", "state": {"name": "Open"},
+             "customFields": []},
+            {"idReadable": "PROJ-2", "summary": "b", "state": {"name": "Open"},
+             "customFields": []},
+        ])
+        await _get_tool_fn(mcp, "get_issues")(ids="PROJ-1, PROJ-2")
+        assert _params_of(client)["query"] == "#PROJ-1 or #PROJ-2"
+
+    @pytest.mark.asyncio
+    async def test_urls_stripped_to_ids(self):
+        mcp, client = _make_mcp_with_mock([])
+        url = "https://example.youtrack.cloud/issue/PROJ-99/some-slug"
+        await _get_tool_fn(mcp, "get_issues")(ids=url)
+        assert _params_of(client)["query"] == "#PROJ-99"
+
+    @pytest.mark.asyncio
+    async def test_over_100_ids_rejected_with_message(self):
+        ids = ",".join(f"PROJ-{i}" for i in range(101))
+        mcp, client = _make_mcp_with_mock([])
+        out = await _get_tool_fn(mcp, "get_issues")(ids=ids)
+        assert "Too many IDs" in out
+        assert "101" in out
+        client.get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_format_json_returns_normalized_array(self):
+        mcp, client = _make_mcp_with_mock([
+            {"idReadable": "PROJ-1", "summary": "first",
+             "state": {"name": "In Progress"}, "customFields": [],
+             "tags": [{"name": "urgent"}]},
+            {"idReadable": "PROJ-2", "summary": "second",
+             "state": {"name": "Closed"}, "customFields": []},
+        ])
+        out = await _get_tool_fn(mcp, "get_issues")(
+            ids="PROJ-1,PROJ-2", format="json",
+        )
+        parsed = json.loads(out)
+        assert isinstance(parsed, list)
+        assert len(parsed) == 2
+        assert parsed[0]["id"] == "PROJ-1"
+        assert parsed[0]["tags"] == ["urgent"]
+        assert "custom_fields" in parsed[0]  # normalized shape
+
+    @pytest.mark.asyncio
+    async def test_fields_override_returns_raw_in_json_mode(self):
+        raw_response = [{"idReadable": "PROJ-1", "weird_custom_field": "preserved"}]
+        mcp, client = _make_mcp_with_mock(raw_response)
+        out = await _get_tool_fn(mcp, "get_issues")(
+            ids="PROJ-1", fields="idReadable,weird_custom_field", format="json",
+        )
+        parsed = json.loads(out)
+        # No normalization applied — raw passthrough
+        assert parsed[0]["weird_custom_field"] == "preserved"
+        assert "custom_fields" not in parsed[0]
+        assert _params_of(client)["fields"] == "idReadable,weird_custom_field"
+
+    @pytest.mark.asyncio
+    async def test_report_mode_shows_count_and_missing(self):
+        mcp, client = _make_mcp_with_mock([
+            {"idReadable": "PROJ-1", "summary": "exists",
+             "state": {"name": "Open"}, "customFields": []},
+        ])
+        out = await _get_tool_fn(mcp, "get_issues")(ids="PROJ-1,PROJ-99")
+        assert "1 of 2 issues fetched" in out
+        assert "PROJ-99" in out  # listed as missing
+        assert "PROJ-1" in out
+
+    @pytest.mark.asyncio
+    async def test_top_param_matches_id_count(self):
+        ids = ",".join(f"PROJ-{i}" for i in range(15))
+        mcp, client = _make_mcp_with_mock([])
+        await _get_tool_fn(mcp, "get_issues")(ids=ids)
+        assert _params_of(client)["$top"] == "15"
+
+    @pytest.mark.asyncio
+    async def test_include_comments_false_by_default(self):
+        mcp, client = _make_mcp_with_mock([])
+        await _get_tool_fn(mcp, "get_issues")(ids="PROJ-1")
+        assert "comments(" not in _params_of(client)["fields"]
+
+    @pytest.mark.asyncio
+    async def test_include_comments_true_widens_field_set(self):
+        mcp, client = _make_mcp_with_mock([])
+        await _get_tool_fn(mcp, "get_issues")(ids="PROJ-1", include_comments=True)
+        assert "comments(" in _params_of(client)["fields"]

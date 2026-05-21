@@ -134,6 +134,90 @@ def register(mcp, resolver: InstanceResolver):
         return format_issue_detail(data)
 
     @mcp.tool()
+    async def get_issues(
+        ids: str,
+        fields: str = "",
+        format: str = "report",
+        include_comments: bool = False,
+        instance: str = "",
+    ) -> str:
+        """Batch-fetch multiple issues in one round-trip.
+
+        Composes a single `#A or #B or #C` query so a 20-issue enrichment
+        pass takes one HTTP request instead of twenty. Useful when you
+        already have a known ID list (active-focus picks, stuck-handoff
+        IDs, daily-summary references).
+
+        Reuses `get_issue`'s default field set + `normalize_issue` for
+        consistent JSON shape across tools. Default `include_comments=False`
+        because batch mode usually doesn't need them and they're heavy.
+
+        Args:
+            ids: Comma-separated issue IDs or URLs (PROJ-1, PROJ-2, ...).
+                Up to ~100 IDs per call — large lists should be split
+                across multiple calls.
+            fields: Override the YT field selector. Empty uses
+                `get_issue`'s expanded default.
+            format: "report" (default compact list) or "json" (array of
+                normalized issue dicts).
+            include_comments: Include comments in the response
+                (default False — batch mode rarely needs them).
+            instance: YouTrack instance (optional).
+        """
+        client = resolver.resolve(instance)
+        # Parse IDs, stripping URLs and whitespace.
+        id_list = [parse_issue_id(s.strip()) for s in ids.split(",") if s.strip()]
+        if not id_list:
+            return "No issue IDs provided."
+
+        # URL length scales with both ID count and selector size. ~100 IDs is
+        # a safe upper bound for a typical YT deployment; warn rather than
+        # silently truncate.
+        if len(id_list) > 100:
+            return (
+                f"Too many IDs ({len(id_list)}): YT query URL length limits "
+                "batch fetches to ~100 per call. Split into smaller batches."
+            )
+
+        query = " or ".join(f"#{iid}" for iid in id_list)
+
+        if fields:
+            field_set = fields
+        else:
+            field_set = (
+                "idReadable,summary,description,state(name),priority(name),"
+                "assignee(login,name),created,updated,resolved,"
+                "tags(name),customFields(name,value(name,login,presentation,text)),"
+                "links(direction,linkType(name),issues(idReadable,summary,state(name),"
+                "customFields(name,value(name))))"
+            )
+            if include_comments:
+                field_set += ",comments(id,text,author(login,name),created)"
+
+        data = await client.get(
+            "/api/issues",
+            params={"query": query, "fields": field_set, "$top": str(len(id_list))},
+        )
+        data = data or []
+
+        if format == "json":
+            if fields:
+                # Power override: return raw response array, no normalization.
+                return json.dumps(data, indent=2, ensure_ascii=False)
+            normalized = [normalize_issue(i, include_comments=include_comments) for i in data]
+            return json.dumps(normalized, indent=2, ensure_ascii=False)
+
+        # report (compact): one line per issue + a count header.
+        lines = [f"## {len(data)} of {len(id_list)} issues fetched"]
+        if len(data) < len(id_list):
+            returned_ids = {i.get("idReadable", "") for i in data}
+            missing = [i for i in id_list if i not in returned_ids]
+            lines.append(f"_Missing (not found or access denied): {', '.join(missing)}_")
+        lines.append("")
+        lines.append(format_issue_list(data))
+        return compact_lines(lines)
+
+    @mcp.tool()
     async def create_issue(
         project: str, summary: str, description: str = "", product: str = "",
         command: str = "",

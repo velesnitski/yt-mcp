@@ -44,7 +44,7 @@ class TestToolRegistration:
         register_all(mcp, resolver, config)
 
         tools = _get_tool_names(mcp)
-        assert len(tools) == 75, f"Expected 75 tools, got {len(tools)}: {sorted(tools)}"
+        assert len(tools) == 76, f"Expected 76 tools, got {len(tools)}: {sorted(tools)}"
 
     def test_expected_tools_present(self):
         mcp = FastMCP("test")
@@ -54,7 +54,7 @@ class TestToolRegistration:
 
         tools = _get_tool_names(mcp)
         expected = {
-            "search_issues", "get_issue", "create_issue", "update_issue",
+            "search_issues", "get_issue", "get_issues", "create_issue", "update_issue",
             "delete_issue", "get_issue_links", "add_issue_link", "remove_issue_link",
             "add_comment", "update_comment", "delete_comment", "poll_changes",
             "get_top_active_issues", "get_top_blocked_issues", "get_team_dashboard", "get_multi_team_dashboard",
@@ -172,4 +172,4 @@ class TestToolRegistration:
         register_all(mcp, resolver, config=None)
 
         tools = _get_tool_names(mcp)
-        assert len(tools) == 75
+        assert len(tools) == 76

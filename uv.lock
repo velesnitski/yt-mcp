@@ -938,7 +938,7 @@ wheels = [
 
 [[package]]
 name = "yt-mcp"
-version = "1.11.2"
+version = "1.11.3"
 source = { editable = "." }
 dependencies = [
     { name = "cryptography" },
