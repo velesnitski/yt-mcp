@@ -28,6 +28,92 @@ def build_state_clause(states: list[str]) -> str:
     return "State: " + ", ".join(f"{{{s}}}" for s in states)
 
 
+def normalize_issue(data: dict, include_comments: bool = True) -> dict:
+    """Flatten a YT issue response into a JSON-friendly dict.
+
+    YT's native shape has `customFields` as a list of `{name, value}` pairs
+    and tags/links as nested objects — readable, but every consumer has to
+    walk the same boilerplate. This helper produces a clean dict that
+    matches the shape used by other tools' `format="json"` outputs (pulse,
+    handoffs):
+
+      {
+        "id", "summary", "description",
+        "state", "priority",
+        "assignee", "assignee_login",
+        "created", "updated", "resolved",
+        "tags": [str, ...],
+        "custom_fields": {field_name: value, ...},
+        "links": [{id, summary, state, link_type, direction}, ...],
+        "comments": [{id, text, author, author_login, created}, ...],
+      }
+    """
+    custom_fields: dict[str, object] = {}
+    for cf in data.get("customFields", []) or []:
+        name = cf.get("name")
+        if not name:
+            continue
+        val = cf.get("value")
+        if isinstance(val, dict):
+            custom_fields[name] = (
+                val.get("name") or val.get("presentation")
+                or val.get("text") or val.get("login")
+            )
+        elif isinstance(val, list):
+            custom_fields[name] = [
+                v.get("name") or v.get("presentation") or v.get("text") or v.get("login")
+                for v in val if isinstance(v, dict)
+            ]
+        else:
+            custom_fields[name] = val
+
+    tags = [t.get("name", "") for t in (data.get("tags") or []) if t.get("name")]
+
+    out: dict = {
+        "id": data.get("idReadable", ""),
+        "summary": data.get("summary", "") or "",
+        "description": data.get("description") or "",
+        "state": _resolve_state(data),
+        "priority": _resolve_priority(data),
+        "assignee": _resolve_assignee(data),
+        "assignee_login": _resolve_assignee_login(data),
+        "created": data.get("created"),
+        "updated": data.get("updated"),
+        "resolved": data.get("resolved"),
+        "tags": tags,
+        "custom_fields": custom_fields,
+    }
+
+    links: list[dict] = []
+    for link in data.get("links", []) or []:
+        link_type = (link.get("linkType") or {}).get("name", "")
+        direction = link.get("direction", "")
+        for linked in link.get("issues", []) or []:
+            ls = linked.get("state")
+            state = ls.get("name", "") if isinstance(ls, dict) else ""
+            links.append({
+                "id": linked.get("idReadable", ""),
+                "summary": linked.get("summary", "") or "",
+                "state": state,
+                "link_type": link_type,
+                "direction": direction,
+            })
+    out["links"] = links
+
+    if include_comments and data.get("comments") is not None:
+        out["comments"] = [
+            {
+                "id": c.get("id", ""),
+                "text": c.get("text", "") or "",
+                "author": (c.get("author") or {}).get("name", ""),
+                "author_login": (c.get("author") or {}).get("login"),
+                "created": c.get("created"),
+            }
+            for c in (data.get("comments") or [])
+        ]
+    return out
+
+
 def build_absolute_date_clause(days_ago: int, now_ms: int) -> str:
     """Absolute-date range `YYYY-MM-DD .. YYYY-MM-DD` for `updated:` /
     `created:` / `resolved:` filters. Relative bounds like `-30d` or

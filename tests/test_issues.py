@@ -64,3 +64,146 @@ class TestCommandKeywords:
             if name.lower() not in _CMD_KEYWORDS:
                 field_commands.append(f"{name} {value}")
         assert field_commands == ["Type Bug", "Subsystem Client Panel"]
+
+
+# --- normalize_issue: JSON-friendly issue shape ---
+
+import json
+import pytest
+
+from yt_mcp.formatters import normalize_issue
+
+
+def _yt_issue(**kw) -> dict:
+    """Build a mock YT issue response with the new (richer) field shape."""
+    return {
+        "idReadable": kw.get("id", "PROJ-1"),
+        "summary": kw.get("summary", "Title"),
+        "description": kw.get("description", "Desc"),
+        "state": {"name": kw.get("state", "In Progress")},
+        "priority": {"name": kw.get("priority", "Medium")},
+        "assignee": kw.get("assignee", {"login": "alice.a", "name": "Alice A"}),
+        "created": kw.get("created", 1747584000000),
+        "updated": kw.get("updated", 1747670400000),
+        "resolved": kw.get("resolved"),
+        "tags": kw.get("tags", [{"name": "release-blocker"}, {"name": "v2"}]),
+        "customFields": kw.get("customFields", [
+            {"name": "Severity", "value": {"name": "Major"}},
+            {"name": "Type", "value": {"name": "Bug"}},
+            {"name": "Deadline ☠️", "value": {"presentation": "2026-05-30"}},
+        ]),
+        "links": kw.get("links", []),
+    }
+
+
+class TestNormalizeIssueBasics:
+    def test_top_level_fields_extracted(self):
+        out = normalize_issue(_yt_issue())
+        assert out["id"] == "PROJ-1"
+        assert out["summary"] == "Title"
+        assert out["description"] == "Desc"
+        assert out["state"] == "In Progress"
+        assert out["priority"] == "Medium"
+        assert out["assignee"] == "Alice A"
+        assert out["assignee_login"] == "alice.a"
+        assert out["created"] == 1747584000000
+
+    def test_tags_normalized_to_string_list(self):
+        out = normalize_issue(_yt_issue())
+        assert out["tags"] == ["release-blocker", "v2"]
+
+    def test_tags_empty_when_absent(self):
+        issue = _yt_issue()
+        issue.pop("tags")
+        out = normalize_issue(issue)
+        assert out["tags"] == []
+
+    def test_custom_fields_dict_shape(self):
+        out = normalize_issue(_yt_issue())
+        assert out["custom_fields"]["Severity"] == "Major"
+        assert out["custom_fields"]["Type"] == "Bug"
+        # Deadline uses `presentation` not `name` — handler falls through
+        assert out["custom_fields"]["Deadline ☠️"] == "2026-05-30"
+
+    def test_custom_fields_list_value(self):
+        issue = _yt_issue(customFields=[
+            {"name": "Subsystems", "value": [
+                {"name": "API"}, {"name": "Auth"},
+            ]},
+        ])
+        out = normalize_issue(issue)
+        assert out["custom_fields"]["Subsystems"] == ["API", "Auth"]
+
+    def test_custom_fields_handles_null_value(self):
+        issue = _yt_issue(customFields=[
+            {"name": "Optional", "value": None},
+        ])
+        out = normalize_issue(issue)
+        assert out["custom_fields"]["Optional"] is None
+
+    def test_unassigned_yields_none_login(self):
+        issue = _yt_issue(assignee=None)
+        out = normalize_issue(issue)
+        assert out["assignee"] == "Unassigned"
+        assert out["assignee_login"] is None
+
+    def test_links_flattened(self):
+        issue = _yt_issue(links=[{
+            "direction": "outward",
+            "linkType": {"name": "Depend"},
+            "issues": [
+                {"idReadable": "PROJ-99", "summary": "blocker", "state": {"name": "Open"}},
+                {"idReadable": "PROJ-100", "summary": "other", "state": {"name": "Closed"}},
+            ],
+        }])
+        out = normalize_issue(issue)
+        assert len(out["links"]) == 2
+        first = out["links"][0]
+        assert first["id"] == "PROJ-99"
+        assert first["link_type"] == "Depend"
+        assert first["direction"] == "outward"
+        assert first["state"] == "Open"
+
+
+class TestNormalizeIssueComments:
+    def test_comments_included_when_present(self):
+        issue = _yt_issue()
+        issue["comments"] = [
+            {"id": "c1", "text": "first", "author": {"login": "bob.b", "name": "Bob B"},
+             "created": 1747000000000},
+        ]
+        out = normalize_issue(issue, include_comments=True)
+        assert len(out["comments"]) == 1
+        assert out["comments"][0]["author"] == "Bob B"
+        assert out["comments"][0]["author_login"] == "bob.b"
+
+    def test_comments_omitted_when_absent_from_response(self):
+        # When the YT response doesn't have a `comments` key at all,
+        # we don't fabricate an empty list — keeps shape honest about
+        # what was fetched.
+        out = normalize_issue(_yt_issue())
+        assert "comments" not in out
+
+    def test_comments_skipped_when_include_comments_false(self):
+        issue = _yt_issue()
+        issue["comments"] = [{"id": "c1", "text": "x", "author": {"name": "x"}}]
+        out = normalize_issue(issue, include_comments=False)
+        assert "comments" not in out
+
+
+class TestNormalizeIssueJSONRoundtrip:
+    """Real consumer flow: normalize → json.dumps → json.loads → walk dict."""
+
+    def test_roundtrip_preserves_all_keys(self):
+        out = normalize_issue(_yt_issue())
+        s = json.dumps(out, indent=2, ensure_ascii=False)
+        parsed = json.loads(s)
+        for key in ("id", "summary", "description", "state", "priority",
+                    "assignee", "assignee_login", "created", "updated",
+                    "resolved", "tags", "custom_fields", "links"):
+            assert key in parsed
+
+    def test_unicode_preserved_in_custom_field_names(self):
+        out = normalize_issue(_yt_issue())
+        s = json.dumps(out, indent=2, ensure_ascii=False)
+        assert "☠️" in s

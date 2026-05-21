@@ -1,8 +1,9 @@
+import json
 import re
 from datetime import datetime, timezone
 
 from yt_mcp.resolver import InstanceResolver
-from yt_mcp.formatters import format_issue_list, format_issue_detail, _resolve_state, _resolve_assignee, _get_custom_field, parse_issue_id, compact_lines
+from yt_mcp.formatters import format_issue_list, format_issue_detail, _resolve_state, _resolve_assignee, _get_custom_field, parse_issue_id, compact_lines, normalize_issue
 
 _CMD_FIELD_RE = re.compile(r"(\S+)\s+\{([^}]+)\}|(\S+)\s+(\S+)")
 _CMD_KEYWORDS = frozenset({"tag", "untag", "remove", "add", "for", "star", "unstar"})
@@ -68,30 +69,68 @@ def register(mcp, resolver: InstanceResolver):
         return f"{header}\n\n{result}"
 
     @mcp.tool()
-    async def get_issue(issue_id: str, include_comments: bool = True, instance: str = "") -> str:
+    async def get_issue(
+        issue_id: str,
+        include_comments: bool = True,
+        format: str = "report",
+        fields: str = "",
+        instance: str = "",
+    ) -> str:
         """Get full details of a YouTrack issue.
 
+        Default returns a markdown render (chat-friendly). `format="json"`
+        returns a normalized JSON dict — flat keys for id/summary/state/
+        assignee + assignee_login, a `tags` list, a `custom_fields` dict
+        (custom field name → value), and a `links` list. Matches the JSON
+        shape used by pulse and handoffs so consumers see one consistent
+        structure across tools.
+
+        Use `fields` to override the field selector for power callers
+        who need specific YT response fields. When `fields` is set and
+        `format="json"`, the raw YT response is returned unaltered (no
+        normalization, full control). When `fields` is set and
+        `format="report"`, the markdown render may be sparse if the
+        selector is narrower than the default.
+
         Args:
-            issue_id: Issue ID or URL
-            include_comments: Include comments (default: True)
-            instance: YouTrack instance (optional)
+            issue_id: Issue ID or URL.
+            include_comments: Include comments in default selector (default: True).
+            format: "report" (default markdown) or "json" (normalized dict).
+            fields: Override the YT `fields` selector. Empty uses a richer
+                default with login on assignee, `presentation`/`text` on
+                custom-field values, and tags + created.
+            instance: YouTrack instance (optional).
         """
         client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
-        fields = (
-            "idReadable,summary,description,state(name),priority(name),"
-            "assignee(name),created,updated,resolved,"
-            "tags(name),customFields(name,value(name)),"
-            "links(direction,linkType(name),issues(idReadable,summary,state(name),"
-            "customFields(name,value(name))))"
-        )
-        if include_comments:
-            fields += ",comments(id,text,author(name),created)"
+
+        if fields:
+            field_set = fields
+        else:
+            # Default selector — richer than the historical set. Adds login
+            # to assignee/comment-author (live YT filter URLs) and
+            # presentation/text to custom-field values (deadlines, free-text).
+            field_set = (
+                "idReadable,summary,description,state(name),priority(name),"
+                "assignee(login,name),created,updated,resolved,"
+                "tags(name),customFields(name,value(name,login,presentation,text)),"
+                "links(direction,linkType(name),issues(idReadable,summary,state(name),"
+                "customFields(name,value(name))))"
+            )
+            if include_comments:
+                field_set += ",comments(id,text,author(login,name),created)"
 
         data = await client.get(
             f"/api/issues/{issue_id}",
-            params={"fields": fields},
+            params={"fields": field_set},
         )
+
+        if format == "json":
+            # Power override: caller asked for specific fields — return raw
+            # so they get exactly what they requested. Otherwise normalize
+            # to the cross-tool JSON shape.
+            payload = data if fields else normalize_issue(data, include_comments=include_comments)
+            return json.dumps(payload, indent=2, ensure_ascii=False)
         return format_issue_detail(data)
 
     @mcp.tool()
