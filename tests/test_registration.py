@@ -44,7 +44,7 @@ class TestToolRegistration:
         register_all(mcp, resolver, config)
 
         tools = _get_tool_names(mcp)
-        assert len(tools) == 76, f"Expected 76 tools, got {len(tools)}: {sorted(tools)}"
+        assert len(tools) == 77, f"Expected 77 tools, got {len(tools)}: {sorted(tools)}"
 
     def test_expected_tools_present(self):
         mcp = FastMCP("test")
@@ -77,7 +77,7 @@ class TestToolRegistration:
             "audit_deadline_changes", "deadline_scorecard", "suggest_managers",
             "get_team_pulse", "get_multi_team_pulse", "get_stuck_handoffs",
             "get_impact_map", "get_deadline_impact",
-            "get_current_user", "search_users",
+            "get_current_user", "get_instance_url", "search_users",
             "search_articles", "get_article", "create_article",
             "update_article", "delete_article",
             "add_article_comment", "update_article_comment", "delete_article_comment",
@@ -172,4 +172,4 @@ class TestToolRegistration:
         register_all(mcp, resolver, config=None)
 
         tools = _get_tool_names(mcp)
-        assert len(tools) == 76
+        assert len(tools) == 77

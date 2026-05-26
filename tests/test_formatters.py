@@ -13,6 +13,7 @@ from yt_mcp.formatters import (
     parse_issue_id,
     build_state_clause,
     build_absolute_date_clause,
+    rewrite_or_clauses,
 )
 
 
@@ -305,3 +306,88 @@ class TestBuildAbsoluteDateClause:
         _, end = clause.split(" .. ")
         expected = datetime.fromtimestamp(self.NOW_MS / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
         assert end == expected
+
+
+# --- rewrite_or_clauses: OR-syntax footgun auto-fix ---
+
+class TestRewriteOrClauses:
+    """YT rejects `<prefix>: x OR <prefix>: y` with a generic 400. Helper
+    detects this exact shape and rewrites to YT's comma-list idiom."""
+
+    def test_simple_same_prefix_two_clauses(self):
+        new, changes = rewrite_or_clauses("summary: foo OR summary: bar")
+        assert new == "summary: foo, bar"
+        assert len(changes) == 1
+        assert "summary" in changes[0]
+
+    def test_three_same_prefix_clauses(self):
+        new, changes = rewrite_or_clauses("tag: a OR tag: b OR tag: c")
+        assert new == "tag: a, b, c"
+        assert changes
+
+    def test_case_insensitive_or_keyword(self):
+        # YT accepts both "or" and "OR"; rewrite should catch both
+        new, _ = rewrite_or_clauses("tag: a or tag: b")
+        assert new == "tag: a, b"
+        new, _ = rewrite_or_clauses("tag: a Or tag: b")
+        assert new == "tag: a, b"
+
+    def test_different_prefixes_left_alone(self):
+        # summary OR state is a genuine cross-field disjunction, not a
+        # rewrite candidate — auto-merging would lose meaning.
+        q = "summary: foo OR state: open"
+        new, changes = rewrite_or_clauses(q)
+        assert new == q
+        assert changes == []
+
+    def test_no_or_keyword_unchanged(self):
+        q = "summary: foo state: open"
+        new, changes = rewrite_or_clauses(q)
+        assert new == q
+        assert changes == []
+
+    def test_braces_bail_out(self):
+        # Brace-wrapped values (`{For Review}`) may contain literal OR text
+        # we mustn't disturb. Conservative: leave the whole query alone.
+        q = "State: {For Review} OR State: {Ready for Test}"
+        new, changes = rewrite_or_clauses(q)
+        assert new == q
+        assert changes == []
+
+    def test_quoted_values_bail_out(self):
+        q = 'summary: "foo OR bar"'
+        new, changes = rewrite_or_clauses(q)
+        assert new == q
+        assert changes == []
+
+    def test_parentheses_bail_out(self):
+        # Grouped disjunctions have semantics that auto-merge could break.
+        q = "(summary: foo OR summary: bar) and state: open"
+        new, changes = rewrite_or_clauses(q)
+        assert new == q
+        assert changes == []
+
+    def test_preserves_prefix_case(self):
+        # User typed `Tag:` (capital T) — rewrite should not lowercase it.
+        new, _ = rewrite_or_clauses("Tag: a OR Tag: b")
+        assert new == "Tag: a, b"
+
+    def test_mixed_prefix_case_treated_as_same(self):
+        # YT is case-insensitive on prefix names; merge `tag` and `Tag`
+        # since they resolve to the same field.
+        new, changes = rewrite_or_clauses("tag: a OR Tag: b")
+        assert new == "tag: a, b"  # uses first-occurrence's casing
+        assert changes
+
+    def test_empty_query_unchanged(self):
+        new, changes = rewrite_or_clauses("")
+        assert new == ""
+        assert changes == []
+
+    def test_one_segment_not_a_clause_bails(self):
+        # `summary: foo OR randomtext` — second segment isn't a prefix:value
+        # clause. Don't try to be clever.
+        q = "summary: foo OR randomtext"
+        new, changes = rewrite_or_clauses(q)
+        assert new == q
+        assert changes == []

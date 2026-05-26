@@ -100,3 +100,122 @@ class TestScrubEventLogentryFallback:
         assert result is event
         assert result["extra"]["db_password"] == "[REDACTED]"
         assert result["extra"]["ok_field"] == "fine"
+
+
+# --- Query auto-rewrite preprocessing (v1.12.0) ---
+
+from yt_mcp.client import _preprocess_query_params
+
+
+class TestPreprocessQueryParams:
+    def test_none_passes_through(self):
+        assert _preprocess_query_params(None) is None
+
+    def test_params_without_query_unchanged(self):
+        params = {"fields": "id,summary", "$top": "10"}
+        assert _preprocess_query_params(params) is params
+
+    def test_non_string_query_unchanged(self):
+        # Defensive: if a caller somehow passes a non-str query, don't crash
+        params = {"query": 42}
+        assert _preprocess_query_params(params) is params
+
+    def test_clean_query_returns_same_dict(self):
+        params = {"query": "project: ALPHA #Unresolved", "fields": "id"}
+        result = _preprocess_query_params(params)
+        # No rewrite needed → returned as-is (same object, not copied)
+        assert result is params
+
+    def test_or_query_rewritten(self, caplog):
+        params = {"query": "summary: foo OR summary: bar"}
+        with caplog.at_level(logging.INFO, logger="yt_mcp"):
+            result = _preprocess_query_params(params)
+        # Modified copy, original untouched
+        assert result is not params
+        assert result["query"] == "summary: foo, bar"
+        assert params["query"] == "summary: foo OR summary: bar"  # unmutated
+        # Logged at info level
+        msgs = [r.getMessage() for r in caplog.records if r.name == "yt_mcp"]
+        assert any("auto-rewrite" in m.lower() for m in msgs)
+
+    def test_braces_in_query_bypass_rewrite(self):
+        # Brace-protected state lists must not be rewritten
+        params = {"query": "State: {For Review} OR State: {Ready for Test}"}
+        result = _preprocess_query_params(params)
+        assert result is params  # unchanged
+
+
+# --- get_instance_url + get_current_user JSON shape (v1.12.0) ---
+
+import json
+from unittest.mock import AsyncMock, MagicMock
+
+from mcp.server.fastmcp import FastMCP
+
+from yt_mcp.resolver import InstanceResolver
+from yt_mcp.tools.users import register as _register_users
+
+
+def _mock_users_mcp(me_response: dict, base_url: str = "https://example.invalid"):
+    mcp = FastMCP("test")
+    client = MagicMock()
+    client.get = AsyncMock(return_value=me_response)
+    client.base_url = base_url
+    resolver = MagicMock(spec=InstanceResolver)
+    resolver.resolve = MagicMock(return_value=client)
+    _register_users(mcp, resolver)
+    return mcp, client
+
+
+def _tool_fn(mcp, name):
+    return mcp._tool_manager._tools[name].fn
+
+
+class TestGetInstanceUrl:
+    @pytest.mark.asyncio
+    async def test_report_returns_plain_url(self):
+        mcp, client = _mock_users_mcp({}, base_url="https://acme.youtrack.cloud")
+        out = await _tool_fn(mcp, "get_instance_url")()
+        assert out == "https://acme.youtrack.cloud"
+
+    @pytest.mark.asyncio
+    async def test_json_returns_wrapped_dict(self):
+        mcp, client = _mock_users_mcp({}, base_url="https://acme.youtrack.cloud")
+        out = await _tool_fn(mcp, "get_instance_url")(format="json")
+        parsed = json.loads(out)
+        assert parsed == {"base_url": "https://acme.youtrack.cloud"}
+
+    @pytest.mark.asyncio
+    async def test_no_api_call_made(self):
+        # The point of this tool is it's free — no auth needed
+        mcp, client = _mock_users_mcp({}, base_url="https://x.invalid")
+        await _tool_fn(mcp, "get_instance_url")()
+        client.get.assert_not_called()
+
+
+class TestGetCurrentUserJson:
+    @pytest.mark.asyncio
+    async def test_json_includes_instance_url(self):
+        me = {
+            "id": "1-1", "login": "alice", "fullName": "Alice A",
+            "email": "alice@example.invalid", "online": True, "banned": False,
+            "avatarUrl": "/hub/api/rest/avatar/1-1",
+        }
+        mcp, client = _mock_users_mcp(me, base_url="https://acme.youtrack.cloud")
+        out = await _tool_fn(mcp, "get_current_user")(format="json")
+        parsed = json.loads(out)
+        assert parsed["login"] == "alice"
+        assert parsed["name"] == "Alice A"
+        assert parsed["email"] == "alice@example.invalid"
+        assert parsed["instance_url"] == "https://acme.youtrack.cloud"
+        assert parsed["online"] is True
+        assert parsed["banned"] is False
+
+    @pytest.mark.asyncio
+    async def test_report_default_includes_instance_line(self):
+        me = {"id": "1-1", "login": "bob", "fullName": "Bob B"}
+        mcp, client = _mock_users_mcp(me, base_url="https://acme.youtrack.cloud")
+        out = await _tool_fn(mcp, "get_current_user")()  # default format=report
+        assert "Bob B" in out
+        assert "https://acme.youtrack.cloud" in out
+        assert out.startswith("## Current user")
