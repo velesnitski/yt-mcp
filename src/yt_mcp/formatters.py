@@ -14,6 +14,53 @@ def escape_query_value(value: str) -> str:
     return value.replace("\\", "").replace("{", "").replace("}", "")
 
 
+_OR_SPLIT_RE = re.compile(r"\s+OR\s+", re.IGNORECASE)
+_PREFIX_VALUE_RE = re.compile(r"^\s*(\w+)\s*:\s*(.+?)\s*$")
+
+
+def rewrite_or_clauses(query: str) -> tuple[str, list[str]]:
+    """Rewrite `<prefix>: x OR <prefix>: y` → `<prefix>: x, y`.
+
+    YouTrack rejects OR-joined same-prefix clauses with a generic 400
+    'Can't parse search query'. The correct idiom is the comma-list form
+    `<prefix>: x, y`. This helper detects the simple-clause shape and
+    auto-rewrites — a footgun avoidance pass that saves the caller a
+    round-trip and a confusing error.
+
+    Conservative bail: if the query contains braces, quotes, or parens,
+    leave it alone. Brace-wrapped values (`{For Review}`) and quoted
+    strings may contain literal " OR " text we shouldn't touch; parens
+    indicate nested groups whose semantics auto-merge could change.
+
+    Returns (new_query, [rewrite_descriptions]). Empty list means no
+    change. The descriptions are for logging — never user-visible.
+    """
+    if not query or any(c in query for c in "(){}\""):
+        return query, []
+
+    segments = _OR_SPLIT_RE.split(query)
+    if len(segments) < 2:
+        return query, []
+
+    parsed: list[tuple[str, str, str]] = []  # (prefix_lower, prefix_orig, value)
+    for seg in segments:
+        m = _PREFIX_VALUE_RE.match(seg)
+        if not m:
+            return query, []  # one segment isn't a simple `prefix: value` — bail
+        prefix_orig = m.group(1)
+        parsed.append((prefix_orig.lower(), prefix_orig, m.group(2)))
+
+    # All segments must share the same prefix for a safe merge.
+    head_prefix = parsed[0][0]
+    if not all(p[0] == head_prefix for p in parsed):
+        return query, []
+
+    prefix = parsed[0][1]  # preserve original-case prefix from first clause
+    values = [p[2] for p in parsed]
+    new_query = f"{prefix}: " + ", ".join(values)
+    return new_query, [f"merged {len(segments)} `{prefix}:` OR-clauses into comma-list"]
+
+
 def build_state_clause(states: list[str]) -> str:
     """Build a `State:` clause in YT's comma-list idiom.
 

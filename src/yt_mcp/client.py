@@ -2,10 +2,40 @@ import logging
 
 import httpx
 from yt_mcp.config import YouTrackConfig
+from yt_mcp.formatters import rewrite_or_clauses
 
 _logger = logging.getLogger("yt_mcp")
 
 _JSON_HEADERS = {"Content-Type": "application/json"}
+
+
+def _preprocess_query_params(params: dict | None) -> dict | None:
+    """Auto-rewrite YT query 'OR' footguns before they hit the API.
+
+    Callers naturally express disjunctions as `summary: X OR summary: Y` —
+    YT rejects this with a generic 400. The correct syntax is the
+    comma-list `summary: X, Y`. Rewriting here means every query path
+    (search_issues, count_issues, get_issues_digest, …) benefits without
+    each tool needing to remember the idiom.
+
+    Returns the (possibly-modified) params dict; original is not mutated.
+    """
+    if not params or "query" not in params:
+        return params
+    q = params["query"]
+    if not isinstance(q, str):
+        return params
+    rewritten, changes = rewrite_or_clauses(q)
+    if not changes:
+        return params
+    _logger.info(
+        "YT query auto-rewrite: %s",
+        changes[0],
+        extra={"original_query": q[:200], "rewritten_query": rewritten[:200]},
+    )
+    new_params = dict(params)
+    new_params["query"] = rewritten
+    return new_params
 
 
 class YouTrackClient:
@@ -25,6 +55,12 @@ class YouTrackClient:
             },
             base_url=config.url,
         )
+
+    @property
+    def base_url(self) -> str:
+        """Configured YouTrack base URL (e.g. https://example.youtrack.cloud).
+        Surfaced so tools can build issue hyperlinks without poking _config."""
+        return self._config.url
 
     async def _handle_error(self, resp: httpx.Response) -> None:
         """Extract YouTrack error message for 400/404 responses, raise for other errors."""
@@ -55,11 +91,15 @@ class YouTrackClient:
         resp.raise_for_status()
 
     async def get(self, path: str, params: dict | None = None):
+        params = _preprocess_query_params(params)
         resp = await self._client.get(path, params=params)
         await self._handle_error(resp)
         return resp.json()
 
     async def post(self, path: str, json: dict | None = None):
+        # POST bodies don't typically use the YT search-query string the same
+        # way GET params do (commands use `query` as a command, not a search
+        # filter), so we don't rewrite POSTs.
         resp = await self._client.post(
             path, json=json, headers=_JSON_HEADERS
         )
