@@ -47,7 +47,9 @@ class TestServerStartup:
         resp = responses[0]
         assert resp.get("id") == 1
         assert "result" in resp
-        assert resp["result"]["serverInfo"]["name"] == "youtrack"
+        # Name includes version suffix so Claude Code's /mcp shows it.
+        from yt_mcp import __version__
+        assert resp["result"]["serverInfo"]["name"] == f"youtrack v{__version__}"
 
     def test_tools_list(self):
         responses = self._run_jsonrpc(
