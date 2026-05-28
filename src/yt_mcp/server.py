@@ -1,11 +1,17 @@
 import os
 
 from mcp.server.fastmcp import FastMCP
+from yt_mcp import __version__
 from yt_mcp.config import load_all_configs
 from yt_mcp.client import YouTrackClient
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.tools import register_all
 from yt_mcp.logging import setup_logging, setup_sentry, INSTANCE_ID
+
+# Bake the version into the server name so Claude Code's `/mcp` line shows
+# "youtrack v1.12.x ✓ connected" rather than just "youtrack". Same pattern
+# as slack-mcp's `server.NewMCPServer("slack v"+version, version, ...)`.
+_SERVER_NAME = f"youtrack v{__version__}"
 
 # Initialize logging and error tracking
 _logger = setup_logging()
@@ -40,9 +46,9 @@ def _build_mcp() -> FastMCP:
             access_code=access_code,
             server_url=oauth_url,
         )
-        return FastMCP("youtrack", auth=auth_settings, auth_server_provider=_oauth_provider)
+        return FastMCP(_SERVER_NAME, auth=auth_settings, auth_server_provider=_oauth_provider)
 
-    return FastMCP("youtrack")
+    return FastMCP(_SERVER_NAME)
 
 
 mcp = _build_mcp()
