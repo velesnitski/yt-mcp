@@ -344,7 +344,9 @@ def _render_markdown(payload: dict, limit: int) -> str:
     metrics = payload["metrics"]
     pipeline_counts = payload["pipeline_counts"]
     insights = payload["insights"]
-    unknown_columns = payload.get("unknown_columns", [])
+    # `unmapped_columns` is the v1.12.3 name; `unknown_columns` is the
+    # legacy v1.11.x key kept in the payload for backwards compatibility.
+    unmapped_columns = payload.get("unmapped_columns") or payload.get("unknown_columns", [])
     re_entry_items = payload["re_entry"]
     triaged_items = payload["triaged"]
     incoming_items = payload["incoming"]
@@ -376,10 +378,14 @@ def _render_markdown(payload: dict, limit: int) -> str:
             lines.append(f"- {f}")
         lines.append("")
 
-    if unknown_columns:
+    if unmapped_columns:
+        # These are board columns with no `fieldValues` — usually swimlanes
+        # or grouping labels, not real State enum values. We skip them in
+        # the query so the call doesn't 400; surface them so operators can
+        # see what's being excluded.
         lines.append(
-            f"_Diagnostic: unrecognized columns treated as `triaged`: "
-            f"{', '.join(unknown_columns)}_"
+            f"_Diagnostic: board columns skipped (not State values on the project): "
+            f"{', '.join(unmapped_columns)}_"
         )
         lines.append("")
 
@@ -564,6 +570,15 @@ def register(mcp, resolver: InstanceResolver):
           - Lookback: closed, released, reopened, new incoming
           - Forward: ready-to-pull, pipeline-unblockers, recent incoming
 
+        **Scope:** project + board-column-scoped. Issues are queried by
+        `project: <PROJ> State: {<board state>, ...}` — so any State enum
+        value on the project that the board does NOT render as a column is
+        invisible. Newly-created tickets in unmapped states won't surface
+        until they're moved to a state that has a column. This is by design
+        (the board defines what "matters" for the team's workflow) but can
+        surprise consumers expecting a full project scan — use
+        `search_issues` with a project filter if you want everything.
+
         Heuristic flags surface "should I act?" signals: backlog growth,
         reopen rate, WIP overload (concurrent dev work), pipeline overload
         (downstream-of-dev clog), bottlenecks, deadline cliff, stale queue.
@@ -741,25 +756,36 @@ def _build_pipeline_lane_states(state_to_role: dict[str, str]) -> dict[str, list
 
 
 def _classify_board_columns(board: dict) -> tuple[dict[str, str], list[str]]:
-    """Map board's state values to roles. Returns (state→role, unknown_columns)."""
+    """Map board's State enum values to workflow roles.
+
+    Returns (state→role, unmapped_columns). Only columns with `fieldValues`
+    contribute states — those are real State enum members on the project's
+    custom field. Columns with empty `fieldValues` (typically swimlanes or
+    presentation-only groupings) get captured in `unmapped_columns` for
+    diagnostic display but never enter the query set: querying
+    `State: {Some Swimlane Label}` against a project where that's not a
+    valid State value triggers `400 Can't parse search query`.
+    """
     col_settings = board.get("columnSettings") or {}
     columns = col_settings.get("columns") or []
     state_to_role: dict[str, str] = {}
-    unknown_columns: list[str] = []
+    unmapped_columns: list[str] = []
     for col in columns:
-        for fv in col.get("fieldValues") or []:
-            state_name = fv.get("name") or ""
-            if not state_name:
-                continue
-            role = classify_column(state_name)
-            state_to_role[state_name] = role
-        pres = col.get("presentation") or ""
-        if pres and not col.get("fieldValues"):
-            role = classify_column(pres)
-            state_to_role[pres] = role
-            if role == "triaged" and not _COLUMN_PATTERNS_match_any(pres):
-                unknown_columns.append(pres)
-    return state_to_role, unknown_columns
+        field_values = col.get("fieldValues") or []
+        if field_values:
+            for fv in field_values:
+                state_name = fv.get("name") or ""
+                if not state_name:
+                    continue
+                role = classify_column(state_name)
+                state_to_role[state_name] = role
+        else:
+            # Presentation-only column — capture for diagnostic, do NOT
+            # treat as a queryable state (it's a UI label, not an enum value).
+            pres = col.get("presentation") or ""
+            if pres:
+                unmapped_columns.append(pres)
+    return state_to_role, unmapped_columns
 
 
 async def _build_pulse_payload(
@@ -774,7 +800,7 @@ async def _build_pulse_payload(
     if not projects:
         return f"Board '{board_display}' has no projects bound."
 
-    state_to_role, unknown_columns = _classify_board_columns(board)
+    state_to_role, unmapped_columns = _classify_board_columns(board)
     standup_patterns = _compile_standup_patterns({})
 
     if len(projects) == 1:
@@ -910,7 +936,12 @@ async def _build_pulse_payload(
         "team_balanced": team_balanced,
         "team_pool": team_pool,
         "insights": insights,
-        "unknown_columns": unknown_columns,
+        # `unmapped_columns` is the v1.12.3+ key; `unknown_columns` is kept
+        # as a deprecated alias for downstream JSON consumers that latched
+        # onto the old name. Both point to the same list — remove the alias
+        # in the next minor version.
+        "unmapped_columns": unmapped_columns,
+        "unknown_columns": unmapped_columns,
     }
 
 
