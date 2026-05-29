@@ -343,6 +343,43 @@ New tool surface, no breakage. Existing `get_team_pulse` behavior is
 unchanged — it now uses the same `_build_pulse_payload` helper but
 returns the same shape.
 
+## v1.12.3 — Presentation-only columns no longer become query states
+
+Reported 400 on a specific board when `get_team_pulse` was called.
+Other tools on the same board (handoff snapshot, get_issue,
+at-risk-issues) worked. Root cause: `_classify_board_columns` had a
+fallback that, when a board column had empty `fieldValues`, treated
+the column's `presentation` string as a state name. But `presentation`
+is a UI column label — often a swimlane or grouping name — not a
+real State enum value on the project. Querying
+`State: {Some Swimlane Label}` against a project where that's not a
+valid State triggered 400 "Can't parse search query."
+
+**Fix:** only `fieldValues.name` entries (real State enum values)
+enter the queryable state set. Columns with empty `fieldValues` are
+captured in a new `unmapped_columns` list for diagnostic display but
+never queried. The diagnostic line in the markdown report now reads
+"board columns skipped (not State values on the project): …"
+instead of the prior misleading "unrecognized columns treated as
+`triaged`: …" (they weren't treated as triaged in the query — they
+were silently injected as broken state filters).
+
+JSON payload key: new `unmapped_columns` is the canonical key.
+Legacy `unknown_columns` is kept as a populated alias so JSON
+consumers from v1.11.x don't break — to be removed in the next
+minor version.
+
+Also bumped the `get_team_pulse` docstring to clarify scope:
+"project + board-column-scoped." Issues in project states that the
+board doesn't render as a column are excluded by design. This was
+not documented and surprised a downstream consumer who expected a
+full project scan. Adding the explicit note saves the next debugger
+the same investigation.
+
+Patch bump 1.12.2 → 1.12.3. No new tool, no breaking change (legacy
+JSON key preserved). Tests: 577 → 579 (+2 covering the new
+fieldValues-only behavior and the unmapped-column skip path).
+
 ## v1.10.1 — `assignee_login` in JSON output
 
 YouTrack's `Assignee:` query filter requires the user's **login**

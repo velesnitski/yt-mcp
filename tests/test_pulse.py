@@ -536,6 +536,7 @@ class TestRenderMarkdownFromPayload:
             "team_balanced": kw.get("team_balanced", []),
             "team_pool": kw.get("team_pool", []),
             "insights": kw.get("insights", []),
+            "unmapped_columns": kw.get("unmapped_columns", []),
             "unknown_columns": kw.get("unknown_columns", []),
         }
 
@@ -556,13 +557,25 @@ class TestRenderMarkdownFromPayload:
         assert "Flags" in out
         assert "Backlog growing" in out
 
-    def test_unknown_columns_diagnostic(self):
+    def test_unmapped_columns_diagnostic_via_new_key(self):
+        # v1.12.3 renamed the payload key to `unmapped_columns`. The
+        # renderer prefers the new key when both are present.
+        out = _render_markdown(
+            self._make_payload(unmapped_columns=["Approval Pending"]),
+            limit=10,
+        )
+        assert "Approval Pending" in out
+        assert "skipped" in out.lower()
+        assert "not State values" in out
+
+    def test_unmapped_columns_diagnostic_via_legacy_key(self):
+        # Old payload key still works (backwards-compat for callers that
+        # serialized payloads from v1.11.x).
         out = _render_markdown(
             self._make_payload(unknown_columns=["Approval Pending"]),
             limit=10,
         )
         assert "Approval Pending" in out
-        assert "unrecognized" in out.lower()
 
     def test_triaged_items_shown(self):
         item = _issue_to_dict(
@@ -757,6 +770,7 @@ def _make_payload(**kw) -> dict:
         "team_balanced": kw.get("team_balanced", []),
         "team_pool": kw.get("team_pool", []),
         "insights": kw.get("insights", []),
+        "unmapped_columns": kw.get("unmapped_columns", []),
         "unknown_columns": kw.get("unknown_columns", []),
     }
 
@@ -891,7 +905,12 @@ class TestClassifyBoardColumns:
         assert state_to_role["Closed"] == "done"
         assert unknown == []
 
-    def test_records_unknown_column_when_no_field_values(self):
+    def test_unmapped_column_when_no_field_values_skipped_from_query_set(self):
+        # v1.12.3: presentation-only columns are UI labels (swimlanes/
+        # groupings), not real State enum values. Querying
+        # `State: {Approval Pending}` against a project where that's not a
+        # state triggers 400 — so we surface the column for diagnostics
+        # but never query it.
         board = {
             "columnSettings": {
                 "columns": [
@@ -899,9 +918,25 @@ class TestClassifyBoardColumns:
                 ]
             }
         }
-        state_to_role, unknown = _classify_board_columns(board)
-        assert state_to_role["Approval Pending"] == "triaged"
-        assert "Approval Pending" in unknown
+        state_to_role, unmapped = _classify_board_columns(board)
+        # NOT in the queryable state set
+        assert "Approval Pending" not in state_to_role
+        # IS in the diagnostic list
+        assert "Approval Pending" in unmapped
+
+    def test_mix_of_real_states_and_presentation_only_columns(self):
+        board = {
+            "columnSettings": {
+                "columns": [
+                    {"presentation": "To Do", "fieldValues": [{"name": "To Do"}]},
+                    {"presentation": "Swimlane Label", "fieldValues": []},
+                    {"presentation": "In Progress", "fieldValues": [{"name": "In Progress"}]},
+                ]
+            }
+        }
+        state_to_role, unmapped = _classify_board_columns(board)
+        assert state_to_role == {"To Do": "triaged", "In Progress": "in_progress"}
+        assert unmapped == ["Swimlane Label"]
 
 
 class TestBuildPipelineLaneStates:
