@@ -11,6 +11,7 @@ from yt_mcp.formatters import (
     compile_exclude_patterns, should_exclude, compact_lines,
 )
 from yt_mcp.scoring import _get_priority_name, _days_since_update
+from yt_mcp.tools.deadlines.parser import _is_deadline_field
 
 _SNAPSHOTS_DIR = Path.home() / ".yt-mcp" / "snapshots"
 
@@ -138,6 +139,108 @@ def _format_at_risk_line(
         f"- **{issue_id}** [{state}] {summary}\n"
         f"  {assignee} | {priority} | {extra}"
     )
+
+
+# Estimate / spent-time field matchers. Same decorated-name problem as the
+# deadline field: real projects name these `Evaluation time 🕙` /
+# `Spent time 🚴🏻‍♂️` / `Dev Estimate`, none of which equal a bare
+# "estimate"/"spent" literal. The `([\W_]|$)` boundary lets a trailing
+# emoji or space match while still rejecting partial words ("Estimated").
+_ESTIMATE_FIELD_PATTERNS = (
+    re.compile(
+        r"^(estimation|estimate|dev\s*estimate|dev\s*estimation|"
+        r"evaluation\s*time|total\s*estimate)([\W_]|$)",
+        re.IGNORECASE,
+    ),
+    re.compile(r"^(оценка|оценка\s*времени)([\W_]|$)", re.IGNORECASE),
+)
+_SPENT_FIELD_PATTERNS = (
+    re.compile(r"^(spent\s*time|spent|time\s*spent|logged\s*time)([\W_]|$)", re.IGNORECASE),
+    re.compile(r"^(затрачено|потрачено)([\W_]|$)", re.IGNORECASE),
+)
+
+
+def _is_estimate_field(name: str) -> bool:
+    return bool(name) and any(p.match(name.strip()) for p in _ESTIMATE_FIELD_PATTERNS)
+
+
+def _is_spent_field(name: str) -> bool:
+    return bool(name) and any(p.match(name.strip()) for p in _SPENT_FIELD_PATTERNS)
+
+
+def _period_to_minutes(val) -> int:
+    """Extract minutes from a YT period custom-field value.
+
+    Prefers YT's authoritative `minutes` (correct under the project's work
+    schedule, e.g. 1d = 8h). Falls back to a raw numeric value. We do NOT
+    parse the `presentation` string ("1w 2d 1h") — day/week length is
+    project-configurable, so parsing it ourselves would risk wrong ratios.
+    """
+    if isinstance(val, dict):
+        m = val.get("minutes")
+        return int(m) if isinstance(m, (int, float)) and m else 0
+    if isinstance(val, (int, float)):
+        return int(val)
+    return 0
+
+
+def _extract_deadline_ts(val) -> int | None:
+    """Pull an epoch-ms deadline from a date custom-field value (raw int or
+    a dict carrying a YYYY-MM-DD `presentation`)."""
+    if isinstance(val, (int, float)):
+        return int(val)
+    if isinstance(val, dict):
+        pres = val.get("presentation", "")
+        if pres:
+            try:
+                return int(
+                    datetime.strptime(pres, "%Y-%m-%d")
+                    .replace(tzinfo=timezone.utc)
+                    .timestamp() * 1000
+                )
+            except ValueError:
+                return None
+    return None
+
+
+# Canonical category keys + display titles, in render order. The `category`
+# filter accepts a key or a friendly alias (see _CATEGORY_ALIASES).
+_AT_RISK_CATEGORIES = (
+    ("overdue", "Overdue"),
+    ("approaching", "Deadline approaching"),
+    ("stalled", "Stalled — actively worked on but went silent"),
+    ("over_estimate", "Over estimate"),
+    ("unestimated", "Unestimated"),
+    ("ancient", "Ancient — open too long"),
+    ("forgotten", "Forgotten — filed/paused but idle"),
+)
+_CATEGORY_ALIASES = {
+    "overdue": "overdue",
+    "approaching": "approaching",
+    "deadline approaching": "approaching",
+    "deadline": "approaching",
+    "stalled": "stalled",
+    "stale": "stalled",
+    "over_estimate": "over_estimate",
+    "over estimate": "over_estimate",
+    "overestimate": "over_estimate",
+    "unestimated": "unestimated",
+    "no estimate": "unestimated",
+    "unestimate": "unestimated",
+    "ancient": "ancient",
+    "forgotten": "forgotten",
+}
+
+
+def _risk_record(
+    issue_id: str, state: str, summary: str, assignee: str, priority: str, detail: str,
+) -> dict:
+    """A JSON-friendly at-risk record. `detail` is the human metric string
+    (e.g. '5d overdue'); markdown renders from the same dict."""
+    return {
+        "id": issue_id, "state": state, "summary": summary,
+        "assignee": assignee, "priority": priority, "detail": detail,
+    }
 
 
 def register(mcp, resolver: InstanceResolver):
@@ -293,22 +396,46 @@ def register(mcp, resolver: InstanceResolver):
         limit_per_category: int = 10,
         deadline_warning_days: int = 7,
         exclude_patterns: str = "",
+        category: str = "",
+        format: str = "report",
         instance: str = "",
     ) -> str:
         """Find at-risk issues: overdue, stalled, forgotten, unestimated, over estimate, ancient.
+
+        Deadline / estimate / spent-time fields are matched by name *pattern*,
+        so decorated field names (`Deadline ☠️`, `Evaluation time 🕙`,
+        `Spent time 🚴🏻‍♂️`, `Dev Estimate`) are recognized — not just bare
+        literals.
 
         Args:
             project: Project short name
             stale_days: Days idle for In Progress (default: 7)
             forgotten_days: Days idle for Submitted/Pause (default: 30)
             ancient_days: Days open to flag (default: 200)
-            limit_per_category: Max per category (default: 10)
+            limit_per_category: Max per category in report mode (default: 10).
+                Ignored when format="json" — JSON returns the full set.
             deadline_warning_days: Days before deadline warning (default: 7)
             exclude_patterns: Comma-separated regex to exclude
+            category: Restrict to one bucket — overdue, approaching, stalled,
+                over_estimate, unestimated, ancient, forgotten (aliases
+                accepted). Empty = all categories.
+            format: "report" (default markdown) or "json" (structured payload
+                with per-category counts + full issue lists, for programmatic
+                consumers like a daily deadline bot).
             instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
         patterns = compile_exclude_patterns(exclude_patterns) or _DEFAULT_EXCLUDE_PATTERNS
+
+        # Resolve the category filter early so a typo fails fast with help.
+        category_key = ""
+        if category:
+            category_key = _CATEGORY_ALIASES.get(category.strip().lower(), "")
+            if not category_key:
+                valid = ", ".join(k for k, _ in _AT_RISK_CATEGORIES)
+                return (
+                    f"Unknown category '{category}'. Valid categories: {valid}."
+                )
 
         at_risk_fields = (
             "idReadable,summary,updated,created,state(name),priority(name),"
@@ -355,9 +482,9 @@ def register(mcp, resolver: InstanceResolver):
             days_idle = _days_since_update(issue)
 
             if state_lower in working_states and days_idle >= stale_days:
-                stalled.append((days_idle, _format_at_risk_line(
+                stalled.append((days_idle, _risk_record(
                     issue_id, state, summary, assignee, priority,
-                    f"**{days_idle}d without updates**",
+                    f"{days_idle}d without updates",
                 )))
             elif (
                 state_lower in waiting_states
@@ -365,74 +492,62 @@ def register(mcp, resolver: InstanceResolver):
                 and state_lower not in COMPLETION_STATES
                 and days_idle >= forgotten_days
             ):
-                forgotten.append((days_idle, _format_at_risk_line(
+                forgotten.append((days_idle, _risk_record(
                     issue_id, state, summary, assignee, priority,
-                    f"**{days_idle}d without updates**",
+                    f"{days_idle}d without updates",
                 )))
 
-            # Scan custom fields once for deadline and estimate data
+            # Scan custom fields once for deadline and estimate data.
+            # Field names are matched by PATTERN (not exact literal) so
+            # decorated names like `Deadline ☠️` / `Evaluation time 🕙` /
+            # `Spent time 🚴🏻‍♂️` are recognized. First non-zero estimate/
+            # spent field wins (deterministic when several exist).
             custom_fields = issue.get("customFields", [])
             estimate_minutes = 0
             spent_minutes = 0
 
             for cf in custom_fields:
-                cf_name = cf.get("name", "").lower()
+                cf_name = cf.get("name", "")
                 val = cf.get("value")
                 if val is None:
                     continue
 
-                # Deadline check
-                if cf_name in ("deadline", "due date", "due"):
-                    deadline_ts = None
-                    if isinstance(val, (int, float)):
-                        deadline_ts = val
-                    elif isinstance(val, dict):
-                        pres = val.get("presentation", "")
-                        if pres:
-                            try:
-                                deadline_ts = int(
-                                    datetime.strptime(pres, "%Y-%m-%d")
-                                    .replace(tzinfo=timezone.utc)
-                                    .timestamp() * 1000
-                                )
-                            except ValueError:
-                                pass
+                if _is_deadline_field(cf_name):
+                    deadline_ts = _extract_deadline_ts(val)
                     if deadline_ts:
                         deadline_dt = datetime.fromtimestamp(deadline_ts / 1000, tz=timezone.utc)
                         days_left = (deadline_dt - now).days
                         deadline_str = deadline_dt.strftime("%Y-%m-%d")
 
                         if days_left < 0:
-                            overdue.append((abs(days_left), _format_at_risk_line(
+                            overdue.append((abs(days_left), _risk_record(
                                 issue_id, state, summary, assignee, priority,
-                                f"Deadline: {deadline_str} (**{abs(days_left)}d overdue**)",
+                                f"Deadline {deadline_str} ({abs(days_left)}d overdue)",
                             )))
                         elif days_left <= deadline_warning_days:
-                            approaching.append((days_left, _format_at_risk_line(
+                            approaching.append((days_left, _risk_record(
                                 issue_id, state, summary, assignee, priority,
-                                f"Deadline: {deadline_str} (**{days_left}d left**)",
+                                f"Deadline {deadline_str} ({days_left}d left)",
                             )))
-
-                # Estimate check
-                elif cf_name in ("estimation", "estimate", "dev estimate", "dev estimation"):
-                    estimate_minutes = val.get("minutes", 0) or 0 if isinstance(val, dict) else int(val) if isinstance(val, (int, float)) else 0
-                elif cf_name in ("spent time", "spent"):
-                    spent_minutes = val.get("minutes", 0) or 0 if isinstance(val, dict) else int(val) if isinstance(val, (int, float)) else 0
+                elif estimate_minutes == 0 and _is_estimate_field(cf_name):
+                    estimate_minutes = _period_to_minutes(val)
+                elif spent_minutes == 0 and _is_spent_field(cf_name):
+                    spent_minutes = _period_to_minutes(val)
 
             if estimate_minutes > 0 and spent_minutes > estimate_minutes:
                 ratio = spent_minutes / estimate_minutes
                 est_str = f"{estimate_minutes // 60}h" if estimate_minutes >= 60 else f"{estimate_minutes}m"
                 spent_str = f"{spent_minutes // 60}h" if spent_minutes >= 60 else f"{spent_minutes}m"
-                over_estimate.append((ratio, _format_at_risk_line(
+                over_estimate.append((ratio, _risk_record(
                     issue_id, state, summary, assignee, priority,
-                    f"Estimate: {est_str}, Spent: {spent_str} (**{ratio:.0%}**)",
+                    f"Estimate {est_str}, Spent {spent_str} ({ratio:.0%})",
                 )))
 
             # Unestimated: active issues without estimation
             if estimate_minutes == 0 and state_lower in (working_states | waiting_states):
-                unestimated.append((days_idle, _format_at_risk_line(
+                unestimated.append((days_idle, _risk_record(
                     issue_id, state, summary, assignee, priority,
-                    "**no estimation**",
+                    "no estimation",
                 )))
 
             # Ancient: open for too long (pause + completion states excluded)
@@ -444,47 +559,78 @@ def register(mcp, resolver: InstanceResolver):
             ):
                 days_open = (now - datetime.fromtimestamp(created_ms / 1000, tz=timezone.utc)).days
                 if days_open >= ancient_days:
-                    ancient.append((days_open, _format_at_risk_line(
+                    ancient.append((days_open, _risk_record(
                         issue_id, state, summary, assignee, priority,
-                        f"**{days_open}d old**",
+                        f"{days_open}d old",
                     )))
 
-        overdue.sort(key=lambda x: x[0], reverse=True)
+        # `approaching` sorts ascending (soonest deadline first); the rest
+        # sort descending on their severity metric (most overdue / stalest
+        # / oldest first).
         approaching.sort(key=lambda x: x[0])
-        stalled.sort(key=lambda x: x[0], reverse=True)
-        forgotten.sort(key=lambda x: x[0], reverse=True)
-        over_estimate.sort(key=lambda x: x[0], reverse=True)
-        unestimated.sort(key=lambda x: x[0], reverse=True)
-        ancient.sort(key=lambda x: x[0], reverse=True)
+        for bucket in (overdue, stalled, forgotten, over_estimate, unestimated, ancient):
+            bucket.sort(key=lambda x: x[0], reverse=True)
 
-        total_risks = len(overdue) + len(approaching) + len(stalled) + len(forgotten) + len(over_estimate) + len(unestimated) + len(ancient)
+        bucket_by_key = {
+            "overdue": overdue, "approaching": approaching, "stalled": stalled,
+            "over_estimate": over_estimate, "unestimated": unestimated,
+            "ancient": ancient, "forgotten": forgotten,
+        }
+        # Apply the optional single-category filter.
+        active_categories = (
+            [(category_key, dict(_AT_RISK_CATEGORIES)[category_key])]
+            if category_key
+            else list(_AT_RISK_CATEGORIES)
+        )
+
+        total_risks = sum(len(b) for b in bucket_by_key.values())
+        thresholds = {
+            "stale_days": stale_days, "forgotten_days": forgotten_days,
+            "ancient_days": ancient_days, "deadline_warning_days": deadline_warning_days,
+        }
+
+        if format == "json":
+            categories_out: dict[str, dict] = {}
+            for key, _title in active_categories:
+                items = bucket_by_key[key]
+                # JSON returns the full set (source already bounded by $top=500).
+                categories_out[key] = {
+                    "count": len(items),
+                    "issues": [rec for _v, rec in items],
+                }
+            payload = {
+                "project": project,
+                "total_at_risk": total_risks,
+                "thresholds": thresholds,
+                "categories": categories_out,
+            }
+            if category_key:
+                payload["filtered_category"] = category_key
+            return json.dumps(payload, indent=2, ensure_ascii=False)
 
         if total_risks == 0:
             return f"No at-risk issues found in **{project}** (stale: {stale_days}d, forgotten: {forgotten_days}d)."
 
-        lines = [
-            f"# At Risk Issues — {project}",
-            f"**Total at risk:** {total_risks}",
-            "",
-        ]
+        header = f"# At Risk Issues — {project}"
+        if category_key:
+            header += f" · {dict(_AT_RISK_CATEGORIES)[category_key]}"
+        lines = [header, f"**Total at risk:** {total_risks}", ""]
 
-        def _append_category(title: str, items: list[tuple[int | float, str]]) -> None:
+        def _append_category(title: str, items: list[tuple[int | float, dict]]) -> None:
             if not items:
                 return
             lines.append(f"## {title} ({len(items)})")
-            for _, line in items[:limit_per_category]:
-                lines.append(line)
+            for _, rec in items[:limit_per_category]:
+                lines.append(_format_at_risk_line(
+                    rec["id"], rec["state"], rec["summary"],
+                    rec["assignee"], rec["priority"], f"**{rec['detail']}**",
+                ))
             if len(items) > limit_per_category:
                 lines.append(f"_...and {len(items) - limit_per_category} more_")
             lines.append("")
 
-        _append_category("Overdue", overdue)
-        _append_category("Deadline approaching", approaching)
-        _append_category("Stalled — actively worked on but went silent", stalled)
-        _append_category("Over estimate", over_estimate)
-        _append_category("Unestimated", unestimated)
-        _append_category("Ancient — open too long", ancient)
-        _append_category("Forgotten — filed/paused but idle", forgotten)
+        for key, title in active_categories:
+            _append_category(title, bucket_by_key[key])
 
         return compact_lines(lines)
 
