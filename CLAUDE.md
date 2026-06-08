@@ -5,7 +5,7 @@ YouTrack MCP server. 77 tools across 19 modules.
 ## Build & test
 
 ```bash
-uv run python -m pytest tests/ -q     # run all tests (627+)
+uv run python -m pytest tests/ -q     # run all tests (657+)
 uv run python -m pytest tests/ -v      # verbose
 uv pip install -e .                     # editable install
 ```

@@ -272,3 +272,161 @@ class TestBareFieldNamesRegression:
         mcp, _ = _make_mcp([issue])
         out = await _fn(mcp, "get_at_risk_issues")(project="PROJ", format="json")
         assert json.loads(out)["categories"]["overdue"]["count"] == 1
+
+
+# --- QA-skip compliance signal --------------------------------------------
+
+from yt_mcp.tools.monitoring import (
+    _is_qa_required_field, _qa_required_affirmative, _passed_qa_state,
+)
+
+
+def _qa_cf(value="Yes"):
+    return {"name": "QA Required", "value": {"name": value}}
+
+
+def _state_act(from_state, to_state):
+    return {
+        "field": {"name": "State"},
+        "added": [{"name": to_state}],
+        "removed": [{"name": from_state}],
+    }
+
+
+def _make_routing_mcp(issues, activities_by_id=None):
+    """Mock client that routes the bulk /api/issues query and per-issue
+    /activities fetches separately, so the QA-skip history walk is exercised."""
+    activities_by_id = activities_by_id or {}
+    mcp = FastMCP("test")
+    client = MagicMock()
+
+    async def _get(path, params=None):
+        if path == "/api/issues":
+            return issues
+        if path.endswith("/activities"):
+            iid = path.split("/")[3]
+            return activities_by_id.get(iid, [])
+        return {}
+
+    client.get = AsyncMock(side_effect=_get)
+    resolver = MagicMock(spec=InstanceResolver)
+    resolver.resolve = MagicMock(return_value=client)
+    _register_monitoring(mcp, resolver)
+    return mcp, client
+
+
+class TestQaRequiredMatchers:
+    @pytest.mark.parametrize("name", [
+        "QA Required", "QA Needed", "Requires QA", "Needs QA", "QA Gate",
+    ])
+    def test_field_matches(self, name):
+        assert _is_qa_required_field(name) is True
+
+    @pytest.mark.parametrize("name", ["Quality", "QA Owner", "State", ""])
+    def test_field_rejects(self, name):
+        assert _is_qa_required_field(name) is False
+
+    @pytest.mark.parametrize("val,expected", [
+        ({"name": "Yes"}, True), ({"name": "No"}, False),
+        ({"name": "Required"}, True), ("yes", True), (True, True), (False, False),
+        ({"name": "Да"}, True), (None, False),
+    ])
+    def test_affirmative(self, val, expected):
+        assert _qa_required_affirmative(val) is expected
+
+
+class TestPassedQaState:
+    def test_true_when_history_has_qa_state(self):
+        assert _passed_qa_state([_state_act("In Progress", "On testing")]) is True
+
+    def test_true_when_qa_on_removed_side(self):
+        # Was in QA, then moved out — still counts as passed.
+        assert _passed_qa_state([_state_act("Ready for test", "Ready for release")]) is True
+
+    def test_false_when_no_qa_state(self):
+        assert _passed_qa_state([_state_act("In Progress", "Ready for release")]) is False
+
+    def test_false_on_empty(self):
+        assert _passed_qa_state([]) is False
+
+    def test_ignores_non_state_activities(self):
+        assert _passed_qa_state([{"field": {"name": "Assignee"}, "added": [{"name": "x"}]}]) is False
+
+
+class TestQaSkipDetection:
+    @pytest.mark.asyncio
+    async def test_fires_when_qa_required_release_without_qa_history(self):
+        issue = _issue(id="PROJ-1", state="Ready for release", custom_fields=[_qa_cf("Yes")])
+        acts = {"PROJ-1": [_state_act("In Progress", "Ready for release")]}
+        mcp, _ = _make_routing_mcp([issue], acts)
+        out = await _fn(mcp, "get_at_risk_issues")(project="PROJ", format="json")
+        payload = json.loads(out)
+        assert payload["categories"]["qa_skipped"]["count"] == 1
+        rec = payload["categories"]["qa_skipped"]["issues"][0]
+        assert rec["id"] == "PROJ-1"
+        assert "never entered QA" in rec["detail"]
+
+    @pytest.mark.asyncio
+    async def test_does_not_fire_when_qa_in_history(self):
+        issue = _issue(id="PROJ-2", state="Ready for release", custom_fields=[_qa_cf("Yes")])
+        acts = {"PROJ-2": [
+            _state_act("In Progress", "On testing"),
+            _state_act("On testing", "Ready for release"),
+        ]}
+        mcp, _ = _make_routing_mcp([issue], acts)
+        out = await _fn(mcp, "get_at_risk_issues")(project="PROJ", format="json")
+        assert json.loads(out)["categories"]["qa_skipped"]["count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_does_not_fire_when_qa_required_no(self):
+        issue = _issue(id="PROJ-3", state="Ready for release", custom_fields=[_qa_cf("No")])
+        mcp, client = _make_routing_mcp([issue], {})
+        out = await _fn(mcp, "get_at_risk_issues")(project="PROJ", format="json")
+        assert json.loads(out)["categories"]["qa_skipped"]["count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_does_not_fire_when_not_at_release_gate(self):
+        # QA Required=Yes but still in dev — not a candidate (too early).
+        issue = _issue(id="PROJ-4", state="In Progress", custom_fields=[_qa_cf("Yes")])
+        mcp, client = _make_routing_mcp([issue], {})
+        out = await _fn(mcp, "get_at_risk_issues")(project="PROJ", format="json")
+        assert json.loads(out)["categories"]["qa_skipped"]["count"] == 0
+        # No history walk happened — only the bulk query.
+        assert client.get.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_no_qa_field_means_zero_candidates_and_no_history_walk(self):
+        # Common-tool: a project without a QA-gating field pays nothing.
+        issue = _issue(id="PROJ-5", state="Ready for release", custom_fields=[])
+        mcp, client = _make_routing_mcp([issue], {})
+        out = await _fn(mcp, "get_at_risk_issues")(project="PROJ", format="json")
+        assert json.loads(out)["categories"]["qa_skipped"]["count"] == 0
+        assert client.get.call_count == 1  # no /activities calls
+
+    @pytest.mark.asyncio
+    async def test_empty_history_is_inconclusive_not_flagged(self):
+        issue = _issue(id="PROJ-6", state="Ready for release", custom_fields=[_qa_cf("Yes")])
+        mcp, _ = _make_routing_mcp([issue], {"PROJ-6": []})  # no history
+        out = await _fn(mcp, "get_at_risk_issues")(project="PROJ", format="json")
+        assert json.loads(out)["categories"]["qa_skipped"]["count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_category_filter_overdue_skips_qa_history_walk(self):
+        # When only 'overdue' is requested, the QA history walk must not run.
+        issue = _issue(id="PROJ-7", state="Ready for release", custom_fields=[_qa_cf("Yes")])
+        mcp, client = _make_routing_mcp(
+            [issue], {"PROJ-7": [_state_act("In Progress", "Ready for release")]},
+        )
+        await _fn(mcp, "get_at_risk_issues")(project="PROJ", category="overdue", format="json")
+        assert client.get.call_count == 1  # bulk only, no /activities
+
+    @pytest.mark.asyncio
+    async def test_category_qa_alias_and_filter(self):
+        issue = _issue(id="PROJ-8", state="Done", custom_fields=[_qa_cf("Yes")])
+        acts = {"PROJ-8": [_state_act("In Progress", "Done")]}
+        mcp, _ = _make_routing_mcp([issue], acts)
+        out = await _fn(mcp, "get_at_risk_issues")(project="PROJ", category="qa", format="json")
+        payload = json.loads(out)
+        assert list(payload["categories"].keys()) == ["qa_skipped"]
+        assert payload["categories"]["qa_skipped"]["count"] == 1
+        assert payload["filtered_category"] == "qa_skipped"

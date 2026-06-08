@@ -203,10 +203,62 @@ def _extract_deadline_ts(val) -> int | None:
     return None
 
 
+# QA-gating field. Projects that enforce QA add a required enum like
+# `QA Required: Yes/No`. Matched by pattern (decoration-tolerant, like the
+# deadline/estimate fields) so it works across teams without per-project
+# config — absent field simply yields no candidates (zero cost, zero noise).
+_QA_REQUIRED_FIELD_PATTERNS = (
+    re.compile(r"^(qa\s*required|qa\s*needed|requires?\s*qa|needs?\s*qa|qa\s*gate)([\W_]|$)", re.IGNORECASE),
+    re.compile(r"^(нужно\s*qa|требуется\s*qa|qa\s*обязателен)([\W_]|$)", re.IGNORECASE),
+)
+_QA_AFFIRMATIVE = frozenset({"yes", "y", "true", "required", "да", "требуется", "нужно"})
+
+# Cap on how many QA-skip suspects get a (per-issue) history walk, so a team
+# with an unusually large release queue can't make this tool expensive. If
+# exceeded we walk the stalest N and note the rest (no silent truncation).
+_QA_SKIP_CHECK_MAX = 80
+
+
+def _is_qa_required_field(name: str) -> bool:
+    return bool(name) and any(p.match(name.strip()) for p in _QA_REQUIRED_FIELD_PATTERNS)
+
+
+def _qa_required_affirmative(val) -> bool:
+    """True when a QA-Required field value means 'QA is required'."""
+    if isinstance(val, bool):
+        return val
+    name = ""
+    if isinstance(val, dict):
+        name = (val.get("name") or "").strip().lower()
+    elif isinstance(val, str):
+        name = val.strip().lower()
+    elif isinstance(val, list) and val and isinstance(val[0], dict):
+        name = (val[0].get("name") or "").strip().lower()
+    return name in _QA_AFFIRMATIVE
+
+
+def _passed_qa_state(activities: list[dict]) -> bool:
+    """True if the issue's state history ever touched a QA-role state.
+
+    Walks both `added` and `removed` sides so an issue that *was* in QA and
+    moved on still counts as 'passed QA'. Role classification is shared with
+    the handoff tool (single source of pipeline-role truth)."""
+    from yt_mcp.tools.handoffs import classify_handoff_role
+    for act in activities or []:
+        if (act.get("field") or {}).get("name", "").lower() != "state":
+            continue
+        for side in ("added", "removed"):
+            for s in act.get(side) or []:
+                if isinstance(s, dict) and classify_handoff_role(s.get("name", "")) == "qa":
+                    return True
+    return False
+
+
 # Canonical category keys + display titles, in render order. The `category`
 # filter accepts a key or a friendly alias (see _CATEGORY_ALIASES).
 _AT_RISK_CATEGORIES = (
     ("overdue", "Overdue"),
+    ("qa_skipped", "QA skipped — required but never passed a QA state"),
     ("approaching", "Deadline approaching"),
     ("stalled", "Stalled — actively worked on but went silent"),
     ("over_estimate", "Over estimate"),
@@ -216,6 +268,13 @@ _AT_RISK_CATEGORIES = (
 )
 _CATEGORY_ALIASES = {
     "overdue": "overdue",
+    "qa_skipped": "qa_skipped",
+    "qa skipped": "qa_skipped",
+    "qa": "qa_skipped",
+    "qa skip": "qa_skipped",
+    "skipped qa": "qa_skipped",
+    "qa compliance": "qa_skipped",
+    "qa_compliance": "qa_skipped",
     "approaching": "approaching",
     "deadline approaching": "approaching",
     "deadline": "approaching",
@@ -230,6 +289,10 @@ _CATEGORY_ALIASES = {
     "ancient": "ancient",
     "forgotten": "forgotten",
 }
+
+# Current-state roles that mean "QA should already be done" — the window
+# where a QA-required-but-skipped issue is catchable before final close.
+_QA_GATE_ROLES = frozenset({"release", "done"})
 
 
 def _risk_record(
@@ -400,12 +463,19 @@ def register(mcp, resolver: InstanceResolver):
         format: str = "report",
         instance: str = "",
     ) -> str:
-        """Find at-risk issues: overdue, stalled, forgotten, unestimated, over estimate, ancient.
+        """Find at-risk issues: overdue, qa_skipped, stalled, forgotten, unestimated, over estimate, ancient.
 
-        Deadline / estimate / spent-time fields are matched by name *pattern*,
-        so decorated field names (`Deadline ☠️`, `Evaluation time 🕙`,
-        `Spent time 🚴🏻‍♂️`, `Dev Estimate`) are recognized — not just bare
-        literals.
+        Deadline / estimate / spent-time / QA-required fields are matched by
+        name *pattern*, so decorated field names (`Deadline ☠️`,
+        `Evaluation time 🕙`, `Spent time 🚴🏻‍♂️`, `Dev Estimate`,
+        `QA Required`) are recognized — not just bare literals.
+
+        QA-skip: when a project has a QA-gating field (e.g. `QA Required: Yes`),
+        an issue that reached a release/done state while QA was required is
+        confirmed against its state history — flagged only if it NEVER passed
+        a QA state (true skip, not merely "QA pending"). Projects without such
+        a field produce no QA-skip candidates (zero added cost). The per-issue
+        history walk runs only when this category is in scope.
 
         Args:
             project: Project short name
@@ -416,9 +486,9 @@ def register(mcp, resolver: InstanceResolver):
                 Ignored when format="json" — JSON returns the full set.
             deadline_warning_days: Days before deadline warning (default: 7)
             exclude_patterns: Comma-separated regex to exclude
-            category: Restrict to one bucket — overdue, approaching, stalled,
-                over_estimate, unestimated, ancient, forgotten (aliases
-                accepted). Empty = all categories.
+            category: Restrict to one bucket — overdue, qa_skipped, approaching,
+                stalled, over_estimate, unestimated, ancient, forgotten
+                (aliases accepted). Empty = all categories.
             format: "report" (default markdown) or "json" (structured payload
                 with per-category counts + full issue lists, for programmatic
                 consumers like a daily deadline bot).
@@ -471,6 +541,14 @@ def register(mcp, resolver: InstanceResolver):
         over_estimate: list[tuple[float, str]] = []
         unestimated: list[tuple[int, str]] = []
         ancient: list[tuple[int, str]] = []
+        qa_skipped: list[tuple[int, dict]] = []
+
+        # Only walk per-issue history for QA-skip when that category is in
+        # scope (no filter, or category=qa_skipped). Candidates are gathered
+        # cheaply in the bulk loop; the (bounded) history walk happens after.
+        from yt_mcp.tools.handoffs import classify_handoff_role
+        qa_in_scope = (not category_key) or category_key == "qa_skipped"
+        qa_candidates: list[tuple[int, str, dict]] = []  # (days_idle, issue_id, record)
 
         for issue in all_issues:
             issue_id = issue.get("idReadable", "?")
@@ -505,6 +583,7 @@ def register(mcp, resolver: InstanceResolver):
             custom_fields = issue.get("customFields", [])
             estimate_minutes = 0
             spent_minutes = 0
+            qa_required_yes = False
 
             for cf in custom_fields:
                 cf_name = cf.get("name", "")
@@ -529,10 +608,25 @@ def register(mcp, resolver: InstanceResolver):
                                 issue_id, state, summary, assignee, priority,
                                 f"Deadline {deadline_str} ({days_left}d left)",
                             )))
+                elif _is_qa_required_field(cf_name):
+                    qa_required_yes = _qa_required_affirmative(val)
                 elif estimate_minutes == 0 and _is_estimate_field(cf_name):
                     estimate_minutes = _period_to_minutes(val)
                 elif spent_minutes == 0 and _is_spent_field(cf_name):
                     spent_minutes = _period_to_minutes(val)
+
+            # QA-skip candidate: QA is required AND the issue has reached the
+            # release/done gate (where QA should already be done). Whether it
+            # actually skipped QA is confirmed from history after the loop.
+            if (
+                qa_in_scope
+                and qa_required_yes
+                and classify_handoff_role(state) in _QA_GATE_ROLES
+            ):
+                qa_candidates.append((days_idle, issue_id, _risk_record(
+                    issue_id, state, summary, assignee, priority,
+                    f"QA Required, now [{state}] — verifying QA history",
+                )))
 
             if estimate_minutes > 0 and spent_minutes > estimate_minutes:
                 ratio = spent_minutes / estimate_minutes
@@ -564,17 +658,37 @@ def register(mcp, resolver: InstanceResolver):
                         f"{days_open}d old",
                     )))
 
+        # QA-skip confirmation: walk history for the (small) candidate set.
+        # Only candidates whose history NEVER touched a QA state are real
+        # skips. Empty/unavailable history is inconclusive — not flagged,
+        # to avoid false alarms.
+        qa_skip_unchecked = 0
+        if qa_candidates:
+            from yt_mcp.tools.deadlines.fetcher import fetch_activities_only_bounded
+
+            qa_candidates.sort(key=lambda x: x[0], reverse=True)  # stalest first
+            checked = qa_candidates[:_QA_SKIP_CHECK_MAX]
+            qa_skip_unchecked = len(qa_candidates) - len(checked)
+
+            cand_ids = [iid for _d, iid, _r in checked]
+            activities_per = await fetch_activities_only_bounded(client, cand_ids)
+            for (days_idle, _iid, rec), activities in zip(checked, activities_per):
+                if activities and not _passed_qa_state(activities):
+                    rec = dict(rec)
+                    rec["detail"] = f"QA Required but never entered QA — now [{rec['state']}]"
+                    qa_skipped.append((days_idle, rec))
+
         # `approaching` sorts ascending (soonest deadline first); the rest
         # sort descending on their severity metric (most overdue / stalest
         # / oldest first).
         approaching.sort(key=lambda x: x[0])
-        for bucket in (overdue, stalled, forgotten, over_estimate, unestimated, ancient):
+        for bucket in (overdue, qa_skipped, stalled, forgotten, over_estimate, unestimated, ancient):
             bucket.sort(key=lambda x: x[0], reverse=True)
 
         bucket_by_key = {
-            "overdue": overdue, "approaching": approaching, "stalled": stalled,
-            "over_estimate": over_estimate, "unestimated": unestimated,
-            "ancient": ancient, "forgotten": forgotten,
+            "overdue": overdue, "qa_skipped": qa_skipped, "approaching": approaching,
+            "stalled": stalled, "over_estimate": over_estimate,
+            "unestimated": unestimated, "ancient": ancient, "forgotten": forgotten,
         }
         # Apply the optional single-category filter.
         active_categories = (
@@ -606,6 +720,8 @@ def register(mcp, resolver: InstanceResolver):
             }
             if category_key:
                 payload["filtered_category"] = category_key
+            if qa_skip_unchecked:
+                payload["qa_skip_unchecked"] = qa_skip_unchecked
             return json.dumps(payload, indent=2, ensure_ascii=False)
 
         if total_risks == 0:
@@ -631,6 +747,13 @@ def register(mcp, resolver: InstanceResolver):
 
         for key, title in active_categories:
             _append_category(title, bucket_by_key[key])
+
+        if qa_skip_unchecked:
+            lines.append(
+                f"_QA-skip: checked stalest {_QA_SKIP_CHECK_MAX} of "
+                f"{_QA_SKIP_CHECK_MAX + qa_skip_unchecked} candidates; "
+                f"{qa_skip_unchecked} not history-walked._"
+            )
 
         return compact_lines(lines)
 
