@@ -67,6 +67,12 @@ def main():
 
     parser = argparse.ArgumentParser(description="YouTrack MCP server")
     parser.add_argument(
+        "--version",
+        action="version",
+        version=__version__,
+        help="Print the version and exit",
+    )
+    parser.add_argument(
         "--transport",
         choices=["stdio", "sse", "streamable-http"],
         default="stdio",
