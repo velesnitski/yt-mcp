@@ -80,3 +80,14 @@ Before every push: `grep -rn "acme\|acme\|acme\|VPN" --include="*.py" --include=
 - Tool count assertions in `test_registration.py` and `test_server.py`
 - Update `WRITE_TOOLS` set when adding write tools
 - Generic names only: "PROJ-123", "Alpha", "OPS-423", "DEMO-42"
+
+## `/mcp` version label
+
+The `/mcp` dialog labels servers by their **config key** in
+`~/.claude.json`, not by `serverInfo.name`. The server already self-reports
+`youtrack v<version>` (via `_SERVER_NAME` in `server.py`), but that only
+shows in the instructions header — never in the dialog. After a version
+bump, run `python3 scripts/sync-mcp-label.py` to re-key the entry to
+`youtrack v<version>` across all config containers, then reconnect `/mcp`.
+Check the running build any time with `uv run yt-mcp --version`. See
+ADR-011. (Fleet pattern shared with zbbx-mcp / slk-mcp.)
