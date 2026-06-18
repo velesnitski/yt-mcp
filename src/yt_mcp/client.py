@@ -106,6 +106,17 @@ class YouTrackClient:
         await self._handle_error(resp)
         return resp.json() if resp.content else {}
 
+    async def post_multipart(self, path: str, files: dict, params: dict | None = None):
+        """POST multipart/form-data — for file uploads (e.g. attachments).
+
+        Deliberately does NOT set the JSON content-type: httpx derives the
+        multipart boundary from `files=`, which the JSON `post()` can't do.
+        `files` is httpx-shaped: {"file": (filename, bytes, mime_type)}.
+        """
+        resp = await self._client.post(path, files=files, params=params)
+        await self._handle_error(resp)
+        return resp.json() if resp.content else {}
+
     async def delete(self, path: str) -> None:
         resp = await self._client.delete(path)
         await self._handle_error(resp)

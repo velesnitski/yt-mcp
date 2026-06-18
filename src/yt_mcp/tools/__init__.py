@@ -12,6 +12,7 @@ WRITE_TOOLS = frozenset({
     "add_comment",
     "update_comment",
     "delete_comment",
+    "add_attachment",
     "add_issue_link",
     "remove_issue_link",
     "add_work_item",
