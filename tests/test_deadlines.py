@@ -613,6 +613,20 @@ class TestScorecardTool:
             {"alice.user": {"primary": "bob.manager", "also_accept": []}}
         ))
 
+        # Freeze "now" to mid-Q2 so the scenario is deterministic: ALPHA-1's
+        # extended deadline (2026-06-20) stays in the FUTURE (not yet missed),
+        # while ALPHA-2's (2026-04-15) is already past. Without this the test
+        # was a time bomb — it silently broke once wall-clock passed
+        # 2026-06-20, reclassifying ALPHA-1 as a (missed-after-extension) miss.
+        from yt_mcp.tools.deadlines import scorecard as _scorecard_mod
+
+        class _FrozenNow(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return datetime(2026, 5, 12, tzinfo=tz or timezone.utc)
+
+        monkeypatch.setattr(_scorecard_mod, "datetime", _FrozenNow)
+
         # ISSUE-1: compliant_strict shift (Bob, the approver, did it himself)
         # ISSUE-2: missed deadline, never had a shift. Should be missed_no_extension.
         shift_ts = int(datetime(2026, 4, 20, tzinfo=timezone.utc).timestamp() * 1000)
