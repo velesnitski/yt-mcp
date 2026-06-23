@@ -391,3 +391,64 @@ class TestRewriteOrClauses:
         new, changes = rewrite_or_clauses(q)
         assert new == q
         assert changes == []
+
+
+# --- format_issue_detail null-value robustness (Sentry crash repro) ---------
+#
+# Production crash: get_issue on an issue whose comment had `text: null`
+# crashed at `c.get("text", "")[:200]` — YouTrack sends the key present with
+# a null value, so the `.get` default never fires and None gets subscripted.
+# Same "key present, value null" class hits author / linkType / summary.
+
+import yt_mcp.formatters as _fmt
+
+
+def _issue_with_nulls() -> dict:
+    return {
+        "idReadable": "PROJ-1",
+        "summary": None,            # null summary
+        "description": None,
+        "state": {"name": "Open"},
+        "tags": [],
+        "links": [{
+            "linkType": None,        # null linkType
+            "direction": "outward",
+            "issues": [{"idReadable": "PROJ-2", "summary": None, "state": None}],
+        }],
+        "comments": [
+            {"author": None, "text": None},                       # both null
+            {"author": {"name": "Alice"}, "text": None},          # null text only
+            {"author": None, "text": "real comment"},             # null author only
+        ],
+    }
+
+
+class TestFormatIssueDetailNullSafety:
+    def test_non_compact_does_not_crash(self, monkeypatch):
+        monkeypatch.setattr(_fmt, "COMPACT", False)
+        out = format_issue_detail(_issue_with_nulls())
+        assert "PROJ-1" in out
+        assert "real comment" in out
+        assert "None" not in out  # null fields must render empty, not "None"
+
+    def test_compact_does_not_crash(self, monkeypatch):
+        # This is the exact path that crashed in production (line ~333).
+        monkeypatch.setattr(_fmt, "COMPACT", True)
+        out = format_issue_detail(_issue_with_nulls())
+        assert "PROJ-1" in out
+        assert "real comment" in out
+
+    def test_null_comments_list_itself(self, monkeypatch):
+        monkeypatch.setattr(_fmt, "COMPACT", False)
+        # `comments: null` (key present, null) must not crash either.
+        data = {"idReadable": "PROJ-9", "summary": "x", "state": {"name": "Open"},
+                "comments": None, "links": None, "tags": None}
+        out = format_issue_detail(data)
+        assert "PROJ-9" in out
+
+    def test_compact_null_comments_list(self, monkeypatch):
+        monkeypatch.setattr(_fmt, "COMPACT", True)
+        data = {"idReadable": "PROJ-9", "summary": "x", "state": {"name": "Open"},
+                "comments": None, "links": None, "tags": None}
+        out = format_issue_detail(data)
+        assert "PROJ-9" in out

@@ -288,13 +288,13 @@ def format_issue_list(issues: list) -> str:
             prod_str = f"|{product}" if product else ""
             lines.append(
                 f"{issue.get('idReadable', '?')}|{state_name}{prod_str}|"
-                f"{issue.get('summary', '')}|{assignee_name}"
+                f"{issue.get('summary') or ''}|{assignee_name}"
             )
         else:
             product_str = f" ({product})" if product else ""
             lines.append(
                 f"- **{issue.get('idReadable', '?')}** [{state_name}]{product_str} "
-                f"{issue.get('summary', 'No summary')} → {assignee_name}"
+                f"{issue.get('summary') or 'No summary'} → {assignee_name}"
             )
     return "\n".join(lines)
 
@@ -304,38 +304,43 @@ def format_issue_detail(data: dict) -> str:
     priority_name = _resolve_priority(data)
     assignee_name = _resolve_assignee(data)
     product = get_product(data)
-    tags = data.get("tags", [])
+    # `or []` not `.get(default)` — these keys can come back present-but-null.
+    tags = data.get("tags") or []
     desc = data.get("description")
-    links = data.get("links", [])
+    links = data.get("links") or []
 
     if COMPACT:
         iid = data.get("idReadable", "?")
         parts = [f"{iid}|{state_name}|{priority_name}|{assignee_name}"]
         if product:
             parts[0] += f"|{product}"
-        parts.append(data.get("summary", ""))
+        # `or ""` (not a .get default) — YouTrack sends the key present with a
+        # null value for empty fields, so the default never fires. A null
+        # summary here would crash the join below.
+        parts.append(data.get("summary") or "")
         if tags:
             parts.append(f"Tags:{','.join(t.get('name', '') for t in tags)}")
         if desc:
             # Truncate description in compact mode
             parts.append(desc[:500] if len(desc) > 500 else desc)
         for link in links:
-            lt = link.get("linkType", {}).get("name", "?")
+            lt = (link.get("linkType") or {}).get("name", "?")
             d = link.get("direction", "?")
-            for linked in link.get("issues", []):
+            for linked in link.get("issues") or []:
                 ls = linked.get("state")
                 st = ls.get("name", "") if isinstance(ls, dict) else ""
                 parts.append(f"{lt}({d}):{linked.get('idReadable', '?')}[{st}]")
-        comments = data.get("comments", [])
+        comments = data.get("comments") or []
         if comments:
             for c in comments:
-                author = c.get("author", {}).get("name", "?")
-                text = c.get("text", "")[:200]
+                author = (c.get("author") or {}).get("name", "?")
+                # null text → None[:200] crash (the production bug). Coerce.
+                text = (c.get("text") or "")[:200]
                 parts.append(f"@{author}:{text}")
         return "\n".join(parts)
 
     parts = [
-        f"# {data.get('idReadable', '?')}: {data.get('summary', '')}",
+        f"# {data.get('idReadable', '?')}: {data.get('summary') or ''}",
         "",
         f"**State:** {state_name}",
         f"**Priority:** {priority_name}",
@@ -355,9 +360,9 @@ def format_issue_detail(data: dict) -> str:
         has_linked = False
         link_lines = []
         for link in links:
-            link_type = link.get("linkType", {}).get("name", "?")
+            link_type = (link.get("linkType") or {}).get("name", "?")
             direction = link.get("direction", "?")
-            for linked in link.get("issues", []):
+            for linked in link.get("issues") or []:
                 linked_state = ""
                 ls = linked.get("state")
                 if ls and isinstance(ls, dict) and ls.get("name"):
@@ -367,7 +372,7 @@ def format_issue_detail(data: dict) -> str:
                 state_str = f" [{linked_state}]" if linked_state else ""
                 link_lines.append(
                     f"- **{link_type}** ({direction}): "
-                    f"{linked.get('idReadable', '?')}{state_str} — {linked.get('summary', '')}"
+                    f"{linked.get('idReadable', '?')}{state_str} — {linked.get('summary') or ''}"
                 )
                 has_linked = True
         if has_linked:
@@ -375,12 +380,12 @@ def format_issue_detail(data: dict) -> str:
             parts.append("## Links")
             parts.extend(link_lines)
 
-    comments = data.get("comments", [])
+    comments = data.get("comments") or []
     if comments:
         parts.extend(["", f"## Comments ({len(comments)})"])
         for c in comments:
-            author = c.get("author", {}).get("name", "Unknown")
-            parts.append(f"**{author}:** {c.get('text', '')}")
+            author = (c.get("author") or {}).get("name", "Unknown")
+            parts.append(f"**{author}:** {c.get('text') or ''}")
             parts.append("")
 
     return "\n".join(parts)
