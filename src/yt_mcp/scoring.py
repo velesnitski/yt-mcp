@@ -85,7 +85,7 @@ def _count_blockers(issue: dict) -> int:
     count = 0
     for link in issue.get("links", []):
         direction = link.get("direction", "")
-        link_type = link.get("linkType", {}).get("name", "").lower()
+        link_type = (link.get("linkType") or {}).get("name", "").lower()
         if direction == "OUTWARD" and any(
             kw in link_type for kw in ("subtask", "depend", "parent")
         ):
@@ -98,7 +98,7 @@ def _count_blocking_others(issue: dict) -> int:
     count = 0
     for link in issue.get("links", []):
         direction = link.get("direction", "")
-        link_type = link.get("linkType", {}).get("name", "").lower()
+        link_type = (link.get("linkType") or {}).get("name", "").lower()
         if direction == "INWARD" and "depend" in link_type:
             count += len(link.get("issues", []))
     return count

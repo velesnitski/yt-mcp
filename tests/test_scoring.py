@@ -360,3 +360,43 @@ class TestFormatScoreBreakdown:
     def test_all_zero(self):
         result = format_score_breakdown({"priority": 0, "type": 0})
         assert result == ""
+
+
+# --- null-object hardening regression (sibling of the MAN-280 crash) ---------
+#
+# YouTrack emits `null` for objects whose key is present but empty (author,
+# linkType, field, project, state). `.get(k, {})` returns the default only
+# when the KEY is ABSENT, so a null value flowed into `.get("name")` and
+# crashed. These confirm the `(x.get(k) or {})` hardening holds on the
+# module-level link/journey helpers.
+from yt_mcp.scoring import _count_blockers, _count_blocking_others
+from yt_mcp.tools.journey import _gather_subtask_ids, _build_journey
+
+
+class TestNullObjectHardening:
+    def test_count_blockers_null_linktype(self):
+        issue = {"links": [
+            {"direction": "OUTWARD", "linkType": None, "issues": [{"idReadable": "A-1"}]},
+        ]}
+        assert _count_blockers(issue) == 0  # null linkType -> no crash, no match
+
+    def test_count_blocking_others_null_linktype(self):
+        issue = {"links": [
+            {"direction": "INWARD", "linkType": None, "issues": [{"idReadable": "A-1"}]},
+        ]}
+        assert _count_blocking_others(issue) == 0
+
+    def test_gather_subtask_ids_null_linktype(self):
+        issue = {"links": [
+            {"direction": "OUTWARD", "linkType": None, "issues": [{"idReadable": "A-2"}]},
+            {"direction": "OUTWARD", "linkType": {"name": "Subtask"},
+             "issues": [{"idReadable": "A-3"}]},
+        ]}
+        assert _gather_subtask_ids(issue) == ["A-3"]  # null one skipped, real one kept
+
+    def test_build_journey_null_project_and_field(self):
+        # null project, and an activity whose `field` object is null.
+        issue = {"project": None, "state": None, "created": 0}
+        activities = [{"timestamp": 1, "field": None, "added": []}]
+        events = _build_journey(issue, activities, now_ms=1000)
+        assert isinstance(events, list) and events  # built without crashing

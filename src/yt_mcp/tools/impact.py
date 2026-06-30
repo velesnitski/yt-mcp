@@ -47,7 +47,7 @@ def register(mcp, resolver: InstanceResolver):
 
             # Follow links
             for link in data.get("links", []):
-                link_type = link.get("linkType", {}).get("name", "?")
+                link_type = (link.get("linkType") or {}).get("name", "?")
                 direction = link.get("direction", "?")
                 for linked in link.get("issues", []):
                     linked_id = linked.get("idReadable", "")

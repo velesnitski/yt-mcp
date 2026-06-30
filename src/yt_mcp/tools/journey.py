@@ -68,7 +68,7 @@ def _build_journey(
     issue: dict, activities: list[dict], now_ms: int,
 ) -> list[dict]:
     """Build chronological list of dept-changing events for one issue."""
-    project = issue.get("project", {}).get("shortName", "?")
+    project = (issue.get("project") or {}).get("shortName", "?")
     base_dept = _detect_dept(project)
     initial_state = (issue.get("state") or {}).get("name", "")
     # Initial dept = state hint if present, else project-based
@@ -422,7 +422,7 @@ def register(mcp, resolver: InstanceResolver):
             lines.append("_None — nothing stuck beyond threshold._")
         else:
             for duration, pid, p, chain in bottlenecks[:15]:
-                summary = p.get("summary", "?")[:80]
+                summary = (p.get("summary") or "?")[:80]
                 # Build hop trail
                 trail_parts = []
                 for i, ev in enumerate(chain):

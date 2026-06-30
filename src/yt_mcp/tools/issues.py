@@ -24,7 +24,7 @@ async def _get_required_fields_info(client, project_id: str, project_short: str)
             for f in fields:
                 if f.get("canBeEmpty", True):
                     continue
-                name = f.get("field", {}).get("name", "?")
+                name = (f.get("field") or {}).get("name", "?")
                 bundle = f.get("bundle")
                 if bundle and bundle.get("values"):
                     vals = [v["name"] for v in bundle["values"] if not v.get("archived")]
@@ -568,7 +568,7 @@ def register(mcp, resolver: InstanceResolver):
         # Group by link type + direction
         groups: dict[str, list[str]] = {}
         for link in links:
-            link_type = link.get("linkType", {}).get("name", "?")
+            link_type = (link.get("linkType") or {}).get("name", "?")
             direction = link.get("direction", "BOTH")
             # Build a label from type + direction
             if direction == "OUTWARD":

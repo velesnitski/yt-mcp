@@ -33,10 +33,10 @@ def register(mcp, resolver: InstanceResolver):
 
         lines = [f"## Change history for {issue_id}", ""]
         for a in activities:
-            field = a.get("field", {}).get("name", "?")
+            field = (a.get("field") or {}).get("name", "?")
             added = format_value(a.get("added"))
             removed = format_value(a.get("removed"))
-            author = a.get("author", {}).get("name", "?")
+            author = (a.get("author") or {}).get("name", "?")
             ts = datetime.fromtimestamp(
                 a["timestamp"] / 1000, tz=timezone.utc
             ).strftime("%Y-%m-%d %H:%M UTC")
@@ -77,7 +77,7 @@ def register(mcp, resolver: InstanceResolver):
         if not target:
             return f"Activity `{activity_id}` not found for **{issue_id}**."
 
-        field_name = target.get("field", {}).get("name", "")
+        field_name = (target.get("field") or {}).get("name", "")
         removed = target.get("removed")
 
         if field_name.lower() == "summary":
@@ -152,7 +152,7 @@ def register(mcp, resolver: InstanceResolver):
             minutes = duration.get("minutes", 0) if duration else 0
             total_minutes += minutes
 
-            author = item.get("author", {}).get("name", "?")
+            author = (item.get("author") or {}).get("name", "?")
             text = item.get("text", "")
             text_str = f" — {text}" if text else ""
             item_id = item.get("id", "?")
@@ -336,7 +336,7 @@ def register(mcp, resolver: InstanceResolver):
                 old_date_ms / 1000, tz=timezone.utc
             ).strftime("%Y-%m-%d")
         old_text = old.get("text", "")
-        old_author = old.get("author", {}).get("name", "?") if old else "?"
+        old_author = (old.get("author") or {}).get("name", "?") if old else "?"
         old_type = old.get("type", {})
         old_type_str = old_type.get("name", "") if old_type else ""
 
@@ -416,7 +416,7 @@ def register(mcp, resolver: InstanceResolver):
         # Extract state transitions
         state_transitions = []
         for a in activities:
-            field_name = a.get("field", {}).get("name", "")
+            field_name = (a.get("field") or {}).get("name", "")
             if field_name == "State":
                 added = a.get("added")
                 ts = a.get("timestamp", 0)
@@ -435,12 +435,12 @@ def register(mcp, resolver: InstanceResolver):
         comment_authors: dict[str, int] = {}
         comment_count = 0
         for a in activities:
-            field_name = a.get("field", {}).get("name", "")
+            field_name = (a.get("field") or {}).get("name", "")
             if field_name == "comments":
                 added = a.get("added")
                 if added:
                     comment_count += 1 if not isinstance(added, list) else len(added)
-                    author = a.get("author", {}).get("name", "?")
+                    author = (a.get("author") or {}).get("name", "?")
                     comment_authors[author] = comment_authors.get(author, 0) + (
                         1 if not isinstance(added, list) else len(added)
                     )
@@ -449,10 +449,10 @@ def register(mcp, resolver: InstanceResolver):
         total_minutes = 0
         time_authors: dict[str, int] = {}
         for a in activities:
-            field_name = a.get("field", {}).get("name", "")
+            field_name = (a.get("field") or {}).get("name", "")
             if field_name == "Spent time":
                 added = a.get("added")
-                author = a.get("author", {}).get("name", "?")
+                author = (a.get("author") or {}).get("name", "?")
                 # Spent time added is typically a duration value
                 if isinstance(added, list) and added:
                     for item in added:
@@ -467,7 +467,7 @@ def register(mcp, resolver: InstanceResolver):
             ts = a.get("timestamp", 0)
             if ts > last_activity_ts:
                 last_activity_ts = ts
-                field_name = a.get("field", {}).get("name", "?")
+                field_name = (a.get("field") or {}).get("name", "?")
                 last_activity_desc = field_name
 
         # Build output

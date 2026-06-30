@@ -307,7 +307,7 @@ def register(mcp, resolver: InstanceResolver):
             params={"fields": "text,author(fullName)"},
         )
         old_text = old.get("text", "") if old else ""
-        old_author = old.get("author", {}).get("fullName", "?") if old else "?"
+        old_author = (old.get("author") or {}).get("fullName", "?") if old else "?"
 
         await client.delete(f"/api/articles/{article_id}/comments/{comment_id}")
         return (
