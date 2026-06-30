@@ -382,8 +382,8 @@ def register(mcp, resolver: InstanceResolver):
             link_changes: list[str] = []
 
             for a in recent:
-                field_name = a.get("field", {}).get("name", "")
-                author = a.get("author", {}).get("name", "?")
+                field_name = (a.get("field") or {}).get("name", "")
+                author = (a.get("author") or {}).get("name", "?")
                 added = a.get("added")
                 removed = a.get("removed")
                 ts = a.get("timestamp", 0)
@@ -849,7 +849,7 @@ def register(mcp, resolver: InstanceResolver):
             # Count subtasks
             subtask_count = 0
             for link in issue.get("links", []):
-                if link.get("direction") == "OUTWARD" and "subtask" in link.get("linkType", {}).get("name", "").lower():
+                if (link.get("direction") == "OUTWARD" and "subtask" in link.get("linkType") or {}).get("name", "").lower():
                     subtask_count += len(link.get("issues", []))
 
             # Quality checks
@@ -1173,7 +1173,7 @@ def register(mcp, resolver: InstanceResolver):
         lines = [f"# {project} — Project Health", ""]
 
         if prev:
-            lines.append(f"_Compared to previous snapshot ({prev.get('ts', '?')[:10]})_")
+            lines.append(f"_Compared to previous snapshot ({(prev.get('ts') or '?')[:10]})_")
             lines.append("")
 
         score_line = f"**Health score: {health_score}/100**"

@@ -19,7 +19,7 @@ def register(mcp, resolver: InstanceResolver):
             f"/api/issues/{issue_id}/comments",
             json={"text": text},
         )
-        author = data.get("author", {}).get("name", "?") if data else "?"
+        author = (data.get("author") or {}).get("name", "?") if data else "?"
         return f"Comment added to **{issue_id}** by {author}:\n> {text[:200]}"
 
     @mcp.tool()
@@ -64,7 +64,7 @@ def register(mcp, resolver: InstanceResolver):
             params={"fields": "text,author(name)"},
         )
         old_text = old.get("text", "") if old else ""
-        old_author = old.get("author", {}).get("name", "?") if old else "?"
+        old_author = (old.get("author") or {}).get("name", "?") if old else "?"
 
         await client.delete(f"/api/issues/{issue_id}/comments/{comment_id}")
         return (

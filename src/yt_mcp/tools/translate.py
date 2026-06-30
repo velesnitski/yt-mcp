@@ -157,7 +157,7 @@ def register(mcp, resolver: InstanceResolver):
                 for c in comments:
                     c_id = c.get("id", "?")
                     c_text = c.get("text", "")
-                    c_author = c.get("author", {}).get("name", "?")
+                    c_author = (c.get("author") or {}).get("name", "?")
                     if c_text and _has_non_ascii(c_text):
                         lines.append(f"COMMENT {c_id} (by {c_author}):\n{c_text}")
 
@@ -315,7 +315,7 @@ def register(mcp, resolver: InstanceResolver):
                     c_id = comment["id"]
                     c_text = comment["text"]
                     if preserve_original:
-                        orig_text = originals.get("comments", {}).get(c_id, "")
+                        orig_text = (originals.get("comments") or {}).get(c_id, "")
                         if orig_text:
                             c_text = f"{c_text}\n\n{delimiter}\n\n{orig_text}"
                     try:

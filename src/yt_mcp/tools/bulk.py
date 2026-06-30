@@ -175,11 +175,11 @@ def register(mcp, resolver: InstanceResolver):
                 batch_changes = [
                     a for a in activities
                     if batch_ts <= (ts := a.get("timestamp", 0)) <= batch_end_ts
-                    and a.get("field", {}).get("name", "").lower() != "tag"
+                    and (a.get("field") or {}).get("name", "").lower() != "tag"
                 ]
 
                 for change in batch_changes:
-                    field_name = change.get("field", {}).get("name", "")
+                    field_name = (change.get("field") or {}).get("name", "")
                     removed = change.get("removed")
 
                     if field_name.lower() == "summary":

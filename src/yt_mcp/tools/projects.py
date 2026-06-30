@@ -111,7 +111,7 @@ def register(mcp, resolver: InstanceResolver):
             )
             owner = b.get("owner", {})
             owner_name = owner.get("name", "?") if owner else "?"
-            col_field = b.get("columnSettings", {}).get("field", {}).get("name", "?")
+            col_field = ((b.get("columnSettings") or {}).get("field") or {}).get("name", "?")
             current_sprint = b.get("currentSprint", {})
             sprint_name = current_sprint.get("name", "None") if current_sprint else "None"
 
