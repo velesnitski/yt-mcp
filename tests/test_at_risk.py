@@ -430,3 +430,46 @@ class TestQaSkipDetection:
         assert list(payload["categories"].keys()) == ["qa_skipped"]
         assert payload["categories"]["qa_skipped"]["count"] == 1
         assert payload["filtered_category"] == "qa_skipped"
+
+
+# --- check_task_creation: null linkType on OUTWARD link (self-inflicted
+#     regression from the v1.16.4 regex-transform mangle at monitoring.py:852)
+class TestCheckTaskCreationNullLinkType:
+    @pytest.mark.asyncio
+    async def test_outward_link_null_linktype_does_not_crash(self):
+        now_ms = int(time.time() * 1000)
+        issue = {
+            "idReadable": "PROJ-1", "summary": "Add feature X",
+            "created": now_ms, "updated": now_ms,
+            "state": {"name": "Open"}, "priority": {"name": "Normal"},
+            "reporter": {"name": "Alice"}, "tags": [], "customFields": [],
+            # OUTWARD link with a null linkType — the exact shape the mangled
+            # line 852 crashed on (`"subtask" in None` -> TypeError).
+            "links": [
+                {"direction": "OUTWARD", "linkType": None,
+                 "issues": [{"idReadable": "PROJ-2"}]},
+            ],
+        }
+        mcp, _ = _make_mcp([issue])
+        out = await _fn(mcp, "check_task_creation")(keywords="feature")
+        assert "PROJ-1" in out  # renders without crashing
+
+    @pytest.mark.asyncio
+    async def test_real_subtask_link_still_counts(self):
+        now_ms = int(time.time() * 1000)
+        issue = {
+            "idReadable": "PROJ-3", "summary": "Parent task",
+            "created": now_ms, "updated": now_ms,
+            "state": {"name": "Open"}, "priority": {"name": "Normal"},
+            "reporter": {"name": "Bob"}, "tags": [], "customFields": [],
+            "links": [
+                {"direction": "OUTWARD", "linkType": {"name": "Subtask"},
+                 "issues": [{"idReadable": "PROJ-4"}, {"idReadable": "PROJ-5"}]},
+            ],
+        }
+        mcp, _ = _make_mcp([issue])
+        out = await _fn(mcp, "check_task_creation")(keywords="parent")
+        assert "PROJ-3" in out
+        # 2 subtasks detected (linkType matched) — proves the fix didn't
+        # break the happy path.
+        assert "2" in out

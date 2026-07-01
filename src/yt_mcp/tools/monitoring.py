@@ -849,7 +849,7 @@ def register(mcp, resolver: InstanceResolver):
             # Count subtasks
             subtask_count = 0
             for link in issue.get("links", []):
-                if (link.get("direction") == "OUTWARD" and "subtask" in link.get("linkType") or {}).get("name", "").lower():
+                if link.get("direction") == "OUTWARD" and "subtask" in (link.get("linkType") or {}).get("name", "").lower():
                     subtask_count += len(link.get("issues", []))
 
             # Quality checks
