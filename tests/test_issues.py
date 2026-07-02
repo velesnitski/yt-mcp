@@ -347,14 +347,17 @@ class TestGetIssuesBatch:
         assert "comments(" in _params_of(client)["fields"]
 
 
-# --- create_issue split-fallback brace preservation (HR Department bug) -------
+# --- create_issue split fallback emits BARE values ----------------------------
 #
-# The split fallback stripped braces off multi-word values (_CMD_FIELD_RE
-# group(2)), so a rejoined `Assignee Jane Q Public` made YT read only
-# "Alexey" -> "Assignee expected" 400, and emitted a false "Could not set"
-# even though the field was actually set by the full command. Fix re-wraps
-# braced values.
-class TestCreateIssueBracePreservation:
+# Verified live: YouTrack's command parser REJECTS braces in values
+# (`Status {New Employee}` -> 400 "expected: {New Employee}", even single-word
+# `Priority {High}`) and matches multi-word enum values greedily, so
+# `Status New Employee` is the correct command form. Braces are only an input
+# convention so _CMD_FIELD_RE can capture a multi-word value as one group;
+# they must be stripped before the command reaches YT. The mock below mirrors
+# real YT by rejecting any braced command — this is the test that catches the
+# ADR-016/v1.16.6 re-wrapping regression.
+class TestCreateIssueBareCommandValues:
     def _make(self):
         mcp = FastMCP("test")
         client = MagicMock()
@@ -367,8 +370,11 @@ class TestCreateIssueBracePreservation:
             if path == "/api/commands":
                 q = json["query"]
                 seen.append(q)
-                # Force the split path: reject the combined multi-field command,
-                # accept individual clauses (mirrors real YT behavior here).
+                # Mirror real YouTrack: braces in a command are a 400...
+                if "{" in q or "}" in q:
+                    raise ValueError("YouTrack query error (400): expected: " + q)
+                # ...and a combined multi-field command doesn't parse, forcing
+                # the per-field split path.
                 if ("Status" in q and "Department" in q) or q.count("Assignee") > 1:
                     raise ValueError("YouTrack query error (400): parse")
                 return {}
@@ -381,31 +387,31 @@ class TestCreateIssueBracePreservation:
         return mcp, seen
 
     @pytest.mark.asyncio
-    async def test_split_clauses_keep_braces_on_multiword_values(self):
+    async def test_split_clauses_are_bare_multiword_values(self):
         mcp, seen = self._make()
         out = await _get_tool_fn(mcp, "create_issue")(
             project="HR", summary="test",
             command="Status {New Employee} Department DevOps Assignee {Jane Q Public}",
         )
-        # Multi-word values keep their braces in the split fallback...
-        assert "Status {New Employee}" in seen
-        assert "Assignee {Jane Q Public}" in seen
-        # ...single-token value stays unbraced.
+        # Multi-word values reach YT BARE (braces stripped), which is what the
+        # command parser accepts...
+        assert "Status New Employee" in seen
+        assert "Assignee Jane Q Public" in seen
         assert "Department DevOps" in seen
-        # And no bare, brace-stripped multi-word clause was ever sent.
-        assert "Status New Employee" not in seen
-        assert "Assignee Jane Q Public" not in seen
+        # ...and no braced clause was ever sent (real YT would 400 on it).
+        assert not any("{" in q or "}" in q for q in seen)
         assert "Created" in out
 
     @pytest.mark.asyncio
-    async def test_multi_word_value_not_reported_as_failed(self):
-        # With braces preserved, the split clauses succeed -> no false
-        # "Could not set" for the multi-word field.
+    async def test_multiword_value_set_without_false_failure(self):
+        # Bare split clauses succeed against the brace-rejecting mock -> no
+        # false "Could not set" for the multi-word field.
         mcp, seen = self._make()
         out = await _get_tool_fn(mcp, "create_issue")(
             project="HR", summary="test",
             command="Status {New Employee} Department DevOps",
         )
+        assert "Status New Employee" in seen
         assert "Could not set" not in out
 
 

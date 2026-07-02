@@ -274,15 +274,16 @@ def register(mcp, resolver: InstanceResolver):
             for m in _CMD_FIELD_RE.finditer(command):
                 name = m.group(1) or m.group(3)
                 value = m.group(2) or m.group(4)
-                # group(2) is the {braced} capture — the regex strips the
-                # braces, so a multi-word value ("New Employee", "HR Team")
-                # rejoined as `name value` makes YT read only the first token
-                # ("Assignee expected: Alexey ..."). Re-wrap braced values so
-                # the split fallback matches the original and stays idempotent.
-                if m.group(2) is not None:
-                    split_commands.append(f"{name} {{{value}}}")
-                else:
-                    split_commands.append(f"{name} {value}")
+                # Emit BARE `name value` — never re-wrap in braces. Verified
+                # live: YouTrack's *command* parser rejects braces in values
+                # (`Status {New Employee}` -> 400 "expected: {New Employee}",
+                # even single-word `Priority {High}`) and matches multi-word
+                # enum values greedily, so `Status New Employee` is the correct
+                # form. Braces are only an INPUT convention so this regex can
+                # capture a multi-word value as one group (group 2 already
+                # excludes the braces); they must not survive into the command.
+                # (Re-wrapping here was the ADR-016/v1.16.6 regression.)
+                split_commands.append(f"{name} {value}")
 
         failed_commands: list[str] = []
 
@@ -300,11 +301,16 @@ def register(mcp, resolver: InstanceResolver):
                     failed_commands.append(f"`{product_cmd}`: {_cmd_error_text(e)}")
             if not command:
                 return
-            # Try user's original command as-is (handles emoji/multi-word fields)
+            # Try the whole command first, BARE — braces are an input-only
+            # convention (so _CMD_FIELD_RE can capture multi-word values); YT's
+            # command parser rejects them, so strip before sending. This sets
+            # simple/single-field commands in one call; a multi-field command
+            # that doesn't parse as a whole falls through to the split below.
+            whole = command.replace("{", "").replace("}", "")
             try:
                 await client.post(
                     "/api/commands",
-                    json={"query": command, "issues": [issue_ref]},
+                    json={"query": whole, "issues": [issue_ref]},
                 )
                 return  # full command worked
             except (httpx.HTTPStatusError, ValueError):
