@@ -414,6 +414,30 @@ class TestCreateIssueBareCommandValues:
         assert "Status New Employee" in seen
         assert "Could not set" not in out
 
+    # The durable regression guard (ADR-019): whatever command shape goes in,
+    # and whichever path runs (whole-command or per-field split), no query sent
+    # to /api/commands may contain a brace — real YT 400s on braces. The mock
+    # above rejects braces, so a regression that re-braces would both fail the
+    # command AND be caught by the brace-free assertion here.
+    @pytest.mark.parametrize("command", [
+        "Status {New Employee}",                       # single multi-word
+        "Priority {High}",                             # braced single-word
+        "Status {New Employee} Department DevOps",      # multi-word + bare
+        "Type {Product task} Subsystem {Client Panel}", # two multi-word
+        "Assignee {Jane Q Public}",                    # multi-word person
+    ])
+    @pytest.mark.asyncio
+    async def test_no_command_query_ever_contains_braces(self, command):
+        mcp, seen = self._make()
+        out = await _get_tool_fn(mcp, "create_issue")(
+            project="HR", summary="t", command=command,
+        )
+        assert "Created" in out
+        assert seen, "expected at least one /api/commands call"
+        assert not any("{" in q or "}" in q for q in seen), seen
+        # braces in must still set the field (bare) — no false failure
+        assert "Could not set" not in out
+
 
 class TestCreateIssueInsufficientPermissions:
     """403/401 on create or on a field command must degrade gracefully — no
