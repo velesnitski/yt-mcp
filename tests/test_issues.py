@@ -69,6 +69,7 @@ class TestCommandKeywords:
 # --- normalize_issue: JSON-friendly issue shape ---
 
 import json
+import httpx
 import pytest
 
 from yt_mcp.formatters import normalize_issue
@@ -406,3 +407,71 @@ class TestCreateIssueBracePreservation:
             command="Status {New Employee} Department DevOps",
         )
         assert "Could not set" not in out
+
+
+class TestCreateIssueInsufficientPermissions:
+    """403/401 on create or on a field command must degrade gracefully — no
+    raw httpx error, no orphaned bare issue via an uncaught exception."""
+
+    @staticmethod
+    def _http_error(code: int) -> httpx.HTTPStatusError:
+        req = httpx.Request("POST", "https://example.youtrack.cloud/api/commands")
+        resp = httpx.Response(code, request=req)
+        return httpx.HTTPStatusError(f"{code}", request=req, response=resp)
+
+    def _make(self, *, create_code: int | None = None, command_code: int | None = None):
+        mcp = FastMCP("test")
+        client = MagicMock()
+        client.resolve_project_id = AsyncMock(return_value="0-5")
+
+        async def _post(path, json=None):
+            if path == "/api/issues":
+                if create_code is not None:
+                    raise self._http_error(create_code)
+                return {"idReadable": "PROJ-999", "summary": "test"}
+            if path == "/api/commands":
+                if command_code is not None:
+                    raise self._http_error(command_code)
+                return {}
+            return {}
+
+        client.post = AsyncMock(side_effect=_post)
+        resolver = MagicMock(spec=InstanceResolver)
+        resolver.resolve = MagicMock(return_value=client)
+        _register_issues(mcp, resolver)
+        return mcp
+
+    @pytest.mark.asyncio
+    async def test_field_command_403_reported_not_raised(self):
+        # Issue creates fine, but the account can't set the field -> 403 on
+        # /api/commands. Must return "Created" + "Could not set", never raise.
+        mcp = self._make(command_code=403)
+        out = await _get_tool_fn(mcp, "create_issue")(
+            project="HR", summary="test", command="Department DevOps",
+        )
+        assert "Created" in out
+        assert "Could not set" in out
+        assert "HTTP 403 (insufficient permissions)" in out
+        # The instance host must not leak into the message.
+        assert "youtrack.cloud" not in out
+
+    @pytest.mark.asyncio
+    async def test_create_403_returns_clean_message(self):
+        # No Create Issue permission -> 403 on /api/issues. Friendly message,
+        # no raw httpx error, no URL leak, and it must NOT hit the draft path.
+        mcp = self._make(create_code=403)
+        out = await _get_tool_fn(mcp, "create_issue")(
+            project="HR", summary="test", command="Department DevOps",
+        )
+        assert "insufficient permissions" in out
+        assert "HTTP 403" in out
+        assert "youtrack.cloud" not in out
+
+    @pytest.mark.asyncio
+    async def test_create_500_still_raises(self):
+        # A genuine server error must not be swallowed as a permission message.
+        mcp = self._make(create_code=500)
+        with pytest.raises(httpx.HTTPStatusError):
+            await _get_tool_fn(mcp, "create_issue")(
+                project="HR", summary="test", command="Department DevOps",
+            )

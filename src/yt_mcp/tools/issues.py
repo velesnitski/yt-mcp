@@ -1,5 +1,7 @@
 import json
 import re
+
+import httpx
 from datetime import datetime, timezone
 
 from yt_mcp.resolver import InstanceResolver
@@ -35,6 +37,22 @@ async def _get_required_fields_info(client, project_id: str, project_short: str)
         except (ValueError, KeyError):
             continue
     return ""
+
+
+def _cmd_error_text(e: Exception) -> str:
+    """Concise, URL-free text for a failed command.
+
+    ValueErrors from client._handle_error already carry a clean, truncated
+    YouTrack message (400/404). Everything else — 401/403 permission denials
+    and 5xx — surfaces via raise_for_status() as httpx.HTTPStatusError, whose
+    str() embeds the full request URL (leaks the instance host). Reduce it to
+    status + a short reason so failed_commands stays clean and safe.
+    """
+    if isinstance(e, httpx.HTTPStatusError):
+        code = e.response.status_code
+        reason = "insufficient permissions" if code in (401, 403) else "request failed"
+        return f"HTTP {code} ({reason})"
+    return str(e)
 
 
 def register(mcp, resolver: InstanceResolver):
@@ -277,8 +295,8 @@ def register(mcp, resolver: InstanceResolver):
                         "/api/commands",
                         json={"query": product_cmd, "issues": [issue_ref]},
                     )
-                except ValueError as e:
-                    failed_commands.append(f"`{product_cmd}`: {e}")
+                except (httpx.HTTPStatusError, ValueError) as e:
+                    failed_commands.append(f"`{product_cmd}`: {_cmd_error_text(e)}")
             if not command:
                 return
             # Try user's original command as-is (handles emoji/multi-word fields)
@@ -288,8 +306,8 @@ def register(mcp, resolver: InstanceResolver):
                     json={"query": command, "issues": [issue_ref]},
                 )
                 return  # full command worked
-            except ValueError:
-                pass  # fall through to split
+            except (httpx.HTTPStatusError, ValueError):
+                pass  # fall through to split (400 parse *and* 401/403 perm)
             # Split fallback: apply each field separately
             split_failed: list[str] = []
             for cmd in split_commands:
@@ -298,7 +316,7 @@ def register(mcp, resolver: InstanceResolver):
                         "/api/commands",
                         json={"query": cmd, "issues": [issue_ref]},
                     )
-                except ValueError:
+                except (httpx.HTTPStatusError, ValueError):
                     split_failed.append(cmd)
             # Rejoin failed splits and retry as single command
             # (handles multi-word/emoji fields like "Evaluation time 🕙 1h")
@@ -309,13 +327,26 @@ def register(mcp, resolver: InstanceResolver):
                         "/api/commands",
                         json={"query": rejoined, "issues": [issue_ref]},
                     )
-                except ValueError as cmd_err:
-                    failed_commands.append(f"`{rejoined}`: {cmd_err}")
+                except (httpx.HTTPStatusError, ValueError) as cmd_err:
+                    failed_commands.append(f"`{rejoined}`: {_cmd_error_text(cmd_err)}")
 
         try:
             data = await client.post("/api/issues", json=json_body)
             issue_id = data.get("idReadable", "?")
             await _apply_commands(issue_id)
+        except httpx.HTTPStatusError as perm_err:
+            # 401/403 on the create itself = no Create Issue permission. Return
+            # a clean, actionable message instead of a raw httpx error (which
+            # leaks the instance URL) and — crucially — do NOT fall into the
+            # draft path, which would leave an orphaned draft behind.
+            code = perm_err.response.status_code
+            if code in (401, 403):
+                return (
+                    f"**Could not create issue:** insufficient permissions to "
+                    f"create issues in project **{project}** (HTTP {code}). "
+                    f"Ask a YouTrack admin to grant the Create Issue permission."
+                )
+            raise
         except ValueError as e:
             if "required" not in str(e).lower() or not (command or product_cmd):
                 raise
@@ -334,11 +365,11 @@ def register(mcp, resolver: InstanceResolver):
                     json={},
                 )
                 issue_id = data.get("idReadable", "?")
-            except ValueError as pub_err:
+            except (httpx.HTTPStatusError, ValueError) as pub_err:
                 # Publish failed — fetch required fields to help the LLM
                 req_info = await _get_required_fields_info(client, project_id, project)
                 return (
-                    f"**Could not create issue:** {pub_err}\n\n"
+                    f"**Could not create issue:** {_cmd_error_text(pub_err)}\n\n"
                     + (f"**Failed commands:** {'; '.join(failed_commands)}\n" if failed_commands else "")
                     + (f"\n{req_info}" if req_info else "")
                     + "\nCreate the issue manually or adjust the command."
