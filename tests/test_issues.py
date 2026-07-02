@@ -344,3 +344,65 @@ class TestGetIssuesBatch:
         mcp, client = _make_mcp_with_mock([])
         await _get_tool_fn(mcp, "get_issues")(ids="PROJ-1", include_comments=True)
         assert "comments(" in _params_of(client)["fields"]
+
+
+# --- create_issue split-fallback brace preservation (HR Department bug) -------
+#
+# The split fallback stripped braces off multi-word values (_CMD_FIELD_RE
+# group(2)), so a rejoined `Assignee Jane Q Public` made YT read only
+# "Alexey" -> "Assignee expected" 400, and emitted a false "Could not set"
+# even though the field was actually set by the full command. Fix re-wraps
+# braced values.
+class TestCreateIssueBracePreservation:
+    def _make(self):
+        mcp = FastMCP("test")
+        client = MagicMock()
+        client.resolve_project_id = AsyncMock(return_value="0-5")
+        seen: list[str] = []
+
+        async def _post(path, json=None):
+            if path == "/api/issues":
+                return {"idReadable": "HR-999", "summary": "test"}
+            if path == "/api/commands":
+                q = json["query"]
+                seen.append(q)
+                # Force the split path: reject the combined multi-field command,
+                # accept individual clauses (mirrors real YT behavior here).
+                if ("Status" in q and "Department" in q) or q.count("Assignee") > 1:
+                    raise ValueError("YouTrack query error (400): parse")
+                return {}
+            return {}
+
+        client.post = AsyncMock(side_effect=_post)
+        resolver = MagicMock(spec=InstanceResolver)
+        resolver.resolve = MagicMock(return_value=client)
+        _register_issues(mcp, resolver)
+        return mcp, seen
+
+    @pytest.mark.asyncio
+    async def test_split_clauses_keep_braces_on_multiword_values(self):
+        mcp, seen = self._make()
+        out = await _get_tool_fn(mcp, "create_issue")(
+            project="HR", summary="test",
+            command="Status {New Employee} Department DevOps Assignee {Jane Q Public}",
+        )
+        # Multi-word values keep their braces in the split fallback...
+        assert "Status {New Employee}" in seen
+        assert "Assignee {Jane Q Public}" in seen
+        # ...single-token value stays unbraced.
+        assert "Department DevOps" in seen
+        # And no bare, brace-stripped multi-word clause was ever sent.
+        assert "Status New Employee" not in seen
+        assert "Assignee Jane Q Public" not in seen
+        assert "Created" in out
+
+    @pytest.mark.asyncio
+    async def test_multi_word_value_not_reported_as_failed(self):
+        # With braces preserved, the split clauses succeed -> no false
+        # "Could not set" for the multi-word field.
+        mcp, seen = self._make()
+        out = await _get_tool_fn(mcp, "create_issue")(
+            project="HR", summary="test",
+            command="Status {New Employee} Department DevOps",
+        )
+        assert "Could not set" not in out

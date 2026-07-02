@@ -255,7 +255,15 @@ def register(mcp, resolver: InstanceResolver):
             for m in _CMD_FIELD_RE.finditer(command):
                 name = m.group(1) or m.group(3)
                 value = m.group(2) or m.group(4)
-                split_commands.append(f"{name} {value}")
+                # group(2) is the {braced} capture — the regex strips the
+                # braces, so a multi-word value ("New Employee", "HR Team")
+                # rejoined as `name value` makes YT read only the first token
+                # ("Assignee expected: Alexey ..."). Re-wrap braced values so
+                # the split fallback matches the original and stays idempotent.
+                if m.group(2) is not None:
+                    split_commands.append(f"{name} {{{value}}}")
+                else:
+                    split_commands.append(f"{name} {value}")
 
         failed_commands: list[str] = []
 
