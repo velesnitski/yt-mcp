@@ -12,31 +12,32 @@ _CMD_KEYWORDS = frozenset({"tag", "untag", "remove", "add", "for", "star", "unst
 
 
 async def _get_required_fields_info(client, project_id: str, project_short: str) -> str:
-    """Fetch required fields with values to help LLM fix the command."""
-    for endpoint in (
-        f"/api/admin/projects/{project_id}/customFields",
-        f"/api/projects/{project_id}/customFields",
-    ):
-        try:
-            fields = await client.get(
-                endpoint,
-                params={"fields": "field(name),canBeEmpty,bundle(values(name,archived))"},
-            )
-            lines = ["**Required fields for this project:**"]
-            for f in fields:
-                if f.get("canBeEmpty", True):
-                    continue
-                name = (f.get("field") or {}).get("name", "?")
-                bundle = f.get("bundle")
-                if bundle and bundle.get("values"):
-                    vals = [v["name"] for v in bundle["values"] if not v.get("archived")]
-                    lines.append(f"- **{name}**: {', '.join(vals)}")
-                else:
-                    lines.append(f"- **{name}**")
-            return "\n".join(lines) if len(lines) > 1 else ""
-        except (ValueError, KeyError):
+    """Best-effort required-fields hint to help the LLM fix a failed command.
+
+    Uses /api/admin/projects/{id}/customFields — the only custom-fields
+    resource (/api/projects/{id}/customFields 404s). The hint is optional: a
+    non-admin user may get an empty or forbidden response there, so any failure
+    (permission, parse, shape) just yields "" rather than raising.
+    """
+    try:
+        fields = await client.get(
+            f"/api/admin/projects/{project_id}/customFields",
+            params={"fields": "field(name),canBeEmpty,bundle(values(name,archived))"},
+        )
+    except (httpx.HTTPStatusError, ValueError, KeyError):
+        return ""
+    lines = ["**Required fields for this project:**"]
+    for f in fields:
+        if f.get("canBeEmpty", True):
             continue
-    return ""
+        name = (f.get("field") or {}).get("name", "?")
+        bundle = f.get("bundle")
+        if bundle and bundle.get("values"):
+            vals = [v["name"] for v in bundle["values"] if not v.get("archived")]
+            lines.append(f"- **{name}**: {', '.join(vals)}")
+        else:
+            lines.append(f"- **{name}**")
+    return "\n".join(lines) if len(lines) > 1 else ""
 
 
 def _cmd_error_text(e: Exception) -> str:

@@ -475,3 +475,152 @@ class TestCreateIssueInsufficientPermissions:
             await _get_tool_fn(mcp, "create_issue")(
                 project="HR", summary="test", command="Department DevOps",
             )
+
+    @pytest.mark.asyncio
+    async def test_product_command_403_reported_not_raised(self):
+        # Product is applied as its own /api/commands call; a 403 there must
+        # also be caught and reported (covers the product catch site).
+        mcp = self._make(command_code=403)
+        out = await _get_tool_fn(mcp, "create_issue")(
+            project="HR", summary="test", product="Alpha",
+        )
+        assert "Created" in out
+        assert "Could not set" in out
+        assert "Product Alpha" in out
+        assert "HTTP 403 (insufficient permissions)" in out
+
+    @pytest.mark.asyncio
+    async def test_create_401_also_handled_cleanly(self):
+        # 401 (rejected credentials) on create is handled the same graceful
+        # way as 403 — clean message, no raw error, no URL leak.
+        mcp = self._make(create_code=401)
+        out = await _get_tool_fn(mcp, "create_issue")(
+            project="HR", summary="test", command="Department DevOps",
+        )
+        assert "insufficient permissions" in out
+        assert "HTTP 401" in out
+        assert "youtrack.cloud" not in out
+
+
+class TestCreateIssueLowPermissionIntegration:
+    """Faithful low-permission simulation: drive the REAL YouTrackClient
+    through a mocked httpx transport so the true status -> raise_for_status ->
+    HTTPStatusError chain runs end-to-end.
+
+    Ground truth (verified against a live YouTrack + JetBrains REST docs):
+      * GET /api/admin/projects is permission-FILTERED, not admin-gated — a
+        low-permission user gets ONLY their accessible projects (200), never a
+        blanket 403. The "admin" path segment is just a namespace.
+      * There is NO /api/projects endpoint (it 404s). It must never be called.
+    """
+
+    URL = "https://example.youtrack.cloud"
+
+    def _make(self, handler):
+        from yt_mcp.client import YouTrackClient
+        cfg = YouTrackConfig(url=self.URL, token="perm-fake")
+        client = YouTrackClient(cfg)
+        seen: list[str] = []
+
+        def recording(request):
+            seen.append(request.url.path)
+            return handler(request)
+
+        # Swap only the network transport; keep the real _handle_error mapping.
+        client._client = httpx.AsyncClient(
+            transport=httpx.MockTransport(recording),
+            base_url=self.URL,
+            headers={"Authorization": "Bearer perm-fake"},
+        )
+        mcp = FastMCP("test")
+        resolver = MagicMock(spec=InstanceResolver)
+        resolver.resolve = MagicMock(return_value=client)
+        _register_issues(mcp, resolver)
+        return mcp, seen
+
+    @staticmethod
+    def _lowperm_project_list(request):
+        """A low-perm user's view: admin/projects returns ONLY their own
+        project (filtered). Returns None for other paths."""
+        if request.url.path == "/api/admin/projects":
+            return httpx.Response(200, json=[{"id": "0-5", "shortName": "HR"}])
+        return None
+
+    @pytest.mark.asyncio
+    async def test_resolves_own_project_without_touching_api_projects(self):
+        # The account can create + set fields and only sees its own project.
+        # Resolution must work off the filtered admin/projects list and must
+        # NEVER call the nonexistent /api/projects.
+        def handler(request):
+            base = self._lowperm_project_list(request)
+            if base is not None:
+                return base
+            if request.url.path == "/api/issues":
+                return httpx.Response(200, json={"idReadable": "HR-999", "summary": "test"})
+            if request.url.path == "/api/commands":
+                return httpx.Response(200, json={})
+            return httpx.Response(200, json=[])
+        mcp, seen = self._make(handler)
+        out = await _get_tool_fn(mcp, "create_issue")(
+            project="HR", summary="test", command="Department DevOps",
+        )
+        assert "Created" in out
+        assert "Could not set" not in out
+        assert "/api/admin/projects" in seen
+        assert "/api/projects" not in seen  # dead endpoint, never hit
+
+    @pytest.mark.asyncio
+    async def test_field_command_forbidden_reported_cleanly(self):
+        # Can create, cannot set the field -> real 403 on /api/commands.
+        def handler(request):
+            base = self._lowperm_project_list(request)
+            if base is not None:
+                return base
+            if request.url.path == "/api/issues":
+                return httpx.Response(200, json={"idReadable": "HR-999", "summary": "test"})
+            if request.url.path == "/api/commands":
+                return httpx.Response(403, json={"error": "Forbidden"})
+            return httpx.Response(200, json=[])
+        mcp, seen = self._make(handler)
+        out = await _get_tool_fn(mcp, "create_issue")(
+            project="HR", summary="test", command="Department DevOps",
+        )
+        assert "Created" in out
+        assert "HTTP 403 (insufficient permissions)" in out
+        assert "example.youtrack.cloud" not in out  # URL must not leak
+        assert "/api/projects" not in seen
+
+    @pytest.mark.asyncio
+    async def test_cannot_create_at_all(self):
+        # No Create Issue permission -> real 403 on /api/issues.
+        def handler(request):
+            base = self._lowperm_project_list(request)
+            if base is not None:
+                return base
+            if request.url.path == "/api/issues":
+                return httpx.Response(403, json={"error": "Forbidden"})
+            return httpx.Response(200, json=[])
+        mcp, seen = self._make(handler)
+        out = await _get_tool_fn(mcp, "create_issue")(
+            project="HR", summary="test", command="Department DevOps",
+        )
+        assert "insufficient permissions" in out
+        assert "HTTP 403" in out
+        assert "example.youtrack.cloud" not in out
+
+    @pytest.mark.asyncio
+    async def test_access_less_token_degrades_to_not_found(self):
+        # A token with NO project visibility -> admin/projects 403. Defensive
+        # catch must degrade to a clean "not found", never an uncaught error,
+        # and must not attempt to create.
+        def handler(request):
+            if request.url.path == "/api/admin/projects":
+                return httpx.Response(403, json={"error": "Forbidden"})
+            return httpx.Response(200, json=[])
+        mcp, seen = self._make(handler)
+        out = await _get_tool_fn(mcp, "create_issue")(
+            project="HR", summary="test", command="Department DevOps",
+        )
+        assert "not found" in out.lower()
+        assert "/api/issues" not in seen  # never tried to create
+        assert "/api/projects" not in seen

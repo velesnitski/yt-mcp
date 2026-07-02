@@ -138,15 +138,22 @@ class YouTrackClient:
         )
 
     async def resolve_project_id(self, short_name: str) -> str | None:
-        for endpoint in ("/api/admin/projects", "/api/projects"):
-            try:
-                projects = await self.get(
-                    endpoint,
-                    params={"fields": "id,shortName", "$top": "500"},
-                )
-                for p in projects:
-                    if p.get("shortName", "").lower() == short_name.lower():
-                        return p["id"]
-            except ValueError:
-                continue
+        # /api/admin/projects is YouTrack's ONLY projects resource. Despite the
+        # "admin" path segment, GET is permission-FILTERED, not admin-gated: it
+        # returns just the projects the current user can read, so a
+        # low-permission user gets their own subset (200) rather than a 403
+        # (verified against a live instance + JetBrains REST docs). There is no
+        # /api/projects endpoint — it 404s — so there is nothing to fall back
+        # to. Catch defensively so a genuinely access-less token degrades to
+        # "not found" instead of propagating an uncaught error.
+        try:
+            projects = await self.get(
+                "/api/admin/projects",
+                params={"fields": "id,shortName", "$top": "500"},
+            )
+        except (httpx.HTTPStatusError, ValueError):
+            return None
+        for p in projects:
+            if p.get("shortName", "").lower() == short_name.lower():
+                return p["id"]
         return None
