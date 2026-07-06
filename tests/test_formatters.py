@@ -452,3 +452,50 @@ class TestFormatIssueDetailNullSafety:
                 "comments": None, "links": None, "tags": None}
         out = format_issue_detail(data)
         assert "PROJ-9" in out
+
+
+# --- comment dedup (ADR-023): identical bot nags collapse to one entry -------
+
+from yt_mcp.formatters import dedupe_comments, normalize_issue as _norm
+
+
+def _c(author, text, cid="c1"):
+    return {"id": cid, "text": text, "author": {"name": author, "login": author.lower()},
+            "created": 1}
+
+
+class TestDedupeComments:
+    def test_identical_author_text_collapse_with_count(self):
+        cs = [_c("Bot", "log your time", f"c{i}") for i in range(4)] + \
+             [_c("Bot", "no movement for a day", f"d{i}") for i in range(3)]
+        out = dedupe_comments(cs)
+        assert len(out) == 2
+        assert out[0]["_repeats"] == 4
+        assert out[1]["_repeats"] == 3
+        assert out[0]["id"] == "c0"  # first occurrence kept
+
+    def test_distinct_texts_never_merged(self):
+        out = dedupe_comments([_c("A", "one"), _c("A", "two"), _c("B", "one")])
+        assert len(out) == 3
+        assert all(c.get("_repeats", 1) == 1 for c in out)
+
+    def test_empty_texts_not_collapsed(self):
+        # two empty comments (e.g. attachment-only) stay separate
+        out = dedupe_comments([_c("A", ""), _c("A", "")])
+        assert len(out) == 2
+
+    def test_input_not_mutated(self):
+        cs = [_c("Bot", "same"), _c("Bot", "same")]
+        dedupe_comments(cs)
+        assert "_repeats" not in cs[0]
+
+    def test_normalize_issue_exposes_repeats(self):
+        issue = {
+            "idReadable": "PROJ-1", "summary": "t",
+            "comments": [_c("Bot", "nag", "c1"), _c("Bot", "nag", "c2"),
+                         _c("Dev", "real answer", "c3")],
+        }
+        out = _norm(issue, include_comments=True)
+        assert len(out["comments"]) == 2
+        assert out["comments"][0]["repeats"] == 2
+        assert "repeats" not in out["comments"][1]

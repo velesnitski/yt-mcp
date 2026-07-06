@@ -155,9 +155,31 @@ def normalize_issue(data: dict, include_comments: bool = True) -> dict:
                 "author": (c.get("author") or {}).get("name", ""),
                 "author_login": (c.get("author") or {}).get("login"),
                 "created": c.get("created"),
+                **({"repeats": n} if (n := c.get("_repeats", 1)) > 1 else {}),
             }
-            for c in (data.get("comments") or [])
+            for c in dedupe_comments(data.get("comments") or [])
         ]
+    return out
+
+
+def dedupe_comments(comments: list[dict]) -> list[dict]:
+    """Collapse comments with identical (author, text) into one entry.
+
+    Workflow bots post the same nag many times ("log your time" ×4) — pure
+    token noise on issue reads. First occurrence keeps its position/id;
+    duplicates only bump a `_repeats` counter (renderers show "(×N)").
+    Distinct texts or authors are never merged.
+    """
+    seen: dict[tuple, dict] = {}
+    out: list[dict] = []
+    for c in comments:
+        key = ((c.get("author") or {}).get("name", ""), (c.get("text") or "").strip())
+        if key in seen and key[1]:
+            seen[key]["_repeats"] = seen[key].get("_repeats", 1) + 1
+            continue
+        kept = dict(c)
+        seen[key] = kept
+        out.append(kept)
     return out
 
 
@@ -330,13 +352,14 @@ def format_issue_detail(data: dict) -> str:
                 ls = linked.get("state")
                 st = ls.get("name", "") if isinstance(ls, dict) else ""
                 parts.append(f"{lt}({d}):{linked.get('idReadable', '?')}[{st}]")
-        comments = data.get("comments") or []
+        comments = dedupe_comments(data.get("comments") or [])
         if comments:
             for c in comments:
                 author = (c.get("author") or {}).get("name", "?")
                 # null text → None[:200] crash (the production bug). Coerce.
                 text = (c.get("text") or "")[:200]
-                parts.append(f"@{author}:{text}")
+                rep = f"(x{c['_repeats']})" if c.get("_repeats", 1) > 1 else ""
+                parts.append(f"@{author}{rep}:{text}")
         return "\n".join(parts)
 
     parts = [
@@ -380,12 +403,14 @@ def format_issue_detail(data: dict) -> str:
             parts.append("## Links")
             parts.extend(link_lines)
 
-    comments = data.get("comments") or []
-    if comments:
-        parts.extend(["", f"## Comments ({len(comments)})"])
+    raw_comments = data.get("comments") or []
+    if raw_comments:
+        comments = dedupe_comments(raw_comments)
+        parts.extend(["", f"## Comments ({len(raw_comments)})"])
         for c in comments:
             author = (c.get("author") or {}).get("name", "Unknown")
-            parts.append(f"**{author}:** {c.get('text') or ''}")
+            rep = f" _(×{c['_repeats']})_" if c.get("_repeats", 1) > 1 else ""
+            parts.append(f"**{author}:**{rep} {c.get('text') or ''}")
             parts.append("")
 
     return "\n".join(parts)

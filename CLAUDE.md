@@ -81,7 +81,9 @@ text instead of a raw 400.
 - Real YouTrack instance URLs
 - Real API tokens
 
-Before every push: `grep -rn "acme\|acme\|acme\|VPN" --include="*.py" --include="*.md"`
+Before every push: `scripts/sweep.sh` — patterns live in `.sweep-patterns.local`
+(untracked; copy `.sweep-patterns.example`). Never inline the banned strings
+anywhere tracked — including this file (that was the ADR-023 leak).
 
 ## Test conventions
 

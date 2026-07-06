@@ -33,3 +33,6 @@ Thumbs.db
 tasks.md
 TODO.md
 NOTES.md
+
+# Sensitive sweep — real patterns live only here (see .sweep-patterns.example)
+.sweep-patterns.local

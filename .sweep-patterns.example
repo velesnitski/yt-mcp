@@ -1,0 +1,10 @@
+# Template for .sweep-patterns.local (which is gitignored — NEVER commit it).
+# One extended-regex per line; matched case-insensitively against every
+# tracked file by scripts/sweep.sh. Put the REAL banned strings only in
+# .sweep-patterns.local, so they never appear in the repo itself.
+#
+# Typical categories:
+# \bacme(corp|vpn)?\b        <- product / company names
+# \bexample-internal\.com\b  <- internal hostnames
+# \bjdoe|janedoe\b           <- real person names
+# perm(:|-)[A-Za-z0-9]{10,}  <- API token shapes
