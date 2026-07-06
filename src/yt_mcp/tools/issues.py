@@ -5,97 +5,23 @@ import httpx
 from datetime import datetime, timezone
 
 from yt_mcp.resolver import InstanceResolver
+from yt_mcp.errors import YouTrackPermissionError
 from yt_mcp.formatters import format_issue_list, format_issue_detail, _resolve_state, _resolve_assignee, _get_custom_field, parse_issue_id, compact_lines, normalize_issue
+from yt_mcp.commands import (
+    CMD_FIELD_RE, CMD_KEYWORDS,
+    apply_field_commands, cmd_error_text, get_project_field_names,
+    make_field_names_getter, split_field_clauses, strip_braces,
+)
 
-_CMD_FIELD_RE = re.compile(r"(\S+)\s+\{([^}]+)\}|(\S+)\s+(\S+)")
-_CMD_KEYWORDS = frozenset({"tag", "untag", "remove", "add", "for", "star", "unstar"})
-# Tokenizer for the field-aware split: {…} groups are atomic value tokens.
-_CMD_TOKEN_RE = re.compile(r"\{([^}]*)\}|(\S+)")
-
-
-async def _get_project_field_names(client, project_id: str) -> list[str]:
-    """Custom-field names for a project (best-effort, [] on any failure).
-
-    Needed because field names can be multi-word and emoji-decorated
-    ("Evaluation time 🕙", "Dev Estimation", "Phase detected") — a naive
-    one-token split garbles them. GET /api/admin/projects is permission-
-    filtered, not admin-gated (ADR-018), so this works for regular users too.
-    """
-    try:
-        fields = await client.get(
-            f"/api/admin/projects/{project_id}/customFields",
-            params={"fields": "field(name)"},
-        )
-        return [
-            n for f in fields
-            if (n := (f.get("field") or {}).get("name", "").strip())
-        ]
-    except (httpx.HTTPStatusError, ValueError, KeyError):
-        return []
-
+# Backwards-compatible aliases (tests and older callers import these here).
+_CMD_FIELD_RE = CMD_FIELD_RE
+_CMD_KEYWORDS = CMD_KEYWORDS
+_cmd_error_text = cmd_error_text
+_get_project_field_names = get_project_field_names
 
 def _split_command_with_field_names(command: str, field_names: list[str]) -> list[str]:
-    """Split a multi-field command into per-field clauses using the project's
-    REAL field names as boundaries.
-
-    Handles what the regex split cannot: multi-word and emoji field names
-    ("Evaluation time 🕙 3d" stays one clause instead of splitting into
-    "Evaluation time" + "🕙 3d"). Braces remain the input-only grouping
-    convention: a {braced} token is always a value, never a field boundary,
-    and braces never survive into the output (ADR-019 — YT commands are bare).
-
-    A field-name match only opens a NEW clause if the current clause already
-    has a value, so an unbraced value that happens to start with another
-    field's name ("Type Product task" where "Product" is also a field) is not
-    mis-split. Returns [] when no known field name matches (caller falls back
-    to the regex split).
-    """
-    tokens: list[tuple[str, bool]] = []  # (text, is_braced_value)
-    for m in _CMD_TOKEN_RE.finditer(command):
-        if m.group(1) is not None:
-            if m.group(1).strip():
-                tokens.append((m.group(1).strip(), True))
-        else:
-            tokens.append((m.group(2), False))
-    # Longest name (in words) first so "QA Estimation" wins over any
-    # single-word prefix of it.
-    names = sorted(
-        {n for n in field_names if n},
-        key=lambda n: -len(n.split()),
-    )
-    name_parts = [(n, [p.lower() for p in n.split()]) for n in names]
-
-    clauses: list[str] = []
-    cur_field: str | None = None
-    cur_value: list[str] = []
-
-    def flush():
-        nonlocal cur_field, cur_value
-        if cur_field is not None and cur_value:
-            clauses.append(f"{cur_field} {' '.join(cur_value)}")
-        cur_field, cur_value = None, []
-
-    i = 0
-    while i < len(tokens):
-        matched_len = 0
-        matched_name = ""
-        if not tokens[i][1] and (cur_field is None or cur_value):
-            for name, parts in name_parts:
-                k = len(parts)
-                seg = tokens[i:i + k]
-                if len(seg) == k and all(not braced for _, braced in seg) and \
-                        [t.lower() for t, _ in seg] == parts:
-                    matched_len, matched_name = k, name
-                    break
-        if matched_len:
-            flush()
-            cur_field = matched_name
-            i += matched_len
-        else:
-            cur_value.append(tokens[i][0])
-            i += 1
-    flush()
-    return clauses
+    from yt_mcp.commands import split_command
+    return split_command(command, field_names)
 
 
 async def _get_required_fields_info(client, project_id: str, project_short: str) -> str:
@@ -125,22 +51,6 @@ async def _get_required_fields_info(client, project_id: str, project_short: str)
         else:
             lines.append(f"- **{name}**")
     return "\n".join(lines) if len(lines) > 1 else ""
-
-
-def _cmd_error_text(e: Exception) -> str:
-    """Concise, URL-free text for a failed command.
-
-    ValueErrors from client._handle_error already carry a clean, truncated
-    YouTrack message (400/404). Everything else — 401/403 permission denials
-    and 5xx — surfaces via raise_for_status() as httpx.HTTPStatusError, whose
-    str() embeds the full request URL (leaks the instance host). Reduce it to
-    status + a short reason so failed_commands stays clean and safe.
-    """
-    if isinstance(e, httpx.HTTPStatusError):
-        code = e.response.status_code
-        reason = "insufficient permissions" if code in (401, 403) else "request failed"
-        return f"HTTP {code} ({reason})"
-    return str(e)
 
 
 def register(mcp, resolver: InstanceResolver):
@@ -352,43 +262,16 @@ def register(mcp, resolver: InstanceResolver):
             "description": description,
         }
 
-        # Product is always a separate command (multi-word values)
-        # User's command is tried as-is first (handles emoji/multi-word fields),
-        # then split into individual pairs as fallback
+        # Product is always a separate command (multi-word values).
+        # The user command goes through commands.apply_field_commands:
+        # whole-bare first, then field-aware split, then rejoin (ADR-019/021).
         product_cmd = f"Product {product}" if product else ""
-        split_commands: list[str] = []
-        if command:
-            for m in _CMD_FIELD_RE.finditer(command):
-                name = m.group(1) or m.group(3)
-                value = m.group(2) or m.group(4)
-                # Emit BARE `name value` — never re-wrap in braces. Verified
-                # live: YouTrack's *command* parser rejects braces in values
-                # (`Status {New Employee}` -> 400 "expected: {New Employee}",
-                # even single-word `Priority {High}`) and matches multi-word
-                # enum values greedily, so `Status New Employee` is the correct
-                # form. Braces are only an INPUT convention so this regex can
-                # capture a multi-word value as one group (group 2 already
-                # excludes the braces); they must not survive into the command.
-                # (Re-wrapping here was the ADR-016/v1.16.6 regression.)
-                split_commands.append(f"{name} {value}")
-
         failed_commands: list[str] = []
-        # Lazily-computed field-aware split (fetched once, shared by the
-        # direct and draft paths). The regex split above is the fallback when
-        # the field list is unavailable or matches nothing.
-        _split_cache: list[list[str]] = []
-
-        async def _split_clauses() -> list[str]:
-            if not _split_cache:
-                names = await _get_project_field_names(client, project_id)
-                clauses = _split_command_with_field_names(command, names) if names else []
-                _split_cache.append(clauses or split_commands)
-            return _split_cache[0]
+        # Field list fetched at most once, shared by the direct + draft paths.
+        field_names = make_field_names_getter(client, project_id)
 
         async def _apply_commands(target_id: str, *, use_internal_id: bool = False):
-            """Apply product, then try user command as-is, split on failure."""
             issue_ref = {"id": target_id} if use_internal_id else {"idReadable": target_id}
-            # Product always separate
             if product_cmd:
                 try:
                     await client.post(
@@ -396,56 +279,28 @@ def register(mcp, resolver: InstanceResolver):
                         json={"query": product_cmd, "issues": [issue_ref]},
                     )
                 except (httpx.HTTPStatusError, ValueError) as e:
-                    failed_commands.append(f"`{product_cmd}`: {_cmd_error_text(e)}")
-            if not command:
-                return
-            # Try the whole command first, BARE — braces are an input-only
-            # convention (so _CMD_FIELD_RE can capture multi-word values); YT's
-            # command parser rejects them, so strip before sending. This sets
-            # simple/single-field commands in one call; a multi-field command
-            # that doesn't parse as a whole falls through to the split below.
-            whole = command.replace("{", "").replace("}", "")
-            try:
-                await client.post(
-                    "/api/commands",
-                    json={"query": whole, "issues": [issue_ref]},
+                    failed_commands.append(f"`{product_cmd}`: {cmd_error_text(e)}")
+            if command:
+                failed_commands.extend(
+                    await apply_field_commands(client, issue_ref, command, field_names)
                 )
-                return  # full command worked
-            except (httpx.HTTPStatusError, ValueError):
-                pass  # fall through to split (400 parse *and* 401/403 perm)
-            # Split fallback: apply each field separately. Field-aware split
-            # (project field names as boundaries) so multi-word/emoji field
-            # NAMES ("Evaluation time 🕙") survive; regex split as fallback.
-            split_failed: list[str] = []
-            for cmd in await _split_clauses():
-                try:
-                    await client.post(
-                        "/api/commands",
-                        json={"query": cmd, "issues": [issue_ref]},
-                    )
-                except (httpx.HTTPStatusError, ValueError):
-                    split_failed.append(cmd)
-            # Rejoin failed splits and retry as single command
-            # (handles multi-word/emoji fields like "Evaluation time 🕙 1h")
-            if split_failed:
-                rejoined = " ".join(split_failed)
-                try:
-                    await client.post(
-                        "/api/commands",
-                        json={"query": rejoined, "issues": [issue_ref]},
-                    )
-                except (httpx.HTTPStatusError, ValueError) as cmd_err:
-                    failed_commands.append(f"`{rejoined}`: {_cmd_error_text(cmd_err)}")
 
         try:
             data = await client.post("/api/issues", json=json_body)
             issue_id = data.get("idReadable", "?")
             await _apply_commands(issue_id)
+        except YouTrackPermissionError as perm:
+            # No Create Issue permission (client maps 401/403 to this, clean
+            # and URL-free). Do NOT fall into the draft path — that would
+            # leave an orphaned draft behind.
+            return (
+                f"**Could not create issue:** insufficient permissions to "
+                f"create issues in project **{project}** (HTTP {perm.status_code}). "
+                f"Ask a YouTrack admin to grant the Create Issue permission."
+            )
         except httpx.HTTPStatusError as perm_err:
-            # 401/403 on the create itself = no Create Issue permission. Return
-            # a clean, actionable message instead of a raw httpx error (which
-            # leaks the instance URL) and — crucially — do NOT fall into the
-            # draft path, which would leave an orphaned draft behind.
+            # Defense-in-depth for a directly-raised httpx error (e.g. a
+            # transport that bypasses client._handle_error); 5xx re-raises.
             code = perm_err.response.status_code
             if code in (401, 403):
                 return (
@@ -584,8 +439,36 @@ def register(mcp, resolver: InstanceResolver):
         if command:
             commands.append(command)
 
+        failed_cmds: list[str] = []
         if commands:
-            await client.execute_command(issue_id, " ".join(commands))
+            try:
+                await client.execute_command(issue_id, " ".join(commands))
+            except (httpx.HTTPStatusError, ValueError):
+                # The joined multi-field command can fail to parse as one
+                # string (multi-word values) or die on a single restricted
+                # field. Retry each part separately so one bad field no
+                # longer aborts the whole update with a raw error; the user
+                # `command` part gets the full whole→split→rejoin treatment.
+                issue_ref = {"idReadable": issue_id}
+                project_short = issue_id.rsplit("-", 1)[0]
+
+                async def _names() -> list[str]:
+                    pid = await client.resolve_project_id(project_short)
+                    return await get_project_field_names(client, pid) if pid else []
+
+                for part in commands:
+                    if command and part == command:
+                        failed_cmds.extend(
+                            await apply_field_commands(client, issue_ref, part, _names)
+                        )
+                        continue
+                    try:
+                        await client.post(
+                            "/api/commands",
+                            json={"query": part, "issues": [issue_ref]},
+                        )
+                    except (httpx.HTTPStatusError, ValueError) as e:
+                        failed_cmds.append(f"`{part}`: {cmd_error_text(e)}")
 
         # Fetch updated state
         after = await client.get(
@@ -638,6 +521,10 @@ def register(mcp, resolver: InstanceResolver):
             parts.extend(changes)
         else:
             parts.append("No field changes detected.")
+
+        if failed_cmds:
+            parts.append("")
+            parts.append(f"**Could not apply:** {'; '.join(failed_cmds)}")
 
         # Rollback instructions
         rollback_parts = []
@@ -708,12 +595,8 @@ def register(mcp, resolver: InstanceResolver):
         applied: list[str] = []
         failed: list[str] = []
         if set_fields:
-            names = await _get_project_field_names(client, project_id) if project_id else []
-            clauses = _split_command_with_field_names(set_fields, names) or [
-                f"{(m.group(1) or m.group(3))} {(m.group(2) or m.group(4))}"
-                for m in _CMD_FIELD_RE.finditer(set_fields)
-            ]
-            for clause in clauses:
+            names = await get_project_field_names(client, project_id) if project_id else []
+            for clause in split_field_clauses(set_fields, names):
                 try:
                     await client.post(
                         "/api/commands",
@@ -721,9 +604,9 @@ def register(mcp, resolver: InstanceResolver):
                     )
                     applied.append(clause)
                 except (httpx.HTTPStatusError, ValueError) as e:
-                    failed.append(f"`{clause}`: {_cmd_error_text(e)}")
+                    failed.append(f"`{clause}`: {cmd_error_text(e)}")
 
-        state_bare = state.replace("{", "").replace("}", "").strip()
+        state_bare = strip_braces(state).strip()
         parts: list[str] = []
         try:
             await client.post(

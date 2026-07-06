@@ -618,7 +618,10 @@ class TestCreateIssueLowPermissionIntegration:
             project="HR", summary="test", command="Department DevOps",
         )
         assert "Created" in out
-        assert "HTTP 403 (insufficient permissions)" in out
+        # Real 403s map to YouTrackPermissionError at the client layer —
+        # clean canonical text, still URL-free.
+        assert "permission error (403)" in out
+        assert "insufficient permissions" in out
         assert "example.youtrack.cloud" not in out  # URL must not leak
         assert "/api/projects" not in seen
 
@@ -866,3 +869,68 @@ class TestTransitionIssue:
         )
         assert "State Ready for QA" in seen
         assert not any("{" in q for q in seen)
+
+
+# --- update_issue: per-part fallback when the joined command fails ------------
+
+
+class TestUpdateIssueCommandFallback:
+    def _make(self, *, fail_parts=()):
+        mcp = FastMCP("test")
+        client = MagicMock()
+        seen: list[str] = []
+
+        async def _get(path, params=None):
+            if path.endswith("/customFields"):
+                return [{"field": {"name": n}} for n in
+                        ["State", "Assignee", "Product"]]
+            return {
+                "idReadable": "PROJ-9", "summary": "t", "description": "",
+                "customFields": [{"name": "State", "value": {"name": "Open"}}],
+                "tags": [],
+            }
+
+        async def _post(path, json=None):
+            if path.startswith("/api/issues/"):
+                return {}
+            q = json["query"]
+            seen.append(q)
+            if any(p in q for p in fail_parts):
+                raise ValueError("YouTrack query error (400): nope")
+            return {}
+
+        async def _exec(issue_id, cmd):
+            seen.append(f"JOINED:{cmd}")
+            raise ValueError("YouTrack query error (400): parse")
+
+        client.get = AsyncMock(side_effect=_get)
+        client.post = AsyncMock(side_effect=_post)
+        client.execute_command = AsyncMock(side_effect=_exec)
+        client.resolve_project_id = AsyncMock(return_value="0-5")
+        resolver = MagicMock(spec=InstanceResolver)
+        resolver.resolve = MagicMock(return_value=client)
+        _register_issues(mcp, resolver)
+        return mcp, seen
+
+    @pytest.mark.asyncio
+    async def test_joined_failure_retries_parts_individually(self):
+        mcp, seen = self._make()
+        out = await _get_tool_fn(mcp, "update_issue")(
+            issue_id="PROJ-9", state="To Do", assignee="jdoe",
+        )
+        assert any(s.startswith("JOINED:") for s in seen)   # tried joined first
+        assert "State To Do" in seen                        # then per-part
+        assert "Assignee jdoe" in seen
+        assert "Could not apply" not in out                 # all parts landed
+
+    @pytest.mark.asyncio
+    async def test_one_bad_part_reported_not_raised(self):
+        mcp, seen = self._make(fail_parts=("Assignee",))
+        out = await _get_tool_fn(mcp, "update_issue")(
+            issue_id="PROJ-9", state="To Do", assignee="jdoe",
+        )
+        # the update no longer aborts with a raw error: good part applied,
+        # bad part surfaced legibly
+        assert "State To Do" in seen
+        assert "Could not apply:" in out
+        assert "Assignee jdoe" in out

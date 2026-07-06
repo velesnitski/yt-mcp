@@ -2,6 +2,7 @@ import logging
 
 import httpx
 from yt_mcp.config import YouTrackConfig
+from yt_mcp.errors import YouTrackPermissionError
 from yt_mcp.formatters import rewrite_or_clauses
 
 _logger = logging.getLogger("yt_mcp")
@@ -88,6 +89,18 @@ class YouTrackClient:
                 extra={"error_type": "youtrack_api", "tool": resp.request.url.path},
             )
             raise error
+        if resp.status_code in (401, 403):
+            # Clean, URL-free ValueError subclass so EVERY tool's existing
+            # `except ValueError` handles permission failures gracefully —
+            # previously these escaped as httpx.HTTPStatusError (whose str()
+            # embeds the request URL) in any module that hadn't opted in
+            # (ADR-017 fixed issues.py piecemeal; this fixes the fleet).
+            perm = YouTrackPermissionError(resp.status_code)
+            _logger.warning(
+                str(perm),
+                extra={"error_type": "youtrack_permission", "tool": resp.request.url.path},
+            )
+            raise perm
         resp.raise_for_status()
 
     async def get(self, path: str, params: dict | None = None):
