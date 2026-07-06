@@ -8,6 +8,7 @@ WRITE_TOOLS = frozenset({
     "create_issue",
     "create_issue_from_template",
     "update_issue",
+    "transition_issue",
     "delete_issue",
     "add_comment",
     "update_comment",

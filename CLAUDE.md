@@ -1,6 +1,6 @@
 # yt-mcp
 
-YouTrack MCP server. 78 tools across 19 modules.
+YouTrack MCP server. 79 tools across 19 modules.
 
 ## Build & test
 
@@ -56,13 +56,21 @@ src/yt_mcp/
 
 ## create_issue command strategy
 
-When `command` param is provided:
-1. Try full command as-is (handles emoji/multi-word fields)
-2. On failure: split into individual field-value pairs via regex
+When `command` param is provided (values always sent BARE — YT's command
+parser rejects `{braces}`; braces are input-only grouping, ADR-019):
+1. Try full command as one call (braces stripped)
+2. On failure: split per-field using the project's REAL field names as
+   boundaries (`_split_command_with_field_names`, ADR-021) — handles
+   multi-word/emoji names like `Evaluation time 🕙`; regex split is the
+   fallback when the field list is unavailable
 3. On split failures: rejoin failed parts and retry as single command
 4. Product is always a separate command call
 
 If creation fails due to required fields: creates draft, applies commands, publishes.
+
+For gated state changes use `transition_issue` (ADR-021): sets fields
+first, then transitions, and surfaces the blocking workflow rule's own
+text instead of a raw 400.
 
 ## Sensitive data rules
 

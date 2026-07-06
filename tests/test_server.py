@@ -82,7 +82,7 @@ class TestServerStartup:
         assert tools_resp is not None, f"No tools/list response found in: {responses}"
         tools = tools_resp["result"]["tools"]
         tool_names = {t["name"] for t in tools}
-        assert len(tool_names) == 78, f"Expected 78 tools, got {len(tool_names)}"
+        assert len(tool_names) == 79, f"Expected 79 tools, got {len(tool_names)}"
         # Spot check a few
         assert "search_issues" in tool_names
         assert "get_article" in tool_names

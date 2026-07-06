@@ -44,7 +44,7 @@ class TestToolRegistration:
         register_all(mcp, resolver, config)
 
         tools = _get_tool_names(mcp)
-        assert len(tools) == 78, f"Expected 78 tools, got {len(tools)}: {sorted(tools)}"
+        assert len(tools) == 79, f"Expected 79 tools, got {len(tools)}: {sorted(tools)}"
 
     def test_expected_tools_present(self):
         mcp = FastMCP("test")
@@ -54,7 +54,7 @@ class TestToolRegistration:
 
         tools = _get_tool_names(mcp)
         expected = {
-            "search_issues", "get_issue", "get_issues", "create_issue", "update_issue",
+            "search_issues", "get_issue", "get_issues", "create_issue", "update_issue", "transition_issue",
             "delete_issue", "get_issue_links", "add_issue_link", "remove_issue_link",
             "add_comment", "update_comment", "delete_comment", "poll_changes",
             "get_top_active_issues", "get_top_blocked_issues", "get_team_dashboard", "get_multi_team_dashboard",
@@ -150,7 +150,7 @@ class TestToolRegistration:
     def test_write_tools_set_complete(self):
         """Verify WRITE_TOOLS contains all tools that modify data."""
         expected_write = {
-            "create_issue", "create_issue_from_template", "update_issue",
+            "create_issue", "create_issue_from_template", "update_issue", "transition_issue",
             "delete_issue", "add_comment", "update_comment", "delete_comment",
             "add_attachment",
             "add_issue_link", "remove_issue_link",
@@ -173,4 +173,4 @@ class TestToolRegistration:
         register_all(mcp, resolver, config=None)
 
         tools = _get_tool_names(mcp)
-        assert len(tools) == 78
+        assert len(tools) == 79

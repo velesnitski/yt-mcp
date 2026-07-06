@@ -381,6 +381,7 @@ class TestCreateIssueBareCommandValues:
             return {}
 
         client.post = AsyncMock(side_effect=_post)
+        client.get = AsyncMock(return_value=[])  # empty field list -> regex-split fallback
         resolver = MagicMock(spec=InstanceResolver)
         resolver.resolve = MagicMock(return_value=client)
         _register_issues(mcp, resolver)
@@ -466,6 +467,7 @@ class TestCreateIssueInsufficientPermissions:
             return {}
 
         client.post = AsyncMock(side_effect=_post)
+        client.get = AsyncMock(return_value=[])  # empty field list -> regex-split fallback
         resolver = MagicMock(spec=InstanceResolver)
         resolver.resolve = MagicMock(return_value=client)
         _register_issues(mcp, resolver)
@@ -654,3 +656,213 @@ class TestCreateIssueLowPermissionIntegration:
         assert "not found" in out.lower()
         assert "/api/issues" not in seen  # never tried to create
         assert "/api/projects" not in seen
+
+
+# --- field-aware command split (multi-word / emoji field NAMES) ---------------
+#
+# The regex split assumes one-token field names; real projects have
+# "Evaluation time 🕙", "Dev Estimation", "Phase detected". The field-aware
+# split uses the project's actual field names as clause boundaries.
+from yt_mcp.tools.issues import _split_command_with_field_names
+
+
+class TestFieldAwareSplit:
+    NAMES = ["State", "Type", "Product", "Dev Estimation", "QA Estimation",
+             "Evaluation time 🕙", "Phase detected", "Assignee"]
+
+    def test_emoji_and_multiword_names_stay_whole(self):
+        out = _split_command_with_field_names(
+            "Dev Estimation 2d QA Estimation 1d Evaluation time 🕙 3d",
+            self.NAMES,
+        )
+        assert out == ["Dev Estimation 2d", "QA Estimation 1d",
+                       "Evaluation time 🕙 3d"]
+
+    def test_braced_value_is_atomic_and_braces_stripped(self):
+        out = _split_command_with_field_names(
+            "Type {Product task} Product Alpha", self.NAMES,
+        )
+        assert out == ["Type Product task", "Product Alpha"]
+        assert not any("{" in c or "}" in c for c in out)
+
+    def test_unbraced_value_starting_with_field_name_not_missplit(self):
+        # "Product" is a field name, but here it's the first word of Type's
+        # value — a new clause must not open on an empty-valued field.
+        out = _split_command_with_field_names("Type Product task", self.NAMES)
+        assert out == ["Type Product task"]
+
+    def test_multiword_state_value(self):
+        out = _split_command_with_field_names(
+            "State {Ready for QA} Assignee jdoe", self.NAMES,
+        )
+        assert out == ["State Ready for QA", "Assignee jdoe"]
+
+    def test_no_known_names_returns_empty_for_fallback(self):
+        assert _split_command_with_field_names("Foo bar Baz qux", self.NAMES) == []
+
+    def test_case_insensitive_name_match(self):
+        out = _split_command_with_field_names("state To Do", self.NAMES)
+        assert out == ["State To Do"]
+
+
+class TestCreateIssueFieldAwareSplit:
+    """create_issue uses the project field list to split, so an emoji field
+    name survives the per-field fallback instead of being garbled."""
+
+    def _make(self, field_names):
+        mcp = FastMCP("test")
+        client = MagicMock()
+        client.resolve_project_id = AsyncMock(return_value="0-5")
+        seen: list[str] = []
+
+        async def _post(path, json=None):
+            if path == "/api/issues":
+                return {"idReadable": "PROJ-99", "summary": "t"}
+            if path == "/api/commands":
+                q = json["query"]
+                seen.append(q)
+                if "{" in q or "}" in q:
+                    raise ValueError("YouTrack query error (400): braces")
+                # combined multi-field command fails -> split path
+                if "Dev Estimation" in q and "Evaluation" in q:
+                    raise ValueError("YouTrack query error (400): parse")
+                # a garbled emoji clause (name split off) also fails
+                if q.startswith("🕙"):
+                    raise ValueError("YouTrack query error (400): Unknown command: 🕙")
+                return {}
+            return {}
+
+        async def _get(path, params=None):
+            if path.endswith("/customFields"):
+                return [{"field": {"name": n}} for n in field_names]
+            return {}
+
+        client.post = AsyncMock(side_effect=_post)
+        client.get = AsyncMock(side_effect=_get)
+        resolver = MagicMock(spec=InstanceResolver)
+        resolver.resolve = MagicMock(return_value=client)
+        _register_issues(mcp, resolver)
+        return mcp, seen
+
+    @pytest.mark.asyncio
+    async def test_emoji_field_name_survives_split(self):
+        mcp, seen = self._make(
+            ["Dev Estimation", "QA Estimation", "Evaluation time 🕙", "State"])
+        out = await _get_tool_fn(mcp, "create_issue")(
+            project="PROJ", summary="t",
+            command="Dev Estimation 2d Evaluation time 🕙 3d",
+        )
+        assert "Evaluation time 🕙 3d" in seen      # intact clause
+        assert not any(q.startswith("🕙") for q in seen)  # never garbled
+        assert "Could not set" not in out
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_regex_split_without_field_list(self):
+        mcp, seen = self._make([])  # customFields returns nothing
+        out = await _get_tool_fn(mcp, "create_issue")(
+            project="PROJ", summary="t",
+            command="Dev Estimation 2d Evaluation time 🕙 3d",
+        )
+        assert "Created" in out  # still creates; split is best-effort
+
+
+# --- transition_issue: gate-aware state changes --------------------------------
+
+
+class TestTransitionIssue:
+    def _make(self, *, state_field="State", current="Submitted",
+              block_msg=None, after_state=None, fail_field_cmds=False):
+        mcp = FastMCP("test")
+        client = MagicMock()
+        seen: list[str] = []
+        reads = {"n": 0}
+
+        async def _get(path, params=None):
+            if path.endswith("/customFields"):
+                return [{"field": {"name": n}} for n in
+                        [state_field, "Dev Estimation", "QA Estimation"]]
+            reads["n"] += 1
+            st = current if reads["n"] == 1 else (after_state or current)
+            return {
+                "idReadable": "PROJ-7", "summary": "t",
+                "project": {"id": "0-5"},
+                "customFields": [{"name": state_field, "value": {"name": st}}],
+            }
+
+        async def _post(path, json=None):
+            q = json["query"]
+            seen.append(q)
+            if fail_field_cmds and "Estimation" in q:
+                raise ValueError("YouTrack query error (400): nope")
+            if block_msg and q.startswith(state_field):
+                raise ValueError(f"YouTrack query error (400): {block_msg}")
+            return {}
+
+        client.get = AsyncMock(side_effect=_get)
+        client.post = AsyncMock(side_effect=_post)
+        resolver = MagicMock(spec=InstanceResolver)
+        resolver.resolve = MagicMock(return_value=client)
+        _register_issues(mcp, resolver)
+        return mcp, seen
+
+    @pytest.mark.asyncio
+    async def test_successful_transition_reports_old_and_new(self):
+        mcp, seen = self._make(after_state="To Do")
+        out = await _get_tool_fn(mcp, "transition_issue")(
+            issue_id="PROJ-7", state="To Do",
+        )
+        assert "State To Do" in seen
+        assert "Submitted → To Do" in out
+
+    @pytest.mark.asyncio
+    async def test_gate_block_surfaces_workflow_rule_text(self):
+        mcp, seen = self._make(block_msg="set Dev Estimation before To Do")
+        out = await _get_tool_fn(mcp, "transition_issue")(
+            issue_id="PROJ-7", state="To Do",
+        )
+        assert "blocked" in out
+        assert "set Dev Estimation before To Do" in out
+        assert "set_fields" in out  # actionable hint
+        assert "Current state:" in out
+
+    @pytest.mark.asyncio
+    async def test_set_fields_applied_before_transition(self):
+        mcp, seen = self._make(after_state="To Do")
+        out = await _get_tool_fn(mcp, "transition_issue")(
+            issue_id="PROJ-7", state="To Do",
+            set_fields="Dev Estimation 2d QA Estimation 1d",
+        )
+        # field clauses first (field-aware split kept them whole), state last
+        assert seen == ["Dev Estimation 2d", "QA Estimation 1d", "State To Do"]
+        assert "Fields set:" in out
+
+    @pytest.mark.asyncio
+    async def test_status_field_projects_use_status_command(self):
+        # HR-style projects name the state field "Status" — the command must
+        # use the real field name.
+        mcp, seen = self._make(state_field="Status", current="New Employee",
+                               after_state="Closed")
+        out = await _get_tool_fn(mcp, "transition_issue")(
+            issue_id="PROJ-7", state="Closed",
+        )
+        assert "Status Closed" in seen
+        assert "State Closed" not in seen
+
+    @pytest.mark.asyncio
+    async def test_failed_set_fields_reported_but_transition_attempted(self):
+        mcp, seen = self._make(after_state="To Do", fail_field_cmds=True)
+        out = await _get_tool_fn(mcp, "transition_issue")(
+            issue_id="PROJ-7", state="To Do",
+            set_fields="Dev Estimation 2d",
+        )
+        assert "Fields NOT set:" in out
+        assert any(q.startswith("State") for q in seen)  # still tried
+
+    @pytest.mark.asyncio
+    async def test_braces_in_state_stripped(self):
+        mcp, seen = self._make(after_state="Ready for QA")
+        await _get_tool_fn(mcp, "transition_issue")(
+            issue_id="PROJ-7", state="{Ready for QA}",
+        )
+        assert "State Ready for QA" in seen
+        assert not any("{" in q for q in seen)

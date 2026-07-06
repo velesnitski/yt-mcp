@@ -9,6 +9,93 @@ from yt_mcp.formatters import format_issue_list, format_issue_detail, _resolve_s
 
 _CMD_FIELD_RE = re.compile(r"(\S+)\s+\{([^}]+)\}|(\S+)\s+(\S+)")
 _CMD_KEYWORDS = frozenset({"tag", "untag", "remove", "add", "for", "star", "unstar"})
+# Tokenizer for the field-aware split: {…} groups are atomic value tokens.
+_CMD_TOKEN_RE = re.compile(r"\{([^}]*)\}|(\S+)")
+
+
+async def _get_project_field_names(client, project_id: str) -> list[str]:
+    """Custom-field names for a project (best-effort, [] on any failure).
+
+    Needed because field names can be multi-word and emoji-decorated
+    ("Evaluation time 🕙", "Dev Estimation", "Phase detected") — a naive
+    one-token split garbles them. GET /api/admin/projects is permission-
+    filtered, not admin-gated (ADR-018), so this works for regular users too.
+    """
+    try:
+        fields = await client.get(
+            f"/api/admin/projects/{project_id}/customFields",
+            params={"fields": "field(name)"},
+        )
+        return [
+            n for f in fields
+            if (n := (f.get("field") or {}).get("name", "").strip())
+        ]
+    except (httpx.HTTPStatusError, ValueError, KeyError):
+        return []
+
+
+def _split_command_with_field_names(command: str, field_names: list[str]) -> list[str]:
+    """Split a multi-field command into per-field clauses using the project's
+    REAL field names as boundaries.
+
+    Handles what the regex split cannot: multi-word and emoji field names
+    ("Evaluation time 🕙 3d" stays one clause instead of splitting into
+    "Evaluation time" + "🕙 3d"). Braces remain the input-only grouping
+    convention: a {braced} token is always a value, never a field boundary,
+    and braces never survive into the output (ADR-019 — YT commands are bare).
+
+    A field-name match only opens a NEW clause if the current clause already
+    has a value, so an unbraced value that happens to start with another
+    field's name ("Type Product task" where "Product" is also a field) is not
+    mis-split. Returns [] when no known field name matches (caller falls back
+    to the regex split).
+    """
+    tokens: list[tuple[str, bool]] = []  # (text, is_braced_value)
+    for m in _CMD_TOKEN_RE.finditer(command):
+        if m.group(1) is not None:
+            if m.group(1).strip():
+                tokens.append((m.group(1).strip(), True))
+        else:
+            tokens.append((m.group(2), False))
+    # Longest name (in words) first so "QA Estimation" wins over any
+    # single-word prefix of it.
+    names = sorted(
+        {n for n in field_names if n},
+        key=lambda n: -len(n.split()),
+    )
+    name_parts = [(n, [p.lower() for p in n.split()]) for n in names]
+
+    clauses: list[str] = []
+    cur_field: str | None = None
+    cur_value: list[str] = []
+
+    def flush():
+        nonlocal cur_field, cur_value
+        if cur_field is not None and cur_value:
+            clauses.append(f"{cur_field} {' '.join(cur_value)}")
+        cur_field, cur_value = None, []
+
+    i = 0
+    while i < len(tokens):
+        matched_len = 0
+        matched_name = ""
+        if not tokens[i][1] and (cur_field is None or cur_value):
+            for name, parts in name_parts:
+                k = len(parts)
+                seg = tokens[i:i + k]
+                if len(seg) == k and all(not braced for _, braced in seg) and \
+                        [t.lower() for t, _ in seg] == parts:
+                    matched_len, matched_name = k, name
+                    break
+        if matched_len:
+            flush()
+            cur_field = matched_name
+            i += matched_len
+        else:
+            cur_value.append(tokens[i][0])
+            i += 1
+    flush()
+    return clauses
 
 
 async def _get_required_fields_info(client, project_id: str, project_short: str) -> str:
@@ -286,6 +373,17 @@ def register(mcp, resolver: InstanceResolver):
                 split_commands.append(f"{name} {value}")
 
         failed_commands: list[str] = []
+        # Lazily-computed field-aware split (fetched once, shared by the
+        # direct and draft paths). The regex split above is the fallback when
+        # the field list is unavailable or matches nothing.
+        _split_cache: list[list[str]] = []
+
+        async def _split_clauses() -> list[str]:
+            if not _split_cache:
+                names = await _get_project_field_names(client, project_id)
+                clauses = _split_command_with_field_names(command, names) if names else []
+                _split_cache.append(clauses or split_commands)
+            return _split_cache[0]
 
         async def _apply_commands(target_id: str, *, use_internal_id: bool = False):
             """Apply product, then try user command as-is, split on failure."""
@@ -315,9 +413,11 @@ def register(mcp, resolver: InstanceResolver):
                 return  # full command worked
             except (httpx.HTTPStatusError, ValueError):
                 pass  # fall through to split (400 parse *and* 401/403 perm)
-            # Split fallback: apply each field separately
+            # Split fallback: apply each field separately. Field-aware split
+            # (project field names as boundaries) so multi-word/emoji field
+            # NAMES ("Evaluation time 🕙") survive; regex split as fallback.
             split_failed: list[str] = []
-            for cmd in split_commands:
+            for cmd in await _split_clauses():
                 try:
                     await client.post(
                         "/api/commands",
@@ -554,6 +654,118 @@ def register(mcp, resolver: InstanceResolver):
             parts.append("")
             parts.append(f"To restore: `update_issue({issue_id}, {', '.join(rollback_parts)})`")
 
+        return compact_lines(parts)
+
+    @mcp.tool()
+    async def transition_issue(
+        issue_id: str,
+        state: str,
+        set_fields: str = "",
+        instance: str = "",
+    ) -> str:
+        """Change an issue's State, gate-aware: set required fields first, then
+        transition, and report the exact workflow rule if it still blocks.
+
+        YouTrack workflow scripts often gate transitions ("set Dev Estimation
+        before To Do"). A raw update fails one opaque 400 at a time; this tool
+        applies `set_fields` field-by-field first (command syntax, e.g.
+        'Dev Estimation 2d QA Estimation 1d'), then attempts the state change.
+        If a gate still blocks, the blocking rule's own text is returned so
+        the caller knows exactly what to supply — nothing is ever invented.
+
+        Args:
+            issue_id: Issue ID or URL
+            state: Target state name (bare, e.g. 'To Do', 'Ready for QA')
+            set_fields: Fields to set before transitioning (command syntax; optional)
+            instance: YouTrack instance (optional)
+        """
+        client = resolver.resolve(instance)
+        issue_id = parse_issue_id(issue_id)
+        try:
+            before = await client.get(
+                f"/api/issues/{issue_id}",
+                params={
+                    "fields": "idReadable,summary,project(id),"
+                    "customFields(name,value(name))",
+                },
+            )
+        except ValueError as e:
+            return f"Could not read {issue_id}: {e}"
+        # Projects name their state field differently ("State" on dev boards,
+        # "Status" on e.g. HR) — command syntax needs the real field name.
+        state_field = "State"
+        for cf in before.get("customFields", []):
+            if cf.get("name") in ("State", "Status"):
+                state_field = cf["name"]
+                break
+        old_state = _get_custom_field(before, state_field) or _resolve_state(before)
+        project_id = (before.get("project") or {}).get("id", "")
+        # Internal ids ("87-61285", e.g. drafts) need {"id": ...};
+        # readable ids ("PROJ-7") use {"idReadable": ...}.
+        internal = issue_id.split("-", 1)[0].isdigit()
+        issue_ref = {"id": issue_id} if internal else {"idReadable": issue_id}
+
+        applied: list[str] = []
+        failed: list[str] = []
+        if set_fields:
+            names = await _get_project_field_names(client, project_id) if project_id else []
+            clauses = _split_command_with_field_names(set_fields, names) or [
+                f"{(m.group(1) or m.group(3))} {(m.group(2) or m.group(4))}"
+                for m in _CMD_FIELD_RE.finditer(set_fields)
+            ]
+            for clause in clauses:
+                try:
+                    await client.post(
+                        "/api/commands",
+                        json={"query": clause, "issues": [issue_ref]},
+                    )
+                    applied.append(clause)
+                except (httpx.HTTPStatusError, ValueError) as e:
+                    failed.append(f"`{clause}`: {_cmd_error_text(e)}")
+
+        state_bare = state.replace("{", "").replace("}", "").strip()
+        parts: list[str] = []
+        try:
+            await client.post(
+                "/api/commands",
+                json={"query": f"{state_field} {state_bare}", "issues": [issue_ref]},
+            )
+        except (httpx.HTTPStatusError, ValueError) as e:
+            parts.append(
+                f"⛔ **{issue_id}: transition to '{state_bare}' blocked** — "
+                f"{_cmd_error_text(e)}"
+            )
+            parts.append(f"**Current state:** {old_state}")
+            if applied:
+                parts.append(f"**Fields set:** {'; '.join(applied)}")
+            if failed:
+                parts.append(f"**Fields NOT set:** {'; '.join(failed)}")
+            parts.append(
+                "If the message above names a required field, pass it via "
+                "`set_fields` (e.g. `set_fields=\"Dev Estimation 2d QA Estimation 1d\"`) "
+                "and retry."
+            )
+            return compact_lines(parts)
+
+        # Verify the state actually changed (workflows can silently no-op).
+        try:
+            after = await client.get(
+                f"/api/issues/{issue_id}",
+                params={"fields": "customFields(name,value(name))"},
+            )
+            new_state = _get_custom_field(after, state_field) or _resolve_state(after)
+        except ValueError:
+            new_state = state_bare
+        parts.append(f"✅ **{issue_id}**: State {old_state} → {new_state}")
+        if applied:
+            parts.append(f"**Fields set:** {'; '.join(applied)}")
+        if failed:
+            parts.append(f"**Fields NOT set:** {'; '.join(failed)}")
+        if new_state.lower() != state_bare.lower():
+            parts.append(
+                f"⚠ Requested '{state_bare}' but the issue reads '{new_state}' — "
+                "a workflow rule may have redirected the transition."
+            )
         return compact_lines(parts)
 
     @mcp.tool()
