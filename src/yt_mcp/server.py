@@ -1,4 +1,12 @@
+"""Entry point. Deliberately free of import-time side effects (ADR-024):
+importing this module must not configure logging, init Sentry, read env
+config, build HTTP clients, or register tools. All of that happens in
+build_server(), called from main() AFTER argument parsing — so
+`yt-mcp --version` answers instantly and silently, and tests can import the
+module without environment setup.
+"""
 import os
+from dataclasses import dataclass
 
 from mcp.server.fastmcp import FastMCP
 from yt_mcp import __version__
@@ -13,25 +21,27 @@ from yt_mcp.logging import setup_logging, setup_sentry, INSTANCE_ID
 # as slack-mcp's `server.NewMCPServer("slack v"+version, version, ...)`.
 _SERVER_NAME = f"youtrack v{__version__}"
 
-# Initialize logging and error tracking
-_logger = setup_logging()
-setup_sentry()
-_logger.info("Starting yt-mcp", extra={"instance": INSTANCE_ID})
 
-_oauth_provider = None
+@dataclass
+class ServerBundle:
+    """Everything main() needs from construction, without module globals."""
+    mcp: FastMCP
+    oauth_provider: object | None
 
 
-def _build_mcp() -> FastMCP:
-    """Build the MCP server, optionally with OAuth for claude.ai connectors."""
-    global _oauth_provider
+def build_server() -> ServerBundle:
+    """Construct the fully-wired MCP server (logging, Sentry, clients, tools)."""
+    logger = setup_logging()
+    setup_sentry()
+    logger.info("Starting yt-mcp", extra={"instance": INSTANCE_ID})
+
+    oauth_provider = None
     oauth_url = os.environ.get("YOUTRACK_OAUTH_URL", "")
-
     if oauth_url:
         from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
         from yt_mcp.auth import SimpleOAuthProvider
 
         access_code = os.environ.get("YOUTRACK_ACCESS_CODE", "")
-
         auth_settings = AuthSettings(
             issuer_url=oauth_url,
             resource_server_url=oauth_url,
@@ -42,24 +52,23 @@ def _build_mcp() -> FastMCP:
             ),
             revocation_options=RevocationOptions(enabled=True),
         )
-        _oauth_provider = SimpleOAuthProvider(
+        oauth_provider = SimpleOAuthProvider(
             access_code=access_code,
             server_url=oauth_url,
         )
-        return FastMCP(_SERVER_NAME, auth=auth_settings, auth_server_provider=_oauth_provider)
+        mcp = FastMCP(_SERVER_NAME, auth=auth_settings, auth_server_provider=oauth_provider)
+    else:
+        mcp = FastMCP(_SERVER_NAME)
 
-    return FastMCP(_SERVER_NAME)
+    configs = load_all_configs()
+    clients = {name: YouTrackClient(cfg) for name, cfg in configs.items()}
+    resolver = InstanceResolver(clients)
 
-
-mcp = _build_mcp()
-
-configs = load_all_configs()
-clients = {name: YouTrackClient(cfg) for name, cfg in configs.items()}
-resolver = InstanceResolver(clients)
-
-# Use the first instance's config for server-level settings (read_only, disabled_tools)
-server_config = next(iter(configs.values()))
-register_all(mcp, resolver, server_config)
+    # Use the first instance's config for server-level settings
+    # (read_only, disabled_tools) — they are replicated across instances.
+    server_config = next(iter(configs.values()))
+    register_all(mcp, resolver, server_config)
+    return ServerBundle(mcp=mcp, oauth_provider=oauth_provider)
 
 
 def main():
@@ -84,14 +93,17 @@ def main():
     parser.add_argument(
         "--port", type=int, default=8000, help="Port to bind to (default: 8000)"
     )
-    args = parser.parse_args()
+    args = parser.parse_args()  # --version exits here, before any construction
+
+    bundle = build_server()
+    mcp = bundle.mcp
 
     if args.transport == "stdio":
         mcp.run(transport="stdio")
         return
 
     # For HTTP transports: add verify route if access code is configured
-    if _oauth_provider and os.environ.get("YOUTRACK_ACCESS_CODE"):
+    if bundle.oauth_provider and os.environ.get("YOUTRACK_ACCESS_CODE"):
         import uvicorn
         from starlette.applications import Starlette
         from starlette.routing import Route, Mount
@@ -103,7 +115,7 @@ def main():
             mcp_app = mcp.streamable_http_app()
 
         app = Starlette(routes=[
-            Route("/auth/verify", create_verify_handler(_oauth_provider), methods=["GET", "POST"]),
+            Route("/auth/verify", create_verify_handler(bundle.oauth_provider), methods=["GET", "POST"]),
             Mount("/", mcp_app),
         ])
         uvicorn.run(app, host=args.host, port=args.port)

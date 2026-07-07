@@ -118,3 +118,39 @@ class TestServerStartup:
         assert tools_resp is not None
         for tool in tools_resp["result"]["tools"]:
             assert tool.get("description"), f"Tool '{tool['name']}' has no description"
+
+    def test_version_is_silent_and_instant(self):
+        """--version must not construct the server: no log lines on stderr,
+        nothing but the version on stdout (ADR-024 lazy-startup contract)."""
+        result = subprocess.run(
+            [sys.executable, "-m", "yt_mcp.server", "--version"],
+            capture_output=True, text=True, timeout=30,
+        )
+        from yt_mcp import __version__
+        assert result.stdout.strip() == __version__
+        assert "Starting yt-mcp" not in result.stderr
+
+    def test_import_has_no_side_effects(self):
+        """Importing yt_mcp.server must not read env config, build clients,
+        or register tools — construction lives in build_server()."""
+        code = (
+            "import logging, yt_mcp.server;"
+            "assert not hasattr(yt_mcp.server, 'mcp');"
+            "assert not logging.getLogger('yt_mcp').handlers"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True, text=True, timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+
+    def test_build_server_wires_everything(self, monkeypatch):
+        monkeypatch.setenv("YOUTRACK_URL", "https://test.youtrack.cloud")
+        monkeypatch.setenv("YOUTRACK_TOKEN", "perm:test")
+        monkeypatch.delenv("YOUTRACK_INSTANCES", raising=False)
+        monkeypatch.delenv("YOUTRACK_OAUTH_URL", raising=False)
+        from yt_mcp.server import build_server
+        from yt_mcp.tools import _registered_tools
+        bundle = build_server()
+        assert bundle.oauth_provider is None
+        assert len(_registered_tools(bundle.mcp)) == 79

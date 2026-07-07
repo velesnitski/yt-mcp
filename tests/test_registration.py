@@ -13,6 +13,7 @@ def _make_client():
     cfg = YouTrackConfig(url="https://test.youtrack.cloud", token="perm:test")
     mock = MagicMock()
     mock._config = cfg
+    mock.base_url = cfg.url  # resolver uses the public property (ADR-024)
     mock.get = AsyncMock(return_value=[])
     mock.post = AsyncMock(return_value={})
     mock.delete = AsyncMock()

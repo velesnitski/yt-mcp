@@ -20,7 +20,7 @@ class InstanceResolver:
 
         self._domain_map: dict[str, str] = {}
         for name, client in clients.items():
-            domain = urlparse(client._config.url).hostname
+            domain = urlparse(client.base_url).hostname
             if domain:
                 self._domain_map[domain] = name
 

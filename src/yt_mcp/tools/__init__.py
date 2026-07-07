@@ -37,17 +37,31 @@ WRITE_TOOLS = frozenset({
 })
 
 
+def _registered_tools(mcp) -> dict:
+    """The ONE place that touches FastMCP's private tool registry.
+
+    FastMCP has no public API to enumerate/mutate registered tools after the
+    fact, so we reach into `_tool_manager._tools` — a version-coupled hack
+    (pin: mcp>=1.0,<1.26 in pyproject). Keeping every reach-in behind this
+    accessor means an SDK layout change breaks exactly one function, and the
+    hasattr guards degrade to a no-op ({}), never a crash.
+    """
+    manager = getattr(mcp, "_tool_manager", None)
+    return getattr(manager, "_tools", None) or {}
+
+
 def register_all(mcp, resolver: InstanceResolver, config: YouTrackConfig | None = None):
     # Collect all tools first, then filter
     modules = [issues, comments, attachments, templates, history, bulk, projects, sprints, discovery, translate, impact, users, articles, dashboard, monitoring, journey, deadlines, pulse, handoffs]
     for module in modules:
         module.register(mcp, resolver)
 
+    tools = _registered_tools(mcp)
+
     # Wrap all tool functions with analytics logging
-    if hasattr(mcp, "_tool_manager") and hasattr(mcp._tool_manager, "_tools"):
-        for tool in mcp._tool_manager._tools.values():
-            if hasattr(tool, "fn"):
-                tool.fn = logged(tool.fn)
+    for tool in tools.values():
+        if hasattr(tool, "fn"):
+            tool.fn = logged(tool.fn)
 
     if config is None:
         return
@@ -63,9 +77,5 @@ def register_all(mcp, resolver: InstanceResolver, config: YouTrackConfig | None 
     if config.disabled_tools:
         to_remove.update(config.disabled_tools)
 
-    # Remove blocked tools from the MCP server
-    if to_remove and hasattr(mcp, "_tool_manager"):
-        manager = mcp._tool_manager
-        if hasattr(manager, "_tools"):
-            for tool_name in to_remove:
-                manager._tools.pop(tool_name, None)
+    for tool_name in to_remove:
+        tools.pop(tool_name, None)

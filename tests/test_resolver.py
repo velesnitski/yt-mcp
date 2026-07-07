@@ -9,6 +9,7 @@ def _mock_client(url: str) -> MagicMock:
     cfg = YouTrackConfig(url=url, token="perm:test")
     mock = MagicMock()
     mock._config = cfg
+    mock.base_url = cfg.url  # resolver uses the public property (ADR-024)
     return mock
 
 
