@@ -37,6 +37,29 @@ CLAUDE = os.path.expanduser("~/.claude.json")
 BINARY_MATCH = "yt-mcp"  # path fragment identifying the youtrack server entry
 DISPLAY = "youtrack"  # friendly name; matches the server's serverInfo.name
 _SEMVER = re.compile(r"\d+\.\d+\.\d+[^\s]*")
+# The unpinned --from spec (with or without an @ref suffix to replace).
+_GIT_FROM = "git+https://github.com/velesnitski/yt-mcp"
+
+
+def pin_args(args, ref):
+    """Rewrite any `git+…/yt-mcp[@old]` arg to `git+…/yt-mcp@<ref>`.
+
+    Why pin (ADR-025): an unpinned git URL makes the spawned version depend
+    on uv's cached ref resolution at spawn time — observed drift of TWO
+    releases between the label and what a reconnect actually ran. Pinning
+    the released tag makes every spawn deterministic and instant-from-cache.
+    Returns (new_args, changed).
+    """
+    out, changed = [], False
+    for a in args or []:
+        if isinstance(a, str) and a.startswith(_GIT_FROM):
+            new = f"{_GIT_FROM}@{ref}"
+            if new != a:
+                changed = True
+            out.append(new)
+        else:
+            out.append(a)
+    return out, changed
 
 
 def mcp_containers(cfg):
@@ -110,13 +133,21 @@ def query_version(command, args):
     return version_from_pyproject(_wired_directory(args))
 
 
-def rename_in(container, get_version=query_version):
-    """Rename matching entries' keys to 'youtrack v<version>'. Returns True if changed."""
+def rename_in(container, get_version=query_version, pin=""):
+    """Rename matching entries' keys to 'youtrack v<version>'; optionally pin
+    the --from git ref first (so the version query runs the pinned build).
+    Returns True if changed."""
     changed = False
     for key in list(container.keys()):
         entry = container[key]
         if not entry_matches(entry):
             continue
+        if pin:
+            new_args, pinned = pin_args(entry.get("args", []), pin)
+            if pinned:
+                entry["args"] = new_args
+                print(f"  ✓ pinned '{key}' → @{pin}")
+                changed = True
         version = get_version(entry.get("command", ""), entry.get("args", []))
         if not version:
             print(f"  ! no version for '{key}' — skipped")
@@ -134,7 +165,7 @@ def rename_in(container, get_version=query_version):
     return changed
 
 
-def sync_config(cfg, get_version=query_version):
+def sync_config(cfg, get_version=query_version, pin=""):
     """Rename matching entries across ALL containers. Returns True if any changed.
 
     The list comprehension is load-bearing: `any(rename_in(c) for c in ...)`
@@ -142,17 +173,28 @@ def sync_config(cfg, get_version=query_version):
     leaving the youtrack entry stale in every other container (the config
     carries one per project). Build the full list first, then reduce.
     """
-    return any([rename_in(c, get_version) for c in mcp_containers(cfg)])
+    return any([rename_in(c, get_version, pin) for c in mcp_containers(cfg)])
 
 
 def main():
+    # Minimal CLI: `--pin <ref>` rewrites the --from spec to that git ref
+    # (release.sh ship passes the just-pushed tag) before the label sync.
+    pin = ""
+    argv = sys.argv[1:]
+    if "--pin" in argv:
+        i = argv.index("--pin")
+        if i + 1 >= len(argv):
+            print("usage: sync-mcp-label.py [--pin <git-ref>]")
+            return 1
+        pin = argv[i + 1]
+
     if not os.path.exists(CLAUDE):
         print(f"no config at {CLAUDE} — nothing to do")
         return 0
     with open(CLAUDE) as f:
         cfg = json.load(f)
 
-    if not sync_config(cfg):
+    if not sync_config(cfg, pin=pin):
         print("nothing to update (yt-mcp entry not found or label already current)")
         return 0
 

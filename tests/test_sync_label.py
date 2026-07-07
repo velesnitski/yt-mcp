@@ -160,3 +160,44 @@ class TestSyncConfig:
     def test_returns_false_when_nothing_matches(self, mod):
         cfg = {"mcpServers": {"slack": {"command": "uv", "args": ["run", "slk-mcp"]}}}
         assert mod.sync_config(cfg, get_version=lambda cmd, args: "1.15.1") is False
+
+
+class TestPinArgs:
+    """--pin rewrites the --from git spec to the released tag (ADR-025)."""
+
+    def test_pins_unpinned_spec(self, mod):
+        args, changed = mod.pin_args(_YT_ARGS, "v1.17.4")
+        assert changed
+        assert "git+https://github.com/velesnitski/yt-mcp@v1.17.4" in args
+        assert args[0] == "--from" and args[-1] == "yt-mcp"
+
+    def test_repins_old_ref(self, mod):
+        old = ["--from", "git+https://github.com/velesnitski/yt-mcp@v1.17.3", "yt-mcp"]
+        args, changed = mod.pin_args(old, "v1.17.4")
+        assert changed
+        assert "git+https://github.com/velesnitski/yt-mcp@v1.17.4" in args
+        assert not any("@v1.17.3" in a for a in args)
+
+    def test_idempotent_when_already_pinned(self, mod):
+        pinned = ["--from", "git+https://github.com/velesnitski/yt-mcp@v1.17.4", "yt-mcp"]
+        args, changed = mod.pin_args(pinned, "v1.17.4")
+        assert not changed
+        assert args == pinned
+
+    def test_other_args_untouched(self, mod):
+        args, changed = mod.pin_args(["--quiet", "yt-mcp"], "v1")
+        assert not changed and args == ["--quiet", "yt-mcp"]
+
+    def test_rename_in_pins_before_version_query(self, mod):
+        # The version query must run against the PINNED args, so the label
+        # reflects the release just pinned — not whatever the cache held.
+        container = {"youtrack v1.17.3": {
+            "command": "uvx", "args": list(_YT_ARGS), "type": "stdio"}}
+        seen_args = []
+        def fake_version(command, args):
+            seen_args.append(list(args))
+            return "1.17.4"
+        changed = mod.rename_in(container, fake_version, pin="v1.17.4")
+        assert changed
+        assert "youtrack v1.17.4" in container
+        assert any("@v1.17.4" in a for a in seen_args[0])

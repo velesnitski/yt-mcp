@@ -32,6 +32,8 @@ ship)
     branch="$(git rev-parse --abbrev-ref HEAD)"
     [[ "$branch" == "dev" ]] || { echo "ship must run from dev (on: $branch)" >&2; exit 1; }
     [[ -z "$(git status --porcelain)" ]] || { echo "working tree not clean" >&2; exit 1; }
+    ver="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/yt_mcp/__init__.py)"
+    tag="v$ver"
     git push origin dev
     git checkout main
     git merge --ff-only dev
@@ -41,9 +43,21 @@ ship)
     d="$(git rev-parse origin/dev)"; m="$(git rev-parse origin/main)"; l="$(git rev-parse dev)"
     [[ "$d" == "$m" && "$m" == "$l" ]] || { echo "remote mismatch: dev=$d main=$m local=$l" >&2; exit 1; }
     echo "remotes in sync @ ${l:0:7}"
-    "$HOME/.local/bin/uvx" --refresh --from git+https://github.com/velesnitski/yt-mcp yt-mcp --version | tail -1
-    python3 scripts/sync-mcp-label.py
-    echo "ship OK — reconnect /mcp to load the new build"
+    # Tag the release and PIN the config to it (ADR-025): an unpinned
+    # git+URL leaves the spawned version to uv's cached ref resolution —
+    # observed two releases behind what the label claimed.
+    git tag -f "$tag" && git push -f origin "$tag"
+    "$HOME/.local/bin/uvx" --from "git+https://github.com/velesnitski/yt-mcp@$tag" yt-mcp --version | tail -1
+    python3 scripts/sync-mcp-label.py --pin "$tag"
+    # Kill stale yt-mcp server processes (known cross-session leak) so the
+    # next /mcp reconnect MUST spawn the pinned build instead of reattaching
+    # to a weeks-old process. Patterns live in this file, not the pkill
+    # cmdline, so the script can't match itself.
+    killed=0
+    pkill -f "archive-v0/.*/bin/yt-mcp" 2>/dev/null && killed=1
+    pkill -f "uvx --from git\+https://github.com/velesnitski/yt-mcp" 2>/dev/null && killed=1
+    [[ "$killed" == 1 ]] && echo "stale yt-mcp server processes killed"
+    echo "ship OK ($tag pinned) — reconnect /mcp to load the new build"
     ;;
 *)
     echo "usage: release.sh prepare <version> | ship" >&2
