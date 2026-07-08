@@ -175,3 +175,37 @@ class TestToolRegistration:
 
         tools = _get_tool_names(mcp)
         assert len(tools) == 79
+
+
+class TestCoreToolset:
+    """YOUTRACK_TOOLSET=core registers exactly the CORE_TOOLS surface (ADR-026)."""
+
+    def _register(self, **cfg_kwargs):
+        from yt_mcp.tools import register_all
+        mcp = FastMCP("test")
+        config = YouTrackConfig(
+            url="https://test.youtrack.cloud", token="perm:test", **cfg_kwargs)
+        register_all(mcp, _make_resolver(), config)
+        return set(mcp._tool_manager._tools.keys())
+
+    def test_core_registers_exactly_core_tools(self):
+        from yt_mcp.tools import CORE_TOOLS
+        # equality (not subset) also guards CORE_TOOLS against typos:
+        # a misspelled entry would make the registered set smaller.
+        assert self._register(toolset="core") == set(CORE_TOOLS)
+
+    def test_every_core_tool_exists_in_full(self):
+        from yt_mcp.tools import CORE_TOOLS
+        full = self._register()
+        missing = CORE_TOOLS - full
+        assert not missing, f"CORE_TOOLS names not registered by any module: {missing}"
+
+    def test_core_plus_read_only_strips_writes(self):
+        from yt_mcp.tools import CORE_TOOLS, WRITE_TOOLS
+        names = self._register(toolset="core", read_only=True)
+        assert names == set(CORE_TOOLS) - set(WRITE_TOOLS)
+        assert "search_issues" in names
+        assert "create_issue" not in names
+
+    def test_full_unchanged(self):
+        assert len(self._register(toolset="full")) == 79

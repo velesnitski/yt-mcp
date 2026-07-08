@@ -36,6 +36,26 @@ WRITE_TOOLS = frozenset({
     "delete_article_comment",
 })
 
+# The "core" toolset (YOUTRACK_TOOLSET=core): the everyday issue-CRUD surface,
+# deliberately sized like the official YouTrack MCP server's ~23 predefined
+# tools. Exists for token economics — all 79 schemas cost ~21K context tokens
+# per session on clients WITHOUT deferred tool loading (Cursor, n8n, …);
+# core cuts that ~4x. Analytics/reporting/bulk tools need "full". ADR-026.
+CORE_TOOLS = frozenset({
+    # issues
+    "search_issues", "get_issue", "get_issues", "count_issues",
+    "create_issue", "update_issue", "transition_issue",
+    "add_comment",
+    "get_issue_links", "add_issue_link",
+    # projects & discovery
+    "list_projects", "get_project_fields",
+    "list_tags", "list_saved_searches", "run_saved_search",
+    # people & instance
+    "get_current_user", "search_users", "get_instance_url",
+    # knowledge base (read side)
+    "search_articles", "get_article",
+})
+
 
 def _registered_tools(mcp) -> dict:
     """The ONE place that touches FastMCP's private tool registry.
@@ -68,6 +88,10 @@ def register_all(mcp, resolver: InstanceResolver, config: YouTrackConfig | None 
 
     # Build set of tools to remove
     to_remove = set()
+
+    # Core toolset: keep only the everyday issue-CRUD surface (token economics)
+    if getattr(config, "toolset", "full") == "core":
+        to_remove.update(set(tools) - CORE_TOOLS)
 
     # Read-only mode: block all write tools
     if config.read_only:

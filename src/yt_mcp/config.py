@@ -9,6 +9,11 @@ class YouTrackConfig:
     read_only: bool = False
     disabled_tools: frozenset[str] = field(default_factory=frozenset)
     max_bulk_results: int = 100
+    # "full" (all tools) or "core" (issue-CRUD surface ≈ the official YouTrack
+    # MCP's 23 tools). Core exists for token economics: 79 tool schemas cost
+    # ~21K context tokens per session on clients without deferred tool
+    # loading (Cursor, n8n, ...); core cuts that ~4x. See ADR-026.
+    toolset: str = "full"
 
 
 def _validate_url(url: str) -> str:
@@ -25,7 +30,7 @@ def _validate_url(url: str) -> str:
     return url
 
 
-def _parse_global_settings() -> tuple[bool, frozenset, int]:
+def _parse_global_settings() -> tuple[bool, frozenset, int, str]:
     """Parse server-level settings shared across all instances."""
     read_only = os.environ.get("YOUTRACK_READ_ONLY", "").lower() in ("1", "true", "yes")
 
@@ -40,12 +45,22 @@ def _parse_global_settings() -> tuple[bool, frozenset, int]:
         max_bulk = int(os.environ.get("YOUTRACK_MAX_BULK_RESULTS", "100"))
     except ValueError:
         max_bulk = 100
-    return read_only, disabled, max_bulk
+
+    toolset = os.environ.get("YOUTRACK_TOOLSET", "full").strip().lower()
+    if toolset not in ("full", "core"):
+        import sys
+        print(
+            f"WARNING: unknown YOUTRACK_TOOLSET '{toolset}' — using 'full'. "
+            "Valid values: full, core.",
+            file=sys.stderr,
+        )
+        toolset = "full"
+    return read_only, disabled, max_bulk, toolset
 
 
 def load_config() -> YouTrackConfig:
     url = _validate_url(os.environ.get("YOUTRACK_URL", "").rstrip("/"))
-    read_only, disabled, max_bulk = _parse_global_settings()
+    read_only, disabled, max_bulk, toolset = _parse_global_settings()
 
     return YouTrackConfig(
         url=url,
@@ -53,6 +68,7 @@ def load_config() -> YouTrackConfig:
         read_only=read_only,
         disabled_tools=disabled,
         max_bulk_results=max_bulk,
+        toolset=toolset,
     )
 
 
@@ -81,7 +97,7 @@ def load_all_configs() -> dict[str, YouTrackConfig]:
     if not instances:
         return {"default": load_config()}
 
-    read_only, disabled, max_bulk = _parse_global_settings()
+    read_only, disabled, max_bulk, toolset = _parse_global_settings()
 
     configs: dict[str, YouTrackConfig] = {}
     for i, name in enumerate(instances):
@@ -102,6 +118,7 @@ def load_all_configs() -> dict[str, YouTrackConfig]:
             read_only=read_only,
             disabled_tools=disabled,
             max_bulk_results=max_bulk,
+            toolset=toolset,
         )
 
     return configs

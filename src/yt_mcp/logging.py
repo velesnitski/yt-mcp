@@ -14,6 +14,7 @@ Each installation gets a persistent instance_id (UUID).
 import functools
 import json
 import logging
+import logging.handlers
 import os
 import sys
 import time
@@ -109,7 +110,9 @@ def setup_logging() -> logging.Logger:
     log_file = os.environ.get("YOUTRACK_LOG_FILE", str(_INSTANCE_DIR / "yt-mcp.log"))
     try:
         Path(log_file).parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(log_file)
+        # Rotate: a long-lived install must not grow logs unboundedly (ADR-026)
+        file_handler = logging.handlers.RotatingFileHandler(
+            log_file, maxBytes=2_000_000, backupCount=2)
         file_handler.setFormatter(JSONFormatter())
         logger.addHandler(file_handler)
     except OSError:
@@ -123,7 +126,8 @@ def setup_logging() -> logging.Logger:
     try:
         analytics_file = os.environ.get("YOUTRACK_ANALYTICS_FILE", str(_ANALYTICS_FILE))
         Path(analytics_file).parent.mkdir(parents=True, exist_ok=True)
-        ah = logging.FileHandler(analytics_file)
+        ah = logging.handlers.RotatingFileHandler(
+            analytics_file, maxBytes=2_000_000, backupCount=2)
         ah.setFormatter(AnalyticsFormatter())
         _analytics_logger.addHandler(ah)
     except OSError:

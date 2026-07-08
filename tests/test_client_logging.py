@@ -219,3 +219,19 @@ class TestGetCurrentUserJson:
         assert "Bob B" in out
         assert "https://acme.youtrack.cloud" in out
         assert out.startswith("## Current user")
+
+
+def test_log_handlers_rotate(monkeypatch, tmp_path):
+    """Long-lived installs must not grow logs unboundedly (ADR-026)."""
+    import importlib, logging as _logging
+    import yt_mcp.logging as ytlog
+    monkeypatch.setenv("YOUTRACK_LOG_FILE", str(tmp_path / "err.log"))
+    monkeypatch.setenv("YOUTRACK_ANALYTICS_FILE", str(tmp_path / "an.log"))
+    # fresh logger names so we don't double-register on the shared root
+    logger = ytlog.setup_logging()
+    rotating = [h for h in logger.handlers
+                if isinstance(h, _logging.handlers.RotatingFileHandler)]
+    assert rotating, "error log must use RotatingFileHandler"
+    analytics = _logging.getLogger("yt_mcp.analytics")
+    assert any(isinstance(h, _logging.handlers.RotatingFileHandler)
+               for h in analytics.handlers), "analytics log must rotate"

@@ -163,3 +163,29 @@ class TestLoadAllConfigs:
         with _env(YOUTRACK_INSTANCES="", YOUTRACK_URL="https://test.youtrack.cloud", YOUTRACK_TOKEN="perm:t"):
             configs = load_all_configs()
             assert list(configs.keys()) == ["default"]
+
+
+class TestToolsetParsing:
+    """YOUTRACK_TOOLSET=core|full (ADR-026)."""
+
+    def test_default_is_full(self, monkeypatch):
+        monkeypatch.delenv("YOUTRACK_TOOLSET", raising=False)
+        monkeypatch.setenv("YOUTRACK_URL", "https://test.youtrack.cloud")
+        monkeypatch.setenv("YOUTRACK_TOKEN", "perm:test")
+        from yt_mcp.config import load_config
+        assert load_config().toolset == "full"
+
+    def test_core_parsed(self, monkeypatch):
+        monkeypatch.setenv("YOUTRACK_TOOLSET", "CORE")  # case-insensitive
+        monkeypatch.setenv("YOUTRACK_URL", "https://test.youtrack.cloud")
+        monkeypatch.setenv("YOUTRACK_TOKEN", "perm:test")
+        from yt_mcp.config import load_config
+        assert load_config().toolset == "core"
+
+    def test_unknown_value_falls_back_to_full(self, monkeypatch, capsys):
+        monkeypatch.setenv("YOUTRACK_TOOLSET", "lite")
+        monkeypatch.setenv("YOUTRACK_URL", "https://test.youtrack.cloud")
+        monkeypatch.setenv("YOUTRACK_TOKEN", "perm:test")
+        from yt_mcp.config import load_config
+        assert load_config().toolset == "full"
+        assert "YOUTRACK_TOOLSET" in capsys.readouterr().err

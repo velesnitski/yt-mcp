@@ -54,6 +54,7 @@ src/yt_mcp/
 - `compact_lines()` joins output (respects YOUTRACK_COMPACT mode)
 - `escape_query_value()` sanitizes user input for YT queries
 - Write tools are listed in `WRITE_TOOLS` (blocked in read-only mode)
+- `YOUTRACK_TOOLSET=core` registers only `CORE_TOOLS` (20-tool CRUD surface, ~4.7K vs ~21K schema tokens/session — ADR-026)
 - `create_issue` uses draft-based creation for projects with required fields
 
 ## create_issue command strategy
