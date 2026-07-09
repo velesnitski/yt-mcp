@@ -14,6 +14,58 @@ def _guess_mime(name: str, *, default: str) -> str:
     return guessed or default
 
 
+# Sanity cap on a local file read — a `file_path` upload should not stream a
+# multi-GB file into memory (DoS / accidental bulk exfil).
+_MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024  # 100 MB
+
+
+def _attachment_roots() -> list[str]:
+    """Directories the `file_path` upload mode is confined to (realpath'd).
+
+    Secure by default (ADR-027): the `file_path` mode is an arbitrary local
+    file read whose bytes are uploaded to a remote issue — i.e. an
+    exfiltration channel that a prompt-injected/compromised caller can point
+    at /etc/passwd, ~/.ssh/id_rsa, .env, etc. So it is DISABLED unless the
+    operator explicitly allowlists roots via YOUTRACK_ATTACHMENT_ROOTS
+    (os.pathsep-separated). Unset/empty → []  → mode disabled; callers use
+    the `content` / `content_base64` mode, where the file is read in the
+    client's own trust context, not silently by this server.
+    """
+    raw = os.environ.get("YOUTRACK_ATTACHMENT_ROOTS", "")
+    return [os.path.realpath(p) for p in raw.split(os.pathsep) if p.strip()]
+
+
+def _confine_attachment_path(file_path: str) -> tuple[str, str]:
+    """Resolve `file_path` and confine it to the allowlisted roots.
+
+    Returns (resolved_realpath, "") on success, or ("", error_message) on
+    refusal. realpath resolves symlinks BEFORE the containment check, so a
+    symlink placed inside a root that targets an outside file is rejected;
+    commonpath (not str.startswith) rejects sibling-prefix escapes
+    ("/root" vs "/root-evil").
+    """
+    roots = _attachment_roots()
+    if not roots:
+        return "", (
+            "Uploading by `file_path` is disabled on this server for safety "
+            "(it would allow reading arbitrary local files). Pass the file "
+            "contents via `content` / `content_base64` instead, or set "
+            "YOUTRACK_ATTACHMENT_ROOTS to an allowlisted directory."
+        )
+    target = os.path.realpath(file_path)
+    for root in roots:
+        try:
+            if os.path.commonpath([root, target]) == root:
+                return target, ""
+        except ValueError:
+            continue  # different drive (Windows) → not under this root
+    return "", (
+        f"Refused: `{file_path}` resolves outside the permitted attachment "
+        f"directory. Allowed root(s): {os.pathsep.join(roots)}. Widen "
+        "YOUTRACK_ATTACHMENT_ROOTS, or upload via `content` / `content_base64`."
+    )
+
+
 def _full_url(client, url: str) -> str:
     """Absolute URL for a (possibly relative) YouTrack attachment path."""
     if url and not url.startswith("http"):
@@ -116,6 +168,10 @@ def register(mcp, resolver: InstanceResolver):
         Two input modes:
           - `file_path`: upload an existing file from disk (report.html,
             chart.png, data.xlsx). `filename` overrides the displayed name.
+            SECURITY: this mode reads a local file whose bytes are then
+            uploaded to a remote issue, so it is confined to an allowlist of
+            directories and is DISABLED unless the operator sets
+            YOUTRACK_ATTACHMENT_ROOTS. Prefer the `content` mode below.
           - `content` + `filename`: upload generated/inline content with no
             temp file. Text is UTF-8 encoded; set `content_base64=True` to
             upload binary you already hold as base64 (e.g. a screenshot).
@@ -144,14 +200,20 @@ def register(mcp, resolver: InstanceResolver):
             return "Provide only one of `file_path` or `content`, not both."
 
         if file_path:
-            if not os.path.isfile(file_path):
+            safe_path, err = _confine_attachment_path(file_path)
+            if err:
+                return err
+            if not os.path.isfile(safe_path):
                 return f"File not found: `{file_path}`"
             try:
-                with open(file_path, "rb") as f:
+                if os.path.getsize(safe_path) > _MAX_ATTACHMENT_BYTES:
+                    mb = _MAX_ATTACHMENT_BYTES // (1024 * 1024)
+                    return f"Refusing to read `{file_path}`: larger than {mb} MB."
+                with open(safe_path, "rb") as f:
                     data_bytes = f.read()
             except OSError as e:
                 return f"Could not read `{file_path}`: {e}"
-            name = filename or os.path.basename(file_path)
+            name = filename or os.path.basename(safe_path)
             mime = mime_type or _guess_mime(name, default="application/octet-stream")
         else:
             if not filename:

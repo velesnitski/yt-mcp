@@ -473,3 +473,29 @@ class TestCheckTaskCreationNullLinkType:
         # 2 subtasks detected (linkType matched) — proves the fix didn't
         # break the happy path.
         assert "2" in out
+
+
+# --- security: snapshot project-name traversal (ADR-027) --------------------
+
+import re as _re
+from yt_mcp.tools.monitoring import _snapshot_path, _SNAPSHOTS_DIR, _SAFE_PROJECT_RE
+
+
+class TestSnapshotPathConfinement:
+    def test_safe_names_map_into_snapshots_dir(self):
+        for p in ("PROJ", "PROJ", "PROJ", "PROJ-1"):
+            path = _snapshot_path(p)
+            assert path is not None
+            assert path.parent == _SNAPSHOTS_DIR
+
+    def test_traversal_names_rejected(self):
+        for p in ("../../../tmp/evil", "a/b", "..", "foo.bar", "x/../../y", ""):
+            assert _snapshot_path(p) is None
+
+    def test_save_load_noop_on_unsafe_name(self, monkeypatch, tmp_path):
+        from yt_mcp.tools import monitoring
+        monkeypatch.setattr(monitoring, "_SNAPSHOTS_DIR", tmp_path / "snaps")
+        # must not create anything outside the snapshots dir
+        monitoring._save_snapshot("../../pwned", {"x": 1})
+        assert monitoring._load_snapshot("../../pwned") is None
+        assert not (tmp_path / "pwned.json").exists()

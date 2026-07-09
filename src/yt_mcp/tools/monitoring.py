@@ -14,11 +14,26 @@ from yt_mcp.scoring import _get_priority_name, _days_since_update
 from yt_mcp.tools.deadlines.parser import _is_deadline_field
 
 _SNAPSHOTS_DIR = Path.home() / ".yt-mcp" / "snapshots"
+# Project short names are simple tokens (PROJ, PROJ, PROJ, PROJ). Anything
+# else — path separators, '..', dots — could traverse out of the snapshots
+# dir when interpolated into the filename (ADR-027), so it disables snapshot
+# tracking for that call rather than writing/reading an attacker-chosen path.
+_SAFE_PROJECT_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def _snapshot_path(project: str):
+    """Confined snapshot Path for a project, or None if the name is unsafe."""
+    name = (project or "").lower()
+    if not _SAFE_PROJECT_RE.match(name):
+        return None
+    return _SNAPSHOTS_DIR / f"{name}.json"
 
 
 def _load_snapshot(project: str) -> dict | None:
     """Load previous health snapshot for a project."""
-    path = _SNAPSHOTS_DIR / f"{project.lower()}.json"
+    path = _snapshot_path(project)
+    if path is None:
+        return None
     try:
         if path.exists():
             return json.loads(path.read_text())
@@ -30,9 +45,11 @@ def _load_snapshot(project: str) -> dict | None:
 def _save_snapshot(project: str, data: dict) -> None:
     """Save current health snapshot for delta tracking."""
     import logging
+    path = _snapshot_path(project)
+    if path is None:
+        return
     try:
         _SNAPSHOTS_DIR.mkdir(parents=True, exist_ok=True)
-        path = _SNAPSHOTS_DIR / f"{project.lower()}.json"
         path.write_text(json.dumps(data))
     except OSError as e:
         logging.getLogger("yt_mcp").warning("Failed to save snapshot for %s: %s", project, e)

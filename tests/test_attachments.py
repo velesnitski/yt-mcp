@@ -91,9 +91,13 @@ class TestValidation:
         client.post_multipart.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_file_not_found(self):
+    async def test_file_not_found(self, monkeypatch, tmp_path):
+        # not-found is checked AFTER confinement — allowlist the root so we
+        # reach the isfile check rather than the secure-default refusal.
+        monkeypatch.setenv("YOUTRACK_ATTACHMENT_ROOTS", str(tmp_path))
         mcp, client = _make_mcp()
-        out = await _fn(mcp, "add_attachment")(issue_id="PROJ-1", file_path="/no/such/file.txt")
+        out = await _fn(mcp, "add_attachment")(
+            issue_id="PROJ-1", file_path=str(tmp_path / "nope.txt"))
         assert "File not found" in out
         client.post_multipart.assert_not_called()
 
@@ -169,6 +173,12 @@ class TestInlineContent:
 # --- file_path mode --------------------------------------------------------
 
 class TestFilePath:
+    @pytest.fixture(autouse=True)
+    def _allow_tmp(self, monkeypatch, tmp_path):
+        # file_path mode is secure-by-default (ADR-027); allowlist this test's
+        # tmp dir so the legitimate-upload behaviour can be exercised.
+        monkeypatch.setenv("YOUTRACK_ATTACHMENT_ROOTS", str(tmp_path))
+
     @pytest.mark.asyncio
     async def test_reads_disk_file(self, tmp_path):
         p = tmp_path / "data.csv"
@@ -212,3 +222,88 @@ class TestFilePath:
         )
         path, _, _ = _multipart_of(client)
         assert path == "/api/issues/PROJ-7/attachments"
+
+
+# --- security: file_path confinement (ADR-027, CWE-22/CWE-73) ---------------
+
+import os
+
+
+class TestFilePathConfinement:
+    """`file_path` must be confined to YOUTRACK_ATTACHMENT_ROOTS; the reported
+    arbitrary-file-read + exfil path must be closed. No sensitive real files
+    are touched — everything runs against a tmp allowlisted root."""
+
+    @pytest.mark.asyncio
+    async def test_disabled_by_default(self, monkeypatch, tmp_path):
+        monkeypatch.delenv("YOUTRACK_ATTACHMENT_ROOTS", raising=False)
+        secret = tmp_path / "secret.txt"
+        secret.write_text("top secret")
+        mcp, client = _make_mcp()
+        out = await _fn(mcp, "add_attachment")(issue_id="DEMO-1", file_path=str(secret))
+        assert "disabled" in out.lower()
+        client.post_multipart.assert_not_called()  # nothing exfiltrated
+
+    @pytest.mark.asyncio
+    async def test_absolute_escape_refused(self, monkeypatch, tmp_path):
+        root = tmp_path / "root"; root.mkdir()
+        outside = tmp_path / "outside.txt"; outside.write_text("nope")
+        monkeypatch.setenv("YOUTRACK_ATTACHMENT_ROOTS", str(root))
+        mcp, client = _make_mcp()
+        out = await _fn(mcp, "add_attachment")(issue_id="DEMO-1", file_path=str(outside))
+        assert "Refused" in out
+        client.post_multipart.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_traversal_refused(self, monkeypatch, tmp_path):
+        root = tmp_path / "root"; root.mkdir()
+        (tmp_path / "outside.txt").write_text("nope")
+        monkeypatch.setenv("YOUTRACK_ATTACHMENT_ROOTS", str(root))
+        mcp, client = _make_mcp()
+        out = await _fn(mcp, "add_attachment")(
+            issue_id="DEMO-1", file_path=str(root / ".." / "outside.txt"))
+        assert "Refused" in out
+        client.post_multipart.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_symlink_escape_refused(self, monkeypatch, tmp_path):
+        root = tmp_path / "root"; root.mkdir()
+        outside = tmp_path / "outside.txt"; outside.write_text("nope")
+        link = root / "innocent.txt"
+        os.symlink(outside, link)  # symlink INSIDE root, points OUTSIDE
+        monkeypatch.setenv("YOUTRACK_ATTACHMENT_ROOTS", str(root))
+        mcp, client = _make_mcp()
+        out = await _fn(mcp, "add_attachment")(issue_id="DEMO-1", file_path=str(link))
+        assert "Refused" in out
+        client.post_multipart.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_sibling_prefix_not_confused(self, monkeypatch, tmp_path):
+        root = tmp_path / "root"; root.mkdir()
+        evil = tmp_path / "root-evil"; evil.mkdir()
+        (evil / "x.txt").write_text("nope")
+        monkeypatch.setenv("YOUTRACK_ATTACHMENT_ROOTS", str(root))
+        mcp, client = _make_mcp()
+        out = await _fn(mcp, "add_attachment")(issue_id="DEMO-1", file_path=str(evil / "x.txt"))
+        assert "Refused" in out  # commonpath, not str.startswith
+
+    @pytest.mark.asyncio
+    async def test_in_root_allowed(self, monkeypatch, tmp_path):
+        root = tmp_path / "root"; root.mkdir()
+        f = root / "report.txt"; f.write_bytes(b"legit content")
+        monkeypatch.setenv("YOUTRACK_ATTACHMENT_ROOTS", str(root))
+        mcp, client = _make_mcp()
+        out = await _fn(mcp, "add_attachment")(issue_id="DEMO-1", file_path=str(f))
+        assert "Attached" in out
+        _, files, _ = _multipart_of(client)
+        assert files["file"][1] == b"legit content"  # the confined file uploaded
+
+    @pytest.mark.asyncio
+    async def test_content_mode_unaffected(self, monkeypatch):
+        monkeypatch.delenv("YOUTRACK_ATTACHMENT_ROOTS", raising=False)
+        mcp, client = _make_mcp()
+        out = await _fn(mcp, "add_attachment")(
+            issue_id="DEMO-1", content="hello", filename="note.txt")
+        assert "Attached" in out
+        _, files, _ = _multipart_of(client)
+        assert files["file"][1] == b"hello"
