@@ -499,3 +499,42 @@ class TestDedupeComments:
         assert len(out["comments"]) == 2
         assert out["comments"][0]["repeats"] == 2
         assert "repeats" not in out["comments"][1]
+
+
+# --- compact description truncation: self-announcing + link-safe (ADR-028) ---
+
+from yt_mcp.formatters import _truncate_desc, _DESC_TRUNCATE_LIMIT as _LIM
+
+
+class TestTruncateDesc:
+    def test_short_unchanged(self):
+        d = "a short description"
+        assert _truncate_desc(d) == d
+
+    def test_exactly_at_limit_unchanged(self):
+        d = "x" * _LIM
+        assert _truncate_desc(d) == d
+
+    def test_long_is_announced_with_true_length(self):
+        d = "word " * 200  # 1000 chars
+        out = _truncate_desc(d)
+        assert "truncated" in out
+        assert str(len(d)) in out          # true total length surfaced
+        assert "format=json" in out        # tells the reader how to get it all
+        assert len(out) < len(d)
+
+    def test_does_not_split_a_straddling_markdown_link(self):
+        # a Figma link whose URL crosses the 500-char boundary must be kept
+        # whole or dropped — never severed into a dangling partial.
+        prefix = "x " * 245                                  # ~490 chars, spaced
+        link = "[design](https://www.figma.com/file/AbCdEfGhIjKlMnOpQrStUv)"
+        out = _truncate_desc(prefix + link)
+        assert "figma.com/file/Ab" not in out or link in out  # no partial URL
+        assert "https://www.figma.com/fi\n" not in out        # no mid-URL cut
+
+    def test_unbroken_token_hard_cuts_but_still_announces(self):
+        d = "https://example.com/" + "a" * 1000  # no whitespace in the window
+        out = _truncate_desc(d)
+        assert "truncated" in out
+        # hard-cut near the limit rather than gutting to nothing
+        assert len(out.split("\n")[0]) >= _LIM - 80

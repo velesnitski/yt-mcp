@@ -321,6 +321,32 @@ def format_issue_list(issues: list) -> str:
     return "\n".join(lines)
 
 
+_DESC_TRUNCATE_LIMIT = 500
+
+
+def _truncate_desc(desc: str, limit: int = _DESC_TRUNCATE_LIMIT) -> str:
+    """Compact-mode description truncation that ANNOUNCES itself.
+
+    A bare `desc[:limit]` read as if the description simply ended, and could
+    sever a markdown link mid-URL (e.g. `[design](https://figma.com/fi`). So:
+    cut on the last whitespace within the window — which keeps a straddling
+    link whole (a link has no internal spaces, so the boundary lands before
+    it) — then append a marker with the true length so the reader knows to
+    fetch the full text via `format=json`.
+    """
+    if len(desc) <= limit:
+        return desc
+    window = desc[:limit]
+    boundary = max(window.rfind("\n"), window.rfind(" "))
+    # Only back up to whitespace when it's near the edge; a long unbroken
+    # token (a bare URL filling the window) hard-cuts rather than gutting it.
+    cut = window[:boundary] if boundary >= limit - 80 else window
+    return (
+        f"{cut.rstrip()}\n"
+        f"_… truncated ({len(desc)} chars total) — use format=json for full_"
+    )
+
+
 def format_issue_detail(data: dict) -> str:
     state_name = _resolve_state(data)
     priority_name = _resolve_priority(data)
@@ -343,8 +369,10 @@ def format_issue_detail(data: dict) -> str:
         if tags:
             parts.append(f"Tags:{','.join(t.get('name', '') for t in tags)}")
         if desc:
-            # Truncate description in compact mode
-            parts.append(desc[:500] if len(desc) > 500 else desc)
+            # Compact mode truncates the description — self-announcing and
+            # link-safe (ADR-028), so it never masquerades as "the end" or
+            # severs a markdown link (e.g. a Figma URL) mid-string.
+            parts.append(_truncate_desc(desc))
         for link in links:
             lt = (link.get("linkType") or {}).get("name", "?")
             d = link.get("direction", "?")
