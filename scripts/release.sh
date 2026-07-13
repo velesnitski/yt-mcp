@@ -47,6 +47,22 @@ ship)
     # git+URL leaves the spawned version to uv's cached ref resolution —
     # observed two releases behind what the label claimed.
     git tag -f "$tag" && git push -f origin "$tag"
+    # Publish a GitHub Release for the tag (ADR-029) — tags alone leave the
+    # Releases page stale (it showed v1.7.0 as "Latest" for months). Notes are
+    # auto-generated from commits since the last release; edit afterward if
+    # desired. Non-fatal: never abort a successful push over a Release hiccup
+    # (gh missing, offline, release already exists on re-ship).
+    if command -v gh >/dev/null 2>&1; then
+        if gh release view "$tag" >/dev/null 2>&1; then
+            echo "GitHub Release $tag already exists — skipped"
+        elif gh release create "$tag" --title "$tag" --generate-notes --latest; then
+            echo "GitHub Release $tag published"
+        else
+            echo "WARN: 'gh release create $tag' failed — create it manually" >&2
+        fi
+    else
+        echo "WARN: gh not found — GitHub Release not created for $tag" >&2
+    fi
     "$HOME/.local/bin/uvx" --from "git+https://github.com/velesnitski/yt-mcp@$tag" yt-mcp --version | tail -1
     python3 scripts/sync-mcp-label.py --pin "$tag"
     # Kill stale yt-mcp server processes (known cross-session leak) so the
