@@ -483,7 +483,7 @@ from yt_mcp.tools.monitoring import _snapshot_path, _SNAPSHOTS_DIR, _SAFE_PROJEC
 
 class TestSnapshotPathConfinement:
     def test_safe_names_map_into_snapshots_dir(self):
-        for p in ("PROJ", "PROJ", "PROJ", "PROJ-1"):
+        for p in ("ABC", "XyZ", "TEAM_1", "svc-2"):
             path = _snapshot_path(p)
             assert path is not None
             assert path.parent == _SNAPSHOTS_DIR

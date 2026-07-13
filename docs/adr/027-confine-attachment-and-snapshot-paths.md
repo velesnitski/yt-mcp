@@ -47,7 +47,7 @@ legitimate hardening for an agentic tool and warrants a fix + advisory.
    rejects any `project` that isn't a plain short-name token
    (`^[A-Za-z0-9_-]+$`). Unsafe names no-op snapshot tracking rather than
    read/write an attacker-chosen path — no behavior change for real projects
-   (PROJ, PROJ, PROJ, …).
+   (plain alphanumeric short-names).
 
 ### Why not just base-dir-confine to cwd (the report's option 1)?
 

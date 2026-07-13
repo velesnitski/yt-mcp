@@ -14,7 +14,7 @@ from yt_mcp.scoring import _get_priority_name, _days_since_update
 from yt_mcp.tools.deadlines.parser import _is_deadline_field
 
 _SNAPSHOTS_DIR = Path.home() / ".yt-mcp" / "snapshots"
-# Project short names are simple tokens (PROJ, PROJ, PROJ, PROJ). Anything
+# Project short names are simple tokens (letters, digits, '_' and '-'). Anything
 # else — path separators, '..', dots — could traverse out of the snapshots
 # dir when interpolated into the filename (ADR-027), so it disables snapshot
 # tracking for that call rather than writing/reading an attacker-chosen path.

@@ -13,3 +13,5 @@
 # Use for real project-code / ticket-ID prefixes, which are uppercase — case
 # sensitivity avoids false hits on lowercase words that share a prefix, e.g.:
 # CS:\b(ABC|XYZ)-[0-9]     <- real issue prefixes -> should be PROJ-### everywhere
+# CS:\b(ABC|XYZ)\b         <- also list DISTINCTIVE bare codes (no digit): a
+#                             fixture/comment can leak "ABC" without a ticket number.

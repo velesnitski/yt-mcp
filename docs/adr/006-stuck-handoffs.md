@@ -147,8 +147,8 @@ pattern as pulse's `format="json"`:
   act?" flag list and lose the per-transition grouping that makes this
   tool useful.
 - **Extend `track_cross_dept_journey` with a `stuck=True` filter.** That
-  tool's role-classification is *project-based* (PROJ=Mobile,
-  PROJ=Backend) — wrong primitive for single-board cross-stage stalls.
+  tool's role-classification is *project-based* (each project short-name
+  maps to a team) — wrong primitive for single-board cross-stage stalls.
 - **Sort `get_handoff_snapshot` by activity-based age instead of
   `updated`.** Possible, but the existing tool's contract is
   snapshot-by-state. The state-change-history signal is heavy enough
