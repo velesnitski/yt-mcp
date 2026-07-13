@@ -9,8 +9,7 @@
 # \bjdoe|janedoe\b           <- real person names
 # perm(:|-)[A-Za-z0-9]{10,}  <- API token shapes
 #
-# Prefix a line with NOADR: to scope it to code/tests only — matched
-# case-SENSITIVELY against every tracked file EXCEPT docs/adr/* and CHANGELOG*
-# (whose historical mentions are grandfathered). Use for real project-code /
-# ticket-ID prefixes, e.g.:
-# NOADR:\b(ABC|XYZ)-[0-9]     <- real issue prefixes -> should be PROJ-### in code/tests
+# Prefix a line with CS: for a case-SENSITIVE match (over every tracked file).
+# Use for real project-code / ticket-ID prefixes, which are uppercase — case
+# sensitivity avoids false hits on lowercase words that share a prefix, e.g.:
+# CS:\b(ABC|XYZ)-[0-9]     <- real issue prefixes -> should be PROJ-### everywhere

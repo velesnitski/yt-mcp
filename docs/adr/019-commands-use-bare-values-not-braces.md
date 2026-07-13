@@ -23,8 +23,8 @@ Braces are **search-query** syntax (`State: {In Progress}` in a *query*), not
 command syntax. ADR-016 conflated the two. The original code stripped braces
 in the split (emitting bare, which works); ADR-016 made it emit braces (which
 400). The bug hid because the unit tests mocked `/api/commands` to accept any
-string — they never saw YT reject braces — and PROJ-110 "verified" only because
-"New Employee" is the HR project's default Status.
+string — they never saw YT reject braces — and the created issue "verified" only because
+it already carried that project's default Status.
 
 Discovered while setting a Period estimation (`Evaluation time 🕙 3d`), where
 every braced form failed.
