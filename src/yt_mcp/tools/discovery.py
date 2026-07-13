@@ -177,7 +177,7 @@ def register(mcp, resolver: InstanceResolver):
 
         Args:
             known_ids: Comma-separated issue IDs you already know (e.g. 'PROJ-1,PROJ-2')
-            query: YouTrack query to compare against (e.g. 'project: MAN #Unresolved')
+            query: YouTrack query to compare against (e.g. 'project: PROJ #Unresolved')
             instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)

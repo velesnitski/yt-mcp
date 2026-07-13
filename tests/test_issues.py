@@ -391,7 +391,7 @@ class TestCreateIssueBareCommandValues:
     async def test_split_clauses_are_bare_multiword_values(self):
         mcp, seen = self._make()
         out = await _get_tool_fn(mcp, "create_issue")(
-            project="HR", summary="test",
+            project="PROJ", summary="test",
             command="Status {New Employee} Department DevOps Assignee {Jane Q Public}",
         )
         # Multi-word values reach YT BARE (braces stripped), which is what the
@@ -409,7 +409,7 @@ class TestCreateIssueBareCommandValues:
         # false "Could not set" for the multi-word field.
         mcp, seen = self._make()
         out = await _get_tool_fn(mcp, "create_issue")(
-            project="HR", summary="test",
+            project="PROJ", summary="test",
             command="Status {New Employee} Department DevOps",
         )
         assert "Status New Employee" in seen
@@ -431,7 +431,7 @@ class TestCreateIssueBareCommandValues:
     async def test_no_command_query_ever_contains_braces(self, command):
         mcp, seen = self._make()
         out = await _get_tool_fn(mcp, "create_issue")(
-            project="HR", summary="t", command=command,
+            project="PROJ", summary="t", command=command,
         )
         assert "Created" in out
         assert seen, "expected at least one /api/commands call"
@@ -479,7 +479,7 @@ class TestCreateIssueInsufficientPermissions:
         # /api/commands. Must return "Created" + "Could not set", never raise.
         mcp = self._make(command_code=403)
         out = await _get_tool_fn(mcp, "create_issue")(
-            project="HR", summary="test", command="Department DevOps",
+            project="PROJ", summary="test", command="Department DevOps",
         )
         assert "Created" in out
         assert "Could not set" in out
@@ -493,7 +493,7 @@ class TestCreateIssueInsufficientPermissions:
         # no raw httpx error, no URL leak, and it must NOT hit the draft path.
         mcp = self._make(create_code=403)
         out = await _get_tool_fn(mcp, "create_issue")(
-            project="HR", summary="test", command="Department DevOps",
+            project="PROJ", summary="test", command="Department DevOps",
         )
         assert "insufficient permissions" in out
         assert "HTTP 403" in out
@@ -505,7 +505,7 @@ class TestCreateIssueInsufficientPermissions:
         mcp = self._make(create_code=500)
         with pytest.raises(httpx.HTTPStatusError):
             await _get_tool_fn(mcp, "create_issue")(
-                project="HR", summary="test", command="Department DevOps",
+                project="PROJ", summary="test", command="Department DevOps",
             )
 
     @pytest.mark.asyncio
@@ -514,7 +514,7 @@ class TestCreateIssueInsufficientPermissions:
         # also be caught and reported (covers the product catch site).
         mcp = self._make(command_code=403)
         out = await _get_tool_fn(mcp, "create_issue")(
-            project="HR", summary="test", product="Alpha",
+            project="PROJ", summary="test", product="Alpha",
         )
         assert "Created" in out
         assert "Could not set" in out
@@ -527,7 +527,7 @@ class TestCreateIssueInsufficientPermissions:
         # way as 403 — clean message, no raw error, no URL leak.
         mcp = self._make(create_code=401)
         out = await _get_tool_fn(mcp, "create_issue")(
-            project="HR", summary="test", command="Department DevOps",
+            project="PROJ", summary="test", command="Department DevOps",
         )
         assert "insufficient permissions" in out
         assert "HTTP 401" in out
@@ -575,7 +575,7 @@ class TestCreateIssueLowPermissionIntegration:
         """A low-perm user's view: admin/projects returns ONLY their own
         project (filtered). Returns None for other paths."""
         if request.url.path == "/api/admin/projects":
-            return httpx.Response(200, json=[{"id": "0-5", "shortName": "HR"}])
+            return httpx.Response(200, json=[{"id": "0-5", "shortName": "PROJ"}])
         return None
 
     @pytest.mark.asyncio
@@ -594,7 +594,7 @@ class TestCreateIssueLowPermissionIntegration:
             return httpx.Response(200, json=[])
         mcp, seen = self._make(handler)
         out = await _get_tool_fn(mcp, "create_issue")(
-            project="HR", summary="test", command="Department DevOps",
+            project="PROJ", summary="test", command="Department DevOps",
         )
         assert "Created" in out
         assert "Could not set" not in out
@@ -615,7 +615,7 @@ class TestCreateIssueLowPermissionIntegration:
             return httpx.Response(200, json=[])
         mcp, seen = self._make(handler)
         out = await _get_tool_fn(mcp, "create_issue")(
-            project="HR", summary="test", command="Department DevOps",
+            project="PROJ", summary="test", command="Department DevOps",
         )
         assert "Created" in out
         # Real 403s map to YouTrackPermissionError at the client layer —
@@ -637,7 +637,7 @@ class TestCreateIssueLowPermissionIntegration:
             return httpx.Response(200, json=[])
         mcp, seen = self._make(handler)
         out = await _get_tool_fn(mcp, "create_issue")(
-            project="HR", summary="test", command="Department DevOps",
+            project="PROJ", summary="test", command="Department DevOps",
         )
         assert "insufficient permissions" in out
         assert "HTTP 403" in out
@@ -654,7 +654,7 @@ class TestCreateIssueLowPermissionIntegration:
             return httpx.Response(200, json=[])
         mcp, seen = self._make(handler)
         out = await _get_tool_fn(mcp, "create_issue")(
-            project="HR", summary="test", command="Department DevOps",
+            project="PROJ", summary="test", command="Department DevOps",
         )
         assert "not found" in out.lower()
         assert "/api/issues" not in seen  # never tried to create
@@ -841,7 +841,7 @@ class TestTransitionIssue:
 
     @pytest.mark.asyncio
     async def test_status_field_projects_use_status_command(self):
-        # HR-style projects name the state field "Status" — the command must
+        # Some projects name the state field "Status" — the command must
         # use the real field name.
         mcp, seen = self._make(state_field="Status", current="New Employee",
                                after_state="Closed")

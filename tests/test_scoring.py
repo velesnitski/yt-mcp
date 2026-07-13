@@ -362,7 +362,7 @@ class TestFormatScoreBreakdown:
         assert result == ""
 
 
-# --- null-object hardening regression (sibling of the PROJ-280 crash) ---------
+# --- null-object hardening regression (sibling of the null-subscript crash) ---------
 #
 # YouTrack emits `null` for objects whose key is present but empty (author,
 # linkType, field, project, state). `.get(k, {})` returns the default only

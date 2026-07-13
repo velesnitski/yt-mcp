@@ -11,7 +11,7 @@ DAY_MS = 86400 * 1000
 
 class TestDetectDept:
     def test_exact_match(self):
-        assert _detect_dept("PROJ") == "Backend"
+        assert _detect_dept("SRV") == "Backend"
         assert _detect_dept("QA") == "QA"
         assert _detect_dept("DO") == "DevOps"
 
@@ -103,9 +103,9 @@ class TestGatherSubtaskIds:
 
 
 class TestBuildJourney:
-    def _issue(self, project="PROJ", state="Submitted", created=0):
+    def _issue(self, project="SRV", state="Submitted", created=0):
         return {
-            "idReadable": "PROJ-1",
+            "idReadable": "SRV-1",
             "project": {"shortName": project},
             "state": {"name": state},
             "created": created,
@@ -161,7 +161,7 @@ class TestBuildJourney:
             "field": {"name": "project"},
             "added": [{"shortName": "QA"}],
         }]
-        events = _build_journey(self._issue(project="PROJ", created=0), acts, now_ms=10 * DAY_MS)
+        events = _build_journey(self._issue(project="SRV", created=0), acts, now_ms=10 * DAY_MS)
         assert events[0]["dept"] == "Backend"
         assert events[1]["dept"] == "QA"
 
@@ -178,7 +178,7 @@ class TestBuildJourney:
     def test_initial_state_uses_state_hint(self):
         # Issue created already in "Dev QA" → initial dept is QA, not Backend
         events = _build_journey(
-            self._issue(project="PROJ", state="Dev QA", created=0),
+            self._issue(project="SRV", state="Dev QA", created=0),
             [], now_ms=5 * DAY_MS,
         )
         assert events[0]["dept"] == "QA"

@@ -287,7 +287,7 @@ def register(mcp, resolver: InstanceResolver):
         generic role-based patterns (Backend/Frontend/DevOps/QA/Mobile/etc).
 
         Args:
-            query: YouTrack query selecting issues (e.g. 'project: MAN #Unresolved')
+            query: YouTrack query selecting issues (e.g. 'project: PROJ #Unresolved')
             stale_days: Flag current station if held >N days (default: 5)
             avg_window_days: Rolling window for transit time averages (default: 14)
             follow_subtasks: Include subtask journeys in parent's chain (default: True)
