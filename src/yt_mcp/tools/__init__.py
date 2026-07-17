@@ -1,7 +1,7 @@
 from yt_mcp.config import YouTrackConfig
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.logging import logged
-from yt_mcp.tools import issues, comments, attachments, templates, history, bulk, projects, sprints, discovery, translate, impact, users, articles, dashboard, monitoring, journey, deadlines, pulse, handoffs
+from yt_mcp.tools import issues, comments, attachments, templates, history, bulk, projects, sprints, discovery, translate, impact, users, articles, dashboard, monitoring, journey, deadlines, pulse, handoffs, time_report
 
 # Tools that modify data — blocked in read-only mode
 WRITE_TOOLS = frozenset({
@@ -38,7 +38,7 @@ WRITE_TOOLS = frozenset({
 
 # The "core" toolset (YOUTRACK_TOOLSET=core): the everyday issue-CRUD surface,
 # deliberately sized like the official YouTrack MCP server's ~23 predefined
-# tools. Exists for token economics — all 79 schemas cost ~21K context tokens
+# tools. Exists for token economics — all 81 schemas cost ~21K context tokens
 # per session on clients WITHOUT deferred tool loading (Cursor, n8n, …);
 # core cuts that ~4x. Analytics/reporting/bulk tools need "full". ADR-026.
 CORE_TOOLS = frozenset({
@@ -62,7 +62,7 @@ def _registered_tools(mcp) -> dict:
 
     FastMCP has no public API to enumerate/mutate registered tools after the
     fact, so we reach into `_tool_manager._tools` — a version-coupled hack
-    (pin: mcp>=1.0,<1.26 in pyproject). Keeping every reach-in behind this
+    (pin: mcp>=1.28.1,<2.0 in pyproject). Keeping every reach-in behind this
     accessor means an SDK layout change breaks exactly one function, and the
     hasattr guards degrade to a no-op ({}), never a crash.
     """
@@ -72,7 +72,7 @@ def _registered_tools(mcp) -> dict:
 
 def register_all(mcp, resolver: InstanceResolver, config: YouTrackConfig | None = None):
     # Collect all tools first, then filter
-    modules = [issues, comments, attachments, templates, history, bulk, projects, sprints, discovery, translate, impact, users, articles, dashboard, monitoring, journey, deadlines, pulse, handoffs]
+    modules = [issues, comments, attachments, templates, history, bulk, projects, sprints, discovery, translate, impact, users, articles, dashboard, monitoring, journey, deadlines, pulse, handoffs, time_report]
     for module in modules:
         module.register(mcp, resolver)
 
