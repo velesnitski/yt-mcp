@@ -2,34 +2,85 @@ import json
 import subprocess
 import sys
 import os
+import queue
+import threading
+import time
 
 
 class TestServerStartup:
     def _run_jsonrpc(self, *messages, timeout=15):
-        """Send JSON-RPC messages to the server via stdio and return responses."""
-        input_data = "\n".join(json.dumps(m) for m in messages) + "\n"
+        """Send JSON-RPC messages to the server via stdio and return responses.
+
+        Reads responses until every request (a message carrying an ``id``) has
+        been answered, then terminates the process — rather than closing stdin
+        and trusting the server to flush all buffered replies before its
+        EOF-triggered shutdown. That drain ordering races inside the MCP SDK's
+        stdio loop (a late ``tools/list`` reply can be cut off before it is
+        written), which made this test flaky across SDK bumps. A real client
+        keeps stdin open for the session, so we do too and read replies via a
+        background thread — the handshake is then deterministic (ADR-031).
+        """
+        input_data = "".join(json.dumps(m) + "\n" for m in messages)
+        expected_ids = {m["id"] for m in messages if "id" in m}
 
         env = os.environ.copy()
         env["YOUTRACK_URL"] = "https://test.youtrack.cloud"
         env["YOUTRACK_TOKEN"] = "perm:test-token"
 
-        result = subprocess.run(
+        proc = subprocess.Popen(
             [sys.executable, "-m", "yt_mcp.server"],
-            input=input_data,
-            capture_output=True,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
             text=True,
-            timeout=timeout,
             env=env,
         )
-        # Parse responses (one per line)
+        lines = queue.Queue()
+
+        def _pump(pipe):
+            for line in pipe:
+                lines.put(line)
+            lines.put(None)  # EOF sentinel
+
+        threading.Thread(target=_pump, args=(proc.stdout,), daemon=True).start()
+
         responses = []
-        for line in result.stdout.strip().split("\n"):
-            line = line.strip()
-            if line:
+        try:
+            proc.stdin.write(input_data)
+            proc.stdin.flush()
+            seen = set()
+            deadline = time.monotonic() + timeout
+            while not (expected_ids and expected_ids.issubset(seen)):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
                 try:
-                    responses.append(json.loads(line))
+                    line = lines.get(timeout=remaining)
+                except queue.Empty:
+                    break
+                if line is None:  # server closed stdout / exited
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    msg = json.loads(line)
                 except json.JSONDecodeError:
-                    pass
+                    continue
+                responses.append(msg)
+                if isinstance(msg, dict) and "id" in msg:
+                    seen.add(msg["id"])
+        finally:
+            try:
+                proc.stdin.close()
+            except Exception:
+                pass
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
         return responses
 
     def test_initialize(self):
