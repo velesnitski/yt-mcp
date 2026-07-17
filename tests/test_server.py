@@ -26,6 +26,7 @@ class TestServerStartup:
         env = os.environ.copy()
         env["YOUTRACK_URL"] = "https://test.youtrack.cloud"
         env["YOUTRACK_TOKEN"] = "perm:test-token"
+        env["PYTHONIOENCODING"] = "utf-8"
 
         proc = subprocess.Popen(
             [sys.executable, "-m", "yt_mcp.server"],
@@ -33,6 +34,8 @@ class TestServerStartup:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             env=env,
         )
         lines = queue.Queue()
@@ -133,7 +136,7 @@ class TestServerStartup:
         assert tools_resp is not None, f"No tools/list response found in: {responses}"
         tools = tools_resp["result"]["tools"]
         tool_names = {t["name"] for t in tools}
-        assert len(tool_names) == 79, f"Expected 79 tools, got {len(tool_names)}"
+        assert len(tool_names) == 81, f"Expected 81 tools, got {len(tool_names)}"
         # Spot check a few
         assert "search_issues" in tool_names
         assert "get_article" in tool_names
@@ -204,4 +207,4 @@ class TestServerStartup:
         from yt_mcp.tools import _registered_tools
         bundle = build_server()
         assert bundle.oauth_provider is None
-        assert len(_registered_tools(bundle.mcp)) == 79
+        assert len(_registered_tools(bundle.mcp)) == 81
