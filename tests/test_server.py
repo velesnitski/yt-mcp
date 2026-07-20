@@ -101,6 +101,9 @@ class TestServerStartup:
         # Name includes version suffix so Claude Code's /mcp shows it.
         from yt_mcp import __version__
         assert resp["result"]["serverInfo"]["name"] == f"youtrack v{__version__}"
+        # serverInfo.version must be OUR version, not the mcp SDK's (which is
+        # what FastMCP reports when the low-level Server.version isn't set).
+        assert resp["result"]["serverInfo"]["version"] == __version__
 
     def test_tools_list(self):
         responses = self._run_jsonrpc(

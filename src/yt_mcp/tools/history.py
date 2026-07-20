@@ -118,13 +118,36 @@ def register(mcp, resolver: InstanceResolver):
         )
 
     @mcp.tool()
-    async def get_work_items(issue_id: str, instance: str = "") -> str:
+    async def get_work_items(
+        issue_id: str,
+        instance: str = "",
+        since: str = "",
+        until: str = "",
+        include_text: bool = False,
+    ) -> str:
         """Get time tracking work items for an issue.
+
+        Work-item text is truncated by default — entries often carry
+        multi-paragraph work journals, which once cost ~4K tokens for a
+        single issue. Pass include_text=True for the full notes.
 
         Args:
             issue_id: Issue ID or URL
             instance: YouTrack instance (optional)
+            since: Only work items dated on/after this day, YYYY-MM-DD (optional)
+            until: Only work items dated on/before this day, YYYY-MM-DD (optional)
+            include_text: Full work-item notes instead of a 200-char preview
         """
+        bounds = {}
+        for label, value in (("since", since), ("until", until)):
+            if value:
+                try:
+                    bounds[label] = datetime.strptime(value, "%Y-%m-%d").replace(
+                        tzinfo=timezone.utc
+                    )
+                except ValueError:
+                    raise ValueError(f"{label} must be YYYY-MM-DD, got {value!r}")
+
         client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
         items = await client.get(
@@ -134,8 +157,25 @@ def register(mcp, resolver: InstanceResolver):
             },
         )
 
+        if bounds:
+            # The per-issue endpoint has no date params — filter client-side
+            # on the epoch-ms work date (end bound inclusive: whole day).
+            start_ms = bounds["since"].timestamp() * 1000 if "since" in bounds else None
+            end_ms = (
+                bounds["until"].timestamp() * 1000 + 86_399_999
+                if "until" in bounds
+                else None
+            )
+            items = [
+                i for i in items
+                if i.get("date") is not None
+                and (start_ms is None or i["date"] >= start_ms)
+                and (end_ms is None or i["date"] <= end_ms)
+            ]
+
         if not items:
-            return f"No work items found for **{issue_id}**."
+            period = f" in {since or '…'} → {until or 'now'}" if bounds else ""
+            return f"No work items found for **{issue_id}**{period}."
 
         lines = [f"## Work items for {issue_id}", ""]
         total_minutes = 0
@@ -153,7 +193,9 @@ def register(mcp, resolver: InstanceResolver):
             total_minutes += minutes
 
             author = (item.get("author") or {}).get("name", "?")
-            text = item.get("text", "")
+            text = item.get("text", "") or ""
+            if text and not include_text and len(text) > 200:
+                text = text[:200].rstrip() + f"… (+{len(text) - 200} chars, include_text=True for full)"
             text_str = f" — {text}" if text else ""
             item_id = item.get("id", "?")
             work_type = item.get("type", {})

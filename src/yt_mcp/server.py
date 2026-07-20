@@ -60,6 +60,15 @@ def build_server() -> ServerBundle:
     else:
         mcp = FastMCP(_SERVER_NAME)
 
+    # serverInfo.version otherwise reports the mcp SDK's own version (FastMCP
+    # doesn't expose a version kwarg) — misleading for any client that reads
+    # it instead of parsing the "youtrack vX.Y.Z" name suffix. Same guarded
+    # reach-in pattern as tools._registered_tools: degrade to a no-op, never
+    # crash, if the SDK layout shifts.
+    low_level = getattr(mcp, "_mcp_server", None)
+    if low_level is not None and hasattr(low_level, "version"):
+        low_level.version = __version__
+
     configs = load_all_configs()
     clients = {name: YouTrackClient(cfg) for name, cfg in configs.items()}
     resolver = InstanceResolver(clients)

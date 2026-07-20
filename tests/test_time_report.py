@@ -56,7 +56,7 @@ class TestMonthlyReport:
         out = await tools["monthly_time_report_by_user"].fn(year=2026, month=6)
         assert "2 issues" in out
         assert "2 entries" in out
-        assert "**Total:** 2h by 1 user(s), 2 work item(s)" in out
+        assert "**Total:** 2h by 1 user, 2 work items" in out
 
     async def test_sends_month_date_range(self):
         client, tools = _setup([])
@@ -106,7 +106,7 @@ class TestMonthlyReport:
         assert client.get.call_count == 3
         skips = [c.kwargs["params"]["$skip"] for c in client.get.call_args_list]
         assert skips == [0, 2, 4]
-        assert "5 work item(s)" in out
+        assert "5 work items" in out
         assert "Truncated" not in out
 
     async def test_truncation_is_reported(self, monkeypatch):
@@ -140,7 +140,7 @@ class TestUserTimeSummary:
         params = client.get.call_args.kwargs["params"]
         assert params["author"] == "alice"
         assert params["startDate"] == "2026-06-01"
-        assert "**Total:** 3h across 2 issue(s), 3 work item(s)" in out
+        assert "**Total:** 3h across 2 issues, 3 work items" in out
         # per-issue breakdown, largest first
         assert out.index("PROJ-1: 2h 15m") < out.index("PROJ-2: 45m")
 
@@ -148,3 +148,67 @@ class TestUserTimeSummary:
         client, tools = _setup([])
         out = await tools["user_time_summary"].fn(user="alice", since="2026-06-01")
         assert "No work items logged by alice" in out
+
+    async def test_defaults_to_current_month_when_unbounded(self):
+        from datetime import datetime, timezone
+        client, tools = _setup([])
+        await tools["user_time_summary"].fn(user="alice")
+        now = datetime.now(timezone.utc)
+        params = client.get.call_args.kwargs["params"]
+        assert params["startDate"] == f"{now.year}-{now.month:02d}-01"
+
+    async def test_explicit_until_disables_month_default(self):
+        client, tools = _setup([])
+        await tools["user_time_summary"].fn(user="alice", until="2026-06-30")
+        params = client.get.call_args.kwargs["params"]
+        assert "startDate" not in params
+        assert params["endDate"] == "2026-06-30"
+
+    async def test_unknown_user_error_suggests_search_users(self):
+        client, tools = _setup(None)
+        client.get = AsyncMock(
+            side_effect=ValueError(
+                "YouTrack not found error (404): User with id nobody not found"
+            )
+        )
+        with pytest.raises(ValueError, match="search_users"):
+            await tools["user_time_summary"].fn(user="nobody", since="2026-06-01")
+
+
+class TestIdentityKeying:
+    async def test_same_display_name_different_logins_stay_separate(self):
+        client, tools = _setup([
+            _item(60, "Alex K", "akarpov", "PROJ-1"),
+            _item(30, "Alex K", "akuznetsov", "PROJ-2"),  # same display name!
+        ])
+        out = await tools["monthly_time_report_by_user"].fn(year=2026, month=6)
+        assert "2 users" in out          # NOT merged into one row
+        assert out.count("Alex K") == 2  # both rows shown under their name
+
+    async def test_singular_grammar(self):
+        client, tools = _setup([_item(120, "Alice", "alice", "PROJ-1")])
+        out = await tools["monthly_time_report_by_user"].fn(year=2026, month=6)
+        assert "(1 issue, 1 entry)" in out
+        assert "by 1 user, 1 work item" in out
+
+
+class TestGroupByProject:
+    async def test_groups_by_issue_prefix_with_member_counts(self):
+        client, tools = _setup([
+            _item(60, "Alice", "alice", "PROJ-1"),
+            _item(30, "Bob", "bob", "PROJ-2"),
+            _item(15, "Alice", "alice", "OPS-9"),
+        ])
+        out = await tools["monthly_time_report_by_user"].fn(
+            year=2026, month=6, group_by="project"
+        )
+        assert "**PROJ**: 1h 30m (2 users, 2 issues, 2 entries)" in out
+        assert "**OPS**: 15m (1 user, 1 issue, 1 entry)" in out
+        assert "by 2 projects" in out
+
+    async def test_invalid_group_by_rejected(self):
+        client, tools = _setup([])
+        with pytest.raises(ValueError, match="group_by"):
+            await tools["monthly_time_report_by_user"].fn(
+                year=2026, month=6, group_by="team"
+            )
