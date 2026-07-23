@@ -165,6 +165,40 @@ class TestNormalizeIssueBasics:
         assert first["direction"] == "outward"
         assert first["state"] == "Open"
 
+    def test_links_state_from_custom_field_real_yt_shape(self):
+        # REAL YT shape: issues have NO top-level `state` — State (and
+        # Assignee) live in customFields. This was the ADR-034 bug: every
+        # link normalized with state "" because only the fictional
+        # top-level field was read.
+        issue = _yt_issue(links=[{
+            "direction": "OUTWARD",
+            "linkType": {"name": "Subtask"},
+            "issues": [{
+                "idReadable": "PROJ-99",
+                "summary": "real subtask",
+                "customFields": [
+                    {"name": "State", "value": {"name": "On testing"}},
+                    {"name": "Assignee", "value": [
+                        {"name": "Alice A"}, {"name": "Bob B"},
+                    ]},
+                ],
+            }],
+        }])
+        out = normalize_issue(issue)
+        link = out["links"][0]
+        assert link["state"] == "On testing"
+        assert link["assignee"] == "Alice A, Bob B"
+
+    def test_links_missing_state_and_assignee_degrade_to_empty(self):
+        issue = _yt_issue(links=[{
+            "direction": "OUTWARD",
+            "linkType": {"name": "Relates"},
+            "issues": [{"idReadable": "PROJ-7", "summary": "bare"}],
+        }])
+        out = normalize_issue(issue)
+        assert out["links"][0]["state"] == ""
+        assert out["links"][0]["assignee"] == ""
+
 
 class TestNormalizeIssueComments:
     def test_comments_included_when_present(self):

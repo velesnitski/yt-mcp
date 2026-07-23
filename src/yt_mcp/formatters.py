@@ -91,7 +91,7 @@ def normalize_issue(data: dict, include_comments: bool = True) -> dict:
         "created", "updated", "resolved",
         "tags": [str, ...],
         "custom_fields": {field_name: value, ...},
-        "links": [{id, summary, state, link_type, direction}, ...],
+        "links": [{id, summary, state, assignee, link_type, direction}, ...],
         "comments": [{id, text, author, author_login, created}, ...],
       }
     """
@@ -136,12 +136,11 @@ def normalize_issue(data: dict, include_comments: bool = True) -> dict:
         link_type = (link.get("linkType") or {}).get("name", "")
         direction = link.get("direction", "")
         for linked in link.get("issues", []) or []:
-            ls = linked.get("state")
-            state = ls.get("name", "") if isinstance(ls, dict) else ""
             links.append({
                 "id": linked.get("idReadable", ""),
                 "summary": linked.get("summary", "") or "",
-                "state": state,
+                "state": _linked_state(linked),
+                "assignee": _get_custom_field(linked, "Assignee") or "",
                 "link_type": link_type,
                 "direction": direction,
             })
@@ -240,6 +239,21 @@ def _get_custom_field(issue: dict, field_name: str) -> str | None:
             if isinstance(val, str):
                 return val
     return None
+
+
+def _linked_state(linked: dict) -> str:
+    """State of a linked issue, tolerant of where YT actually puts it.
+
+    Issues have NO top-level `state` field — State is a custom field, so a
+    `state(name)` selector silently returns nothing and every link rendered
+    as state "" in JSON mode (the report path had the fallback; the
+    normalize path didn't). Try top-level first for forward-compat, then
+    the custom field the selectors actually fetch.
+    """
+    ls = linked.get("state")
+    if isinstance(ls, dict) and ls.get("name"):
+        return ls["name"]
+    return _get_custom_field(linked, "State") or ""
 
 
 def get_product(issue: dict) -> str:
@@ -377,8 +391,7 @@ def format_issue_detail(data: dict) -> str:
             lt = (link.get("linkType") or {}).get("name", "?")
             d = link.get("direction", "?")
             for linked in link.get("issues") or []:
-                ls = linked.get("state")
-                st = ls.get("name", "") if isinstance(ls, dict) else ""
+                st = _linked_state(linked)
                 parts.append(f"{lt}({d}):{linked.get('idReadable', '?')}[{st}]")
         comments = dedupe_comments(data.get("comments") or [])
         if comments:
@@ -414,12 +427,7 @@ def format_issue_detail(data: dict) -> str:
             link_type = (link.get("linkType") or {}).get("name", "?")
             direction = link.get("direction", "?")
             for linked in link.get("issues") or []:
-                linked_state = ""
-                ls = linked.get("state")
-                if ls and isinstance(ls, dict) and ls.get("name"):
-                    linked_state = ls["name"]
-                else:
-                    linked_state = _get_custom_field(linked, "State") or ""
+                linked_state = _linked_state(linked)
                 state_str = f" [{linked_state}]" if linked_state else ""
                 link_lines.append(
                     f"- **{link_type}** ({direction}): "
