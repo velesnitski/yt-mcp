@@ -832,7 +832,11 @@ async def _build_pulse_payload(
         return len(data or [])
 
     lookback_clause = build_lookback_clause(lookback_days, now_ms)
-    closed_q = f"{project_clause} resolved: {lookback_clause}"
+    # `resolved date:` is the canonical attribute. The `resolved:` alias
+    # stopped accepting ranges after a 2026-07 YouTrack Cloud upgrade:
+    # spaced ranges 400, and UNspaced ranges parse but match nothing —
+    # a silent-zero, so don't "fix" this by removing the spaces (ADR-035).
+    closed_q = f"{project_clause} resolved date: {lookback_clause}"
     incoming_q = f"{project_clause} created: {lookback_clause} #Unresolved"
     released_states = [s for s, r in state_to_role.items() if r == "done" and "release" in s.lower()]
     recency_clause_incoming = f"created: {lookback_clause}"
@@ -854,7 +858,7 @@ async def _build_pulse_payload(
         _count_by_query(closed_q),
         _count_by_query(incoming_q),
         _count_by_query(
-            f"{project_clause} resolved: {lookback_clause} "
+            f"{project_clause} resolved date: {lookback_clause} "
             + ("State: " + ", ".join(f"{{{s}}}" for s in released_states) if released_states else "")
         ) if released_states else asyncio.sleep(0, result=0),
     )

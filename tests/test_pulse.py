@@ -434,6 +434,26 @@ class TestBuildLookbackClause:
         assert " * " not in clause
         assert clause.count("..") == 1
 
+
+class TestResolvedDateAttribute:
+    """Pulse must query `resolved date:`, never the `resolved:` alias.
+
+    A 2026-07 YouTrack Cloud upgrade broke the alias for ranges: spaced
+    ranges 400, and UNspaced ranges parse but silently match zero issues
+    (ADR-035). Pin the source so a refactor can't reintroduce either form.
+    """
+
+    def test_no_bare_resolved_alias_in_pulse_queries(self):
+        import inspect
+        import yt_mcp.tools.pulse as pulse_mod
+        src = inspect.getsource(pulse_mod)
+        # Every query interpolation must use `resolved date:`; a bare
+        # `resolved: {` f-string interpolation is the broken alias.
+        assert "resolved: {" not in src.replace("resolved date:", ""), (
+            "pulse queries must use `resolved date:` — the bare `resolved:` "
+            "alias 400s (spaced) or silently matches nothing (unspaced)"
+        )
+
     def test_30_day_window_spans_30_days(self):
         clause = build_lookback_clause(30, NOW_MS)
         start, end = clause.split(" .. ")
