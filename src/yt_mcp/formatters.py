@@ -161,6 +161,28 @@ def normalize_issue(data: dict, include_comments: bool = True) -> dict:
     return out
 
 
+# Comments that carry no human signal on issue reads: workflow-automation
+# nags (YouTrack workflow accounts follow the `workflow_user…` login shape)
+# and this server's own service stamps. Hidden by default, recoverable via
+# include_bots=True — counts are always surfaced so nothing hides silently.
+_SERVICE_AUTHOR_PREFIXES = ("workflow_user",)
+_SERVICE_TEXT_PREFIXES = ("[yt-mcp]",)
+
+
+def split_service_comments(comments: list[dict]) -> tuple[list[dict], int]:
+    """(human_comments, hidden_count) — peel off bot/service comments."""
+    real: list[dict] = []
+    hidden = 0
+    for c in comments or []:
+        login = (c.get("author") or {}).get("login") or ""
+        text = (c.get("text") or "").lstrip()
+        if login.startswith(_SERVICE_AUTHOR_PREFIXES) or text.startswith(_SERVICE_TEXT_PREFIXES):
+            hidden += 1
+        else:
+            real.append(c)
+    return real, hidden
+
+
 def dedupe_comments(comments: list[dict]) -> list[dict]:
     """Collapse comments with identical (author, text) into one entry.
 
@@ -361,7 +383,7 @@ def _truncate_desc(desc: str, limit: int = _DESC_TRUNCATE_LIMIT) -> str:
     )
 
 
-def format_issue_detail(data: dict) -> str:
+def format_issue_detail(data: dict, comment_chars: int = 200) -> str:
     state_name = _resolve_state(data)
     priority_name = _resolve_priority(data)
     assignee_name = _resolve_assignee(data)
@@ -397,8 +419,11 @@ def format_issue_detail(data: dict) -> str:
         if comments:
             for c in comments:
                 author = (c.get("author") or {}).get("name", "?")
-                # null text → None[:200] crash (the production bug). Coerce.
-                text = (c.get("text") or "")[:200]
+                # null text → None[:n] crash (the production bug). Coerce.
+                # comment_chars <= 0 means untruncated.
+                text = c.get("text") or ""
+                if comment_chars > 0:
+                    text = text[:comment_chars]
                 rep = f"(x{c['_repeats']})" if c.get("_repeats", 1) > 1 else ""
                 parts.append(f"@{author}{rep}:{text}")
         return "\n".join(parts)

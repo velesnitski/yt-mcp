@@ -1,5 +1,8 @@
+from datetime import datetime, timezone
+
+from yt_mcp.errors import UserInputError
 from yt_mcp.resolver import InstanceResolver
-from yt_mcp.formatters import parse_issue_id
+from yt_mcp.formatters import compact_lines, escape_query_value, parse_issue_id, split_service_comments
 
 
 def register(mcp, resolver: InstanceResolver):
@@ -73,3 +76,92 @@ def register(mcp, resolver: InstanceResolver):
             f"**Deleted text:** {old_text[:500]}\n\n"
             f"To restore, call `add_comment` with the text above."
         )
+
+    @mcp.tool()
+    async def find_comments(
+        text: str,
+        author: str = "",
+        project: str = "",
+        max_results: int = 10,
+        instance: str = "",
+    ) -> str:
+        """Find issues by what their COMMENTS say.
+
+        Answers "the ticket where someone wrote …". Two stages: a YouTrack
+        full-text query narrows candidate issues (pass `author` — a login —
+        to add the `commenter:` filter), then comments are matched locally:
+        the whole phrase case-insensitively, falling back to all-words when
+        the phrase doesn't appear verbatim. Workflow-bot nags and service
+        stamps are ignored. Newest matches first.
+
+        Args:
+            text: Phrase (or words) to find in comment text — required
+            author: Only comments by this login; also narrows the search
+            project: Limit to one project key (optional)
+            max_results: Max matching comments returned (default: 10)
+            instance: YouTrack instance (optional)
+        """
+        phrase = " ".join(text.split()).lower()
+        if not phrase:
+            raise UserInputError("text is required")
+        words = phrase.split()
+
+        clauses = []
+        if project:
+            clauses.append(f"project: {escape_query_value(project)}")
+        if author:
+            clauses.append(f"commenter: {escape_query_value(author)}")
+        clauses.append(escape_query_value(text))
+
+        client = resolver.resolve(instance)
+        issues = await client.get(
+            "/api/issues",
+            params={
+                "query": " ".join(clauses),
+                "fields": "idReadable,summary,comments(text,author(login,name),created)",
+                "$top": "40",
+            },
+        )
+
+        matches: list[dict] = []
+        for issue in issues or []:
+            comments, _ = split_service_comments(issue.get("comments") or [])
+            for c in comments:
+                login = (c.get("author") or {}).get("login") or ""
+                if author and login.lower() != author.lower():
+                    continue
+                raw = c.get("text") or ""
+                norm = " ".join(raw.split())
+                low = norm.lower()
+                idx = low.find(phrase)
+                if idx < 0 and not all(w in low for w in words):
+                    continue
+                if idx < 0:
+                    idx = low.find(words[0])
+                start = max(0, idx - 80)
+                end = min(len(norm), (idx if idx >= 0 else 0) + len(phrase) + 160)
+                snippet = ("…" if start > 0 else "") + norm[start:end] + ("…" if end < len(norm) else "")
+                matches.append({
+                    "issue": issue.get("idReadable", "?"),
+                    "summary": issue.get("summary") or "",
+                    "author": (c.get("author") or {}).get("name") or login or "?",
+                    "created": c.get("created") or 0,
+                    "snippet": snippet,
+                })
+
+        if not matches:
+            scope = f" by {author}" if author else ""
+            return f"No comments{scope} matching '{text}' found."
+
+        matches.sort(key=lambda m: m["created"], reverse=True)
+        lines = [f"## Comments matching '{text}' — {len(matches)} found", ""]
+        for m in matches[:max_results]:
+            when = (
+                datetime.fromtimestamp(m["created"] / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
+                if m["created"] else "?"
+            )
+            lines.append(f"- **{m['issue']}** ({m['summary'][:60]}) — {m['author']}, {when}:")
+            lines.append(f"  > {m['snippet']}")
+        if len(matches) > max_results:
+            lines.append(f"…and {len(matches) - max_results} more — raise max_results or narrow the query.")
+        return compact_lines(lines)

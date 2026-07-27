@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.errors import YouTrackPermissionError
-from yt_mcp.formatters import format_issue_list, format_issue_detail, _resolve_state, _resolve_assignee, _get_custom_field, parse_issue_id, compact_lines, normalize_issue
+from yt_mcp.formatters import format_issue_list, format_issue_detail, _resolve_state, _resolve_assignee, _get_custom_field, parse_issue_id, compact_lines, normalize_issue, split_service_comments
 from yt_mcp.commands import (
     CMD_FIELD_RE, CMD_KEYWORDS,
     apply_field_commands, cmd_error_text, get_project_field_names,
@@ -91,6 +91,8 @@ def register(mcp, resolver: InstanceResolver):
         format: str = "report",
         fields: str = "",
         instance: str = "",
+        include_bots: bool = False,
+        comment_chars: int = 200,
     ) -> str:
         """Get full details of a YouTrack issue.
 
@@ -116,6 +118,11 @@ def register(mcp, resolver: InstanceResolver):
                 default with login on assignee, `presentation`/`text` on
                 custom-field values, and tags + created.
             instance: YouTrack instance (optional).
+            include_bots: Also show workflow-automation nags and service
+                stamps in comments (hidden by default; the hidden count is
+                always reported).
+            comment_chars: Per-comment truncation in compact mode
+                (default: 200; 0 = untruncated).
         """
         client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
@@ -141,13 +148,22 @@ def register(mcp, resolver: InstanceResolver):
             params={"fields": field_set},
         )
 
+        hidden = 0
+        if data.get("comments") and not include_bots:
+            data["comments"], hidden = split_service_comments(data["comments"])
+
         if format == "json":
             # Power override: caller asked for specific fields — return raw
             # so they get exactly what they requested. Otherwise normalize
             # to the cross-tool JSON shape.
             payload = data if fields else normalize_issue(data, include_comments=include_comments)
+            if hidden and isinstance(payload, dict):
+                payload["comments_hidden"] = hidden
             return json.dumps(payload, indent=2, ensure_ascii=False)
-        return format_issue_detail(data)
+        out = format_issue_detail(data, comment_chars=comment_chars)
+        if hidden:
+            out += f"\n_({hidden} service/bot comments hidden — include_bots=True to show)_"
+        return out
 
     @mcp.tool()
     async def get_issues(
