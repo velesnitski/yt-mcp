@@ -2,6 +2,7 @@ import asyncio
 from datetime import datetime, timezone
 
 from yt_mcp.resolver import InstanceResolver
+from yt_mcp.errors import UserInputError
 from yt_mcp.formatters import format_value, parse_issue_id
 
 
@@ -146,7 +147,7 @@ def register(mcp, resolver: InstanceResolver):
                         tzinfo=timezone.utc
                     )
                 except ValueError:
-                    raise ValueError(f"{label} must be YYYY-MM-DD, got {value!r}")
+                    raise UserInputError(f"{label} must be YYYY-MM-DD, got {value!r}")
 
         client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)

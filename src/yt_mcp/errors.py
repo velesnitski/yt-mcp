@@ -5,10 +5,24 @@ without cycles.
 """
 
 
-class YouTrackPermissionError(ValueError):
+class UserInputError(ValueError):
+    """Caller-supplied bad input (invalid month, malformed date, unknown id).
+
+    Subclasses ValueError so every existing `except ValueError` catch site
+    handles it unchanged. Its real job is Sentry hygiene: `_scrub_event`
+    drops these by ISINSTANCE, so a new validation guard is filtered
+    automatically just by raising the right type — no string-pattern
+    allowlist to forget to update (that allowlist gap is how an expected
+    `month must be 1-12` rejection paged as a production error, ADR-036).
+    """
+
+
+class YouTrackPermissionError(UserInputError):
     """401/403 from YouTrack, raised at the client layer with clean text.
 
-    Subclasses ValueError deliberately: every existing `except ValueError`
+    Subclasses UserInputError (→ ValueError): permission failures are
+    caller/config trouble, not code defects, so they are also dropped from
+    Sentry by type. Every existing `except ValueError`
     (and `except (httpx.HTTPStatusError, ValueError)`) catch site across the
     tools handles it unchanged — but unlike a raw httpx.HTTPStatusError its
     str() never embeds the request URL, so no tool can leak the instance

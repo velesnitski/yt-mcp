@@ -22,6 +22,7 @@ import uuid
 from pathlib import Path
 
 from yt_mcp import __version__
+from yt_mcp.errors import UserInputError
 
 _INSTANCE_DIR = Path.home() / ".yt-mcp"
 _INSTANCE_ID_FILE = _INSTANCE_DIR / "instance_id"
@@ -187,8 +188,15 @@ def _walk_exception_chain(exc: BaseException):
 
 
 def _is_user_input_error(exc: BaseException) -> bool:
-    """True if any exception in the chain matches a user-input pattern."""
+    """True if any exception in the chain is caller-input trouble.
+
+    Primary signal is the TYPE (UserInputError — new guards get filtered
+    just by raising it); the message patterns remain as a fallback for
+    ValueErrors raised by code that predates the type (ADR-036).
+    """
     for e in _walk_exception_chain(exc):
+        if isinstance(e, UserInputError):
+            return True
         if isinstance(e, ValueError):
             msg = str(e)
             if any(p in msg for p in _USER_INPUT_VALUE_ERROR_PATTERNS):

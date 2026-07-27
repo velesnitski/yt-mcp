@@ -7,7 +7,8 @@ import pytest
 
 from yt_mcp.client import YouTrackClient
 from yt_mcp.config import YouTrackConfig
-from yt_mcp.logging import _scrub_event
+from yt_mcp.errors import UserInputError, YouTrackPermissionError
+from yt_mcp.logging import _is_user_input_error, _scrub_event
 
 
 def _make_client() -> YouTrackClient:
@@ -44,6 +45,43 @@ class TestClientErrorLogLevel:
         records = [r for r in caplog.records if r.name == "yt_mcp"]
         assert records
         assert all(r.levelno <= logging.WARNING for r in records)
+
+
+class TestUserInputErrorTypeFilter:
+    """ADR-036: filtering is by TYPE first — new guards are dropped from
+    Sentry just by raising UserInputError, no pattern-list update needed."""
+
+    def test_user_input_error_filtered_by_type(self):
+        # Message deliberately matches NO pattern in the allowlist — the
+        # month=13 class of event that paged as a production error.
+        assert _is_user_input_error(UserInputError("month must be 1-12, got 13"))
+
+    def test_permission_error_filtered_via_subclass(self):
+        assert _is_user_input_error(YouTrackPermissionError(403))
+
+    def test_user_input_error_found_inside_exception_chain(self):
+        # FastMCP wraps tool exceptions: ToolError(...) from UserInputError.
+        inner = UserInputError("since must be YYYY-MM-DD, got 'June'")
+        outer = RuntimeError("Error executing tool user_time_summary")
+        outer.__cause__ = inner
+        assert _is_user_input_error(outer)
+
+    def test_generic_value_error_still_reported(self):
+        # A ValueError that matches no pattern and isn't typed = real bug.
+        assert not _is_user_input_error(ValueError("unexpected internal state"))
+
+    def test_scrub_event_drops_typed_user_input_exception(self):
+        exc = UserInputError("group_by must be \"user\" or \"project\", got 'team'")
+        event = {"extra": {}}
+        hint = {"exc_info": (UserInputError, exc, None)}
+        assert _scrub_event(event, hint) is None
+
+    @pytest.mark.asyncio
+    async def test_client_400_raises_user_input_error_type(self):
+        client = _make_client()
+        resp = _make_response(400, {"error_description": "bad query"})
+        with pytest.raises(UserInputError):
+            await client._handle_error(resp)
 
 
 class TestScrubEventLogentryFallback:

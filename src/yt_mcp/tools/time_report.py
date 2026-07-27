@@ -14,6 +14,7 @@ import calendar
 import re
 from datetime import datetime, timezone
 
+from yt_mcp.errors import UserInputError
 from yt_mcp.formatters import compact_lines, escape_query_value
 from yt_mcp.resolver import InstanceResolver
 
@@ -81,9 +82,9 @@ def register(mcp, resolver: InstanceResolver):
         year = year or now.year
         month = month or now.month
         if not 1 <= month <= 12:
-            raise ValueError(f"month must be 1-12, got {month}")
+            raise UserInputError(f"month must be 1-12, got {month}")
         if group_by not in ("user", "project"):
-            raise ValueError(f'group_by must be "user" or "project", got {group_by!r}')
+            raise UserInputError(f'group_by must be "user" or "project", got {group_by!r}')
 
         days = calendar.monthrange(year, month)[1]
         params = {
@@ -175,10 +176,10 @@ def register(mcp, resolver: InstanceResolver):
             top_issues: How many top issues to list (default: 10)
         """
         if not user:
-            raise ValueError("user is required")
+            raise UserInputError("user is required")
         for label, value in (("since", since), ("until", until)):
             if value and not _DATE_RE.match(value):
-                raise ValueError(f"{label} must be YYYY-MM-DD, got {value!r}")
+                raise UserInputError(f"{label} must be YYYY-MM-DD, got {value!r}")
         if not since and not until:
             now = datetime.now(timezone.utc)
             since = f"{now.year}-{now.month:02d}-01"
@@ -194,7 +195,7 @@ def register(mcp, resolver: InstanceResolver):
             items, truncated = await _fetch_work_items(client, params)
         except ValueError as exc:
             if "not found" in str(exc).lower():
-                raise ValueError(
+                raise UserInputError(
                     f"{exc} — `user` must be a login or user id; "
                     "use search_users to find it by name."
                 ) from exc

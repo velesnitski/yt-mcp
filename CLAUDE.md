@@ -16,7 +16,7 @@ uv pip install -e .                     # editable install
 src/yt_mcp/
   server.py          # entry point, FastMCP setup, OAuth lazy loading
   client.py          # YouTrackClient (httpx async, HTTP/2); maps 401/403 → YouTrackPermissionError
-  errors.py          # YouTrackPermissionError(ValueError) — clean, URL-free, caught by every existing except ValueError
+  errors.py          # UserInputError(ValueError) + YouTrackPermissionError — caller-input types, dropped from Sentry by isinstance (ADR-036)
   commands.py        # COMMAND grammar owner: bare values (no braces!), field-aware split, apply_field_commands
   config.py          # env var parsing, multi-instance config
   resolver.py        # InstanceResolver (instance name / URL auto-detection)

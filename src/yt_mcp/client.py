@@ -2,7 +2,7 @@ import logging
 
 import httpx
 from yt_mcp.config import YouTrackConfig
-from yt_mcp.errors import YouTrackPermissionError
+from yt_mcp.errors import UserInputError, YouTrackPermissionError
 from yt_mcp.formatters import rewrite_or_clauses
 
 _logger = logging.getLogger("yt_mcp")
@@ -77,7 +77,7 @@ class YouTrackClient:
             # Truncate to avoid leaking internal details
             if isinstance(error_msg, str) and len(error_msg) > 200:
                 error_msg = error_msg[:200] + "..."
-            error = ValueError(
+            error = UserInputError(
                 f"YouTrack {'query' if resp.status_code == 400 else 'not found'} error "
                 f"({resp.status_code}): {error_msg}"
             )
