@@ -373,13 +373,18 @@ def register(mcp, resolver: InstanceResolver):
             if not sprint_id:
                 return f"Sprint '{sprint}' not found on board '{board_display_name}'."
 
+        # Issues live on the SPRINT entity, not under board.columns — YT
+        # silently ignores an `issues` selector nested in columns (no key
+        # comes back at all), which rendered every column as empty while
+        # the sprint actually held dozens of issues (ADR-038). Fetch the
+        # flat sprint issue list and group into columns client-side.
         sprint_data = await client.get(
             f"/api/agiles/{board_id}/sprints/{sprint_id}",
             params={
                 "fields": "name,start,finish,"
-                "board(columns(presentation,wipLimit,"
                 "issues(idReadable,summary,assignee(name),"
-                "customFields(name,value(name)))))",
+                "customFields(name,value(name))),"
+                "board(columns(presentation))",
             },
         )
 
@@ -393,17 +398,29 @@ def register(mcp, resolver: InstanceResolver):
 
         parts = [f"## {board_display_name} — {sprint_name}{date_range}"]
 
-        board_data = sprint_data.get("board", {})
-        columns = board_data.get("columns", [])
+        all_issues = sprint_data.get("issues") or []
+        board_data = sprint_data.get("board") or {}
+        columns = board_data.get("columns") or []
 
-        if not columns:
-            parts.append("\nNo columns/issues found in this sprint.")
+        if not all_issues:
+            parts.append("\nNo issues in this sprint.")
             return "\n".join(parts)
 
-        for col in columns:
-            col_name = col.get("presentation", "?")
-            issues = col.get("issues", [])
-            parts.append(f"\n### {col_name} ({len(issues)})")
+        # Group by State into the board's column order; states the board
+        # doesn't render as a column go to an explicit bucket — never
+        # silently dropped.
+        col_names = [c.get("presentation", "?") for c in columns]
+        buckets: dict[str, list] = {name: [] for name in col_names}
+        other: list = []
+        for issue in all_issues:
+            state = _resolve_state(issue)
+            target = next(
+                (name for name in col_names if name.lower() == (state or "").lower()),
+                None,
+            )
+            (buckets[target] if target else other).append(issue)
+
+        def _render(issues: list) -> None:
             for issue in issues:
                 assignee_name = _resolve_assignee(issue)
                 parts.append(
@@ -411,5 +428,12 @@ def register(mcp, resolver: InstanceResolver):
                     f"{issue.get('summary', 'No summary')} "
                     f"→ {assignee_name}"
                 )
+
+        for name in col_names:
+            parts.append(f"\n### {name} ({len(buckets[name])})")
+            _render(buckets[name])
+        if other:
+            parts.append(f"\n### (states without a column) ({len(other)})")
+            _render(other)
 
         return "\n".join(parts)
