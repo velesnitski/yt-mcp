@@ -540,6 +540,7 @@ class TestRenderMarkdownFromPayload:
     def _make_payload(self, **kw) -> dict:
         return {
             "board": kw.get("board", "Foo Board"),
+            "projects": kw.get("projects", []),
             "lookback_days": kw.get("lookback_days", 30),
             "horizon_days": kw.get("horizon_days", 14),
             "metrics": kw.get("metrics", {
@@ -773,6 +774,7 @@ class TestFilterSemanticBoundaries:
 def _make_payload(**kw) -> dict:
     """Mock a payload from _build_pulse_payload for aggregation tests."""
     return {
+        "projects": kw.get("projects", []),
         "board": kw.get("board", "Foo Board"),
         "lookback_days": kw.get("lookback_days", 30),
         "horizon_days": kw.get("horizon_days", 14),
@@ -978,3 +980,76 @@ class TestBuildPipelineLaneStates:
         # Triaged state shouldn't show up in any lane
         for v in lanes.values():
             assert "To Do" not in v
+
+
+class TestAggregateDedup:
+    """ADR-040: boards sharing one project set are views, not additional work."""
+
+    def test_identical_project_sets_counted_once(self):
+        # Five boards over the same project — the observed live failure:
+        # naive summing reported closed×5.
+        boards = [
+            _make_payload(
+                board=f"View {i}",
+                projects=["ALPHA"],
+                metrics={"closed": 171, "released": 0, "incoming": 160, "reopened": 0},
+                pipeline_counts={"in_progress": 30, "for_review": 11 if i else 0,
+                                 "ready_for_test": 0, "on_testing": 0,
+                                 "ready_for_release": 0},
+                insights=["a", "b"],
+            )
+            for i in range(5)
+        ]
+        agg = _aggregate_payloads(boards, lookback_days=30, horizon_days=14)
+        assert agg["metrics"]["closed"] == 171          # once, not 855
+        assert agg["metrics"]["incoming"] == 160
+        assert agg["pipeline_counts"]["in_progress"] == 30
+        assert agg["pipeline_counts"]["for_review"] == 11  # fullest column view
+        assert agg["total_flags"] == 2                  # one representative
+        assert agg["board_count"] == 5
+        assert agg["project_group_count"] == 1
+        assert agg["deduped_boards"] == 4
+
+    def test_distinct_project_sets_still_sum(self):
+        p1 = _make_payload(projects=["ALPHA"],
+                           metrics={"closed": 10, "released": 0, "incoming": 5, "reopened": 0})
+        p2 = _make_payload(projects=["BETA"],
+                           metrics={"closed": 7, "released": 0, "incoming": 3, "reopened": 0})
+        agg = _aggregate_payloads([p1, p2], lookback_days=30, horizon_days=14)
+        assert agg["metrics"]["closed"] == 17
+        assert agg["project_group_count"] == 2
+        assert agg["deduped_boards"] == 0
+
+    def test_payloads_without_projects_keep_legacy_sum(self):
+        agg = _aggregate_payloads(
+            [_make_payload(metrics={"closed": 5, "released": 0, "incoming": 1, "reopened": 0}),
+             _make_payload(metrics={"closed": 5, "released": 0, "incoming": 1, "reopened": 0})],
+            lookback_days=30, horizon_days=14,
+        )
+        assert agg["metrics"]["closed"] == 10
+
+
+class TestUnderloadedRecalibration:
+    """ADR-040: compare WIP to weekly velocity — the lookback-total threshold
+    fired on every board of every instance."""
+
+    def test_healthy_wip_no_longer_flagged(self):
+        # 41 in flight vs 171 closed/30d (~40/wk): old rule flagged (41 < 57),
+        # new rule does not (41 > 20).
+        pipeline = {"in_progress": 30, "for_review": 11,
+                    "ready_for_test": 0, "on_testing": 0, "ready_for_release": 0}
+        flags = compute_insights(
+            {"closed": 171, "released": 0, "incoming": 160, "reopened": 0},
+            pipeline, [], NOW_MS,
+        )
+        assert not any("underloaded" in f.lower() for f in flags)
+
+    def test_genuinely_thin_pipeline_still_flagged(self):
+        # 8 in flight vs 151 closed/30d (~35/wk, half = 17.6) → underloaded.
+        pipeline = {"in_progress": 8, "for_review": 0,
+                    "ready_for_test": 0, "on_testing": 0, "ready_for_release": 0}
+        flags = compute_insights(
+            {"closed": 151, "released": 0, "incoming": 31, "reopened": 0},
+            pipeline, [], NOW_MS,
+        )
+        assert any("underloaded" in f.lower() for f in flags)

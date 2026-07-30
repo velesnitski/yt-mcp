@@ -489,12 +489,16 @@ def compute_insights(
         + pipeline_counts.get("on_testing", 0)
     )
     if closed > 0:
-        if in_flight < closed / 3:
-            flags.append(f"💤 Team underloaded — only {in_flight} in flight vs {closed} closed in lookback")
-        # WIP overload = devs juggling too many concurrent items. Measured
-        # against weekly velocity, not total throughput — a team that closes
-        # 28/30d has weekly_velocity ≈ 6.5 and a healthy WIP cap of ~13.
+        # Underload compares WIP to WEEKLY velocity, not the lookback total —
+        # `in_flight < closed/3` fired on every board of every instance
+        # (a flag that is always on carries no signal, ADR-040). Half a
+        # week's throughput in flight is a genuinely thin pipeline.
         weekly_velocity = closed / max(1.0, lookback_days / 7.0)
+        if in_flight < weekly_velocity / 2:
+            flags.append(
+                f"💤 Team underloaded — {in_flight} in flight vs "
+                f"~{weekly_velocity:.0f}/wk velocity"
+            )
         if weekly_velocity > 0 and in_progress > weekly_velocity * 2:
             flags.append(
                 f"🚧 WIP overload — {in_progress} in progress vs "
@@ -929,6 +933,7 @@ async def _build_pulse_payload(
     )
     return {
         "board": board_display,
+        "projects": projects,
         "lookback_days": lookback_days,
         "horizon_days": horizon_days,
         "metrics": metrics,
@@ -950,7 +955,21 @@ async def _build_pulse_payload(
 
 
 def _aggregate_payloads(payloads: list[dict], lookback_days: int, horizon_days: int) -> dict:
-    """Sum metrics + pipeline counts across boards; collect per-board flag totals."""
+    """Org totals across boards, deduped by project set.
+
+    Multiple boards are often VIEWS over the same project (five team boards
+    on one project was observed live) — their closed/incoming metrics are
+    project-scoped and identical, so naive summing multiplied org totals by
+    the board count (ADR-040). Boards with an identical project set form one
+    group: metrics/pipeline take the per-key MAX inside the group (boards
+    differ only in column mapping) and groups sum. Boards without project
+    info fall back to a per-board group — old behavior, no dedup.
+    """
+    groups: dict = {}
+    for idx, p in enumerate(payloads):
+        key = frozenset(p.get("projects") or [f"__board_{idx}"])
+        groups.setdefault(key, []).append(p)
+
     agg_metrics = {"closed": 0, "released": 0, "incoming": 0, "reopened": 0}
     agg_pipeline = {
         "in_progress": 0, "for_review": 0,
@@ -959,20 +978,27 @@ def _aggregate_payloads(payloads: list[dict], lookback_days: int, horizon_days: 
     boards_with_flags = 0
     total_flags = 0
     boards_with_released = 0
-    for p in payloads:
+    deduped_boards = 0
+    for members in groups.values():
+        if len(members) > 1:
+            deduped_boards += len(members) - 1
         for k in agg_metrics:
-            agg_metrics[k] += p["metrics"].get(k, 0)
+            agg_metrics[k] += max(m["metrics"].get(k, 0) for m in members)
         for k in agg_pipeline:
-            agg_pipeline[k] += p["pipeline_counts"].get(k, 0)
-        if p.get("insights"):
+            agg_pipeline[k] += max(m["pipeline_counts"].get(k, 0) for m in members)
+        # Flags: one representative per group — the fullest view.
+        rep = max(members, key=lambda m: len(m.get("insights") or []))
+        if rep.get("insights"):
             boards_with_flags += 1
-            total_flags += len(p["insights"])
-        if p.get("has_released_states"):
+            total_flags += len(rep["insights"])
+        if any(m.get("has_released_states") for m in members):
             boards_with_released += 1
     return {
         "lookback_days": lookback_days,
         "horizon_days": horizon_days,
         "board_count": len(payloads),
+        "project_group_count": len(groups),
+        "deduped_boards": deduped_boards,
         "metrics": agg_metrics,
         "pipeline_counts": agg_pipeline,
         "boards_with_flags": boards_with_flags,
@@ -1004,7 +1030,14 @@ def _render_multi_markdown(aggregate: dict, payloads: list[dict], limit: int) ->
     )
     lines.append(f"- **Incoming:**      {m['incoming']} new in {lb}d")
     lines.append(f"- **Reopened:**      {m['reopened']} in {lb}d")
-    lines.append(f"- **Flags:**         {aggregate['total_flags']} across {aggregate['boards_with_flags']}/{n} boards")
+    groups = aggregate.get("project_group_count", n)
+    unit = "project groups" if groups != n else "boards"
+    lines.append(f"- **Flags:**         {aggregate['total_flags']} across {aggregate['boards_with_flags']}/{groups} {unit}")
+    if aggregate.get("deduped_boards"):
+        lines.append(
+            f"- ℹ️ {aggregate['deduped_boards']} duplicate board view(s) merged "
+            "(same project set) — shared metrics counted once, not per board"
+        )
     lines.append("")
 
     for p in payloads:
