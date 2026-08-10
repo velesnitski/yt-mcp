@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yt-mcp"
-version = "1.21.1"
+version = "1.21.2"
 description = "YouTrack MCP server for Claude Code, GitHub Copilot, Cursor, JetBrains, n8n, and any MCP-compatible client"
 readme = "README.md"
 license = "MIT"
@@ -28,7 +28,7 @@ dependencies = [
     "httpx[http2]>=0.27.0",
     "sentry-sdk>=2.0",
     "PyJWT>=2.13.0",
-    "cryptography>=48.0.1",
+    "cryptography>=50.0.0",
 ]
 
 [project.optional-dependencies]
@@ -42,6 +42,9 @@ Changelog = "https://github.com/velesnitski/yt-mcp/blob/main/CHANGELOG.md"
 
 [project.scripts]
 yt-mcp = "yt_mcp.server:main"
+
+[tool.uv]
+constraint-dependencies = ["h2>=4.4.1"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
