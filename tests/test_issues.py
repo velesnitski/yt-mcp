@@ -399,7 +399,7 @@ class TestCreateIssueBareCommandValues:
         seen: list[str] = []
 
         async def _post(path, json=None):
-            if path == "/api/issues":
+            if path.split("?", 1)[0] == "/api/issues":
                 return {"idReadable": "PROJ-999", "summary": "test"}
             if path == "/api/commands":
                 q = json["query"]
@@ -490,7 +490,7 @@ class TestCreateIssueInsufficientPermissions:
         client.resolve_project_id = AsyncMock(return_value="0-5")
 
         async def _post(path, json=None):
-            if path == "/api/issues":
+            if path.split("?", 1)[0] == "/api/issues":
                 if create_code is not None:
                     raise self._http_error(create_code)
                 return {"idReadable": "PROJ-999", "summary": "test"}
@@ -753,7 +753,7 @@ class TestCreateIssueFieldAwareSplit:
         seen: list[str] = []
 
         async def _post(path, json=None):
-            if path == "/api/issues":
+            if path.split("?", 1)[0] == "/api/issues":
                 return {"idReadable": "PROJ-99", "summary": "t"}
             if path == "/api/commands":
                 q = json["query"]

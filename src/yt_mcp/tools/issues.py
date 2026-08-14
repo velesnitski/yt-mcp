@@ -302,7 +302,14 @@ def register(mcp, resolver: InstanceResolver):
                 )
 
         try:
-            data = await client.post("/api/issues", json=json_body)
+            # fields= is mandatory: YT's default POST serialization is ONLY
+            # {$type, id} — without it idReadable is absent, the tool reports
+            # "Created: **?**" and follow-up commands target idReadable "?"
+            # (the draft-publish response was fixed for exactly this long ago;
+            # the direct path had been missed — Q16, ADR-042).
+            data = await client.post(
+                "/api/issues?fields=idReadable,summary", json=json_body,
+            )
             issue_id = data.get("idReadable", "?")
             await _apply_commands(issue_id)
         except YouTrackPermissionError as perm:
@@ -344,7 +351,13 @@ def register(mcp, resolver: InstanceResolver):
                 )
                 issue_id = data.get("idReadable", "?")
             except (httpx.HTTPStatusError, ValueError) as pub_err:
-                # Publish failed — fetch required fields to help the LLM
+                # Publish failed — discard the draft (best-effort) so failed
+                # attempts don't accumulate orphans in the user's drafts
+                # list, then fetch required fields to help the LLM.
+                try:
+                    await client.delete(f"/api/users/me/drafts/{draft_id}")
+                except Exception:
+                    pass
                 req_info = await _get_required_fields_info(client, project_id, project)
                 return (
                     f"**Could not create issue:** {_cmd_error_text(pub_err)}\n\n"
@@ -410,6 +423,7 @@ def register(mcp, resolver: InstanceResolver):
         )
 
         old_summary = before.get("summary", "?")
+        old_description = before.get("description") or ""
         old_state = _resolve_state(before)
         old_assignee = _resolve_assignee(before)
         old_tags = [t.get("name", "") for t in before.get("tags", [])]
@@ -481,7 +495,7 @@ def register(mcp, resolver: InstanceResolver):
                     try:
                         await client.post(
                             "/api/commands",
-                            json={"query": part, "issues": [issue_ref]},
+                            json={"query": strip_braces(part), "issues": [issue_ref]},
                         )
                     except (httpx.HTTPStatusError, ValueError) as e:
                         failed_cmds.append(f"`{part}`: {cmd_error_text(e)}")
@@ -507,11 +521,18 @@ def register(mcp, resolver: InstanceResolver):
         changes = []
         if summary and summary != old_summary:
             changes.append(f"**Summary:** {old_summary} → {summary}")
+        if description and description != old_description:
+            changes.append(
+                f"**Description:** updated "
+                f"({len(old_description)} → {len(description)} chars)"
+            )
         if new_state != old_state:
             changes.append(f"**State:** {old_state} → {new_state}")
         if new_assignee != old_assignee:
             changes.append(f"**Assignee:** {old_assignee} → {new_assignee}")
-        if new_tags != old_tags:
+        # Set-compare: YT can return tags in a different order — order alone
+        # is not a change.
+        if sorted(new_tags) != sorted(old_tags):
             changes.append(f"**Tags:** {', '.join(old_tags) or '(none)'} → {', '.join(new_tags) or '(none)'}")
 
         # Check custom fields for changes
@@ -550,6 +571,8 @@ def register(mcp, resolver: InstanceResolver):
             rollback_parts.append(f"state=\"{old_state}\"")
         if assignee:
             rollback_parts.append(f"assignee=\"{old_assignee}\"")
+        if description:
+            rollback_parts.append("(previous description: restore via `rollback_issue` with the activity ID)")
         if command:
             rollback_parts.append(f"(use `rollback_issue` with activity ID for command fields)")
 
@@ -582,7 +605,10 @@ def register(mcp, resolver: InstanceResolver):
             set_fields: Fields to set before transitioning (command syntax; optional)
             instance: YouTrack instance (optional)
         """
-        client = resolver.resolve(instance)
+        # Pass the raw issue_id so an issue URL routes to its own instance —
+        # every other CRUD tool does this; transition_issue had been the one
+        # exception, silently targeting the default instance (ADR-042).
+        client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
         try:
             before = await client.get(
@@ -692,10 +718,25 @@ def register(mcp, resolver: InstanceResolver):
             await client.delete(f"/api/issues/{issue_id}")
             return f"Permanently deleted: **{issue_id}** — {summary}"
 
-        await client.execute_command(issue_id, "State Obsolete")
+        # Some projects name the state field "Status" (transition_issue
+        # already handles this) — a hardcoded "State Obsolete" 400s there.
+        state_field = "State"
+        for cf in data.get("customFields", []) or []:
+            if cf.get("name") in ("State", "Status"):
+                state_field = cf["name"]
+                break
+        try:
+            await client.execute_command(issue_id, f"{state_field} Obsolete")
+        except (httpx.HTTPStatusError, ValueError) as e:
+            return (
+                f"**Could not soft-delete {issue_id}:** {cmd_error_text(e)}\n"
+                f"The project may have no 'Obsolete' value on its "
+                f"{state_field} field — use `transition_issue` with a valid "
+                f"terminal state, or `permanent=True`."
+            )
         return (
             f"Soft-deleted: **{issue_id}** — {summary}\n"
-            f"**State:** {old_state} → Obsolete"
+            f"**{state_field}:** {old_state} → Obsolete"
         )
 
     @mcp.tool()

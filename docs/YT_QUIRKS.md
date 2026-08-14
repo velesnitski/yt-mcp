@@ -29,6 +29,7 @@ behavior with no notice and no error.
 | Q13 | Logins can be non-ASCII (Cyrillic logins observed in the wild) | ASCII assumptions in matching/sorting silently drop users | Treat logins as opaque unicode strings | Observed 2026-07-27 activity probe; no code path assumes ASCII |
 | Q14 | `updated:` / `created:` spaced date ranges still work post-upgrade (unlike Q1) | Over-fixing Q1 by "migrating" these wastes the canonical forms | Leave them as-is; only `resolved:` was broken | yt-mcp ADR-035 scope note |
 | Q15 | Selector-honored ≠ error-free: a wrong/unsupported nested field selector often returns **success with the field absent** | "No 400" verification proves nothing; features silently become dead code | Verify selectors by asserting the DATA comes back, not by absence of errors | reports ADR audit 2026-07-28 (`added(text)` proof); the Q3/Q4 incidents are this class |
+| Q16 | POST create responses default to `$type,id` only — `idReadable` is absent unless requested | create reported "Created: **?**" and follow-up commands targeted idReadable "?" (the draft-publish response was fixed for exactly this; the direct path was missed) | Append `?fields=idReadable,summary` (or the fields you need) to every entity-creating POST | yt-mcp ADR-042: test asserts the request carries `fields=` + honest default-shape mock |
 
 ## Update protocol
 

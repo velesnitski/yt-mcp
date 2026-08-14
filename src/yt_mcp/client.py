@@ -135,6 +135,12 @@ class YouTrackClient:
         await self._handle_error(resp)
 
     async def execute_command(self, issue_id: str, command: str) -> None:
+        # ADR-019 invariant, enforced at the choke point: braces are an
+        # input-only grouping convention and 400 at /api/commands — but
+        # callers imitating create_issue's docstring style pass them into
+        # update/bulk/delete paths too (ADR-042). Strip here so no caller
+        # can leak them to YouTrack.
+        command = command.replace("{", "").replace("}", "")
         await self.post(
             "/api/commands",
             json={
