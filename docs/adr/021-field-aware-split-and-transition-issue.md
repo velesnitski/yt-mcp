@@ -14,10 +14,10 @@ Two gaps left open by ADR-019, both hit live:
    everything rides on the split being correct.
 
 2. **No gate-aware way to change State.** Workflow scripts gate transitions
-   ("set Dev Estimation before To Do", "укажите Assignee") and fail one
-   opaque 400 at a time. Feedback ("двигать задачи на доске — отдельный вид
-   пыток", PROJ release tasks) traced directly to this: no tool could set the
-   gate's fields and transition in one legible step.
+   ("set Dev Estimation before To Do", "set the Assignee") and fail one
+   opaque 400 at a time. Team feedback — board transitions described as
+   painfully cumbersome (PROJ release tasks) — traced directly to this: no
+   tool could set the gate's fields and transition in one legible step.
 
 ## Decision
 
@@ -61,11 +61,12 @@ attempt fails) and caches it across the direct and draft paths.
 
 - Split with real PROJ field names: `Dev Estimation 2h · QA Estimation 1h ·
   Evaluation time 🕙 3h · Type Product task` — all four clauses intact.
-- Blocked path: gate text surfaced verbatim ("Перед переводом в To Do укажи
-  Dev Estimation…"), current state and hint included.
+- Blocked path: the gate's own message surfaced verbatim (a rule naming the
+  required field, e.g. "set <Field> before To Do"), current state and hint
+  included.
 - `set_fields` path: all three estimations set (emoji name included); the
-  *next* gate ("…Укажите Assignee") surfaced cleanly — gates peel one at a
-  time with exact rule text.
+  *next* gate's message (naming the Assignee requirement) surfaced cleanly —
+  gates peel one at a time with exact rule text.
 
 ## Consequences
 
