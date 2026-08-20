@@ -4,7 +4,9 @@
 
 An external researcher (Moshe Levi, Levinity Cyber) reported, under
 responsible disclosure, a path-traversal / external-control-of-file-path
-issue in the `add_attachment` MCP tool. Validated from source and confirmed:
+issue in the `add_attachment` MCP tool. Tracked as
+[GHSA-99mq-fjjc-6v9j](https://github.com/velesnitski/yt-mcp/security/advisories/GHSA-99mq-fjjc-6v9j)
+/ **CVE-2026-75612** (High, patched in 1.18.1). Validated from source and confirmed:
 
 - `add_attachment`'s `file_path` mode did only `os.path.isfile()` then
   `open(file_path, "rb")` with **no confinement**, and the bytes flow to
