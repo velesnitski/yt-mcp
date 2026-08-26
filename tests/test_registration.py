@@ -45,7 +45,7 @@ class TestToolRegistration:
         register_all(mcp, resolver, config)
 
         tools = _get_tool_names(mcp)
-        assert len(tools) == 83, f"Expected 83 tools, got {len(tools)}: {sorted(tools)}"
+        assert len(tools) == 84, f"Expected 84 tools, got {len(tools)}: {sorted(tools)}"
 
     def test_expected_tools_present(self):
         mcp = FastMCP("test")
@@ -57,7 +57,7 @@ class TestToolRegistration:
         expected = {
             "search_issues", "get_issue", "get_issues", "create_issue", "update_issue", "transition_issue",
             "delete_issue", "get_issue_links", "add_issue_link", "remove_issue_link",
-            "add_comment", "update_comment", "delete_comment", "find_comments", "poll_changes",
+            "add_comment", "update_comment", "delete_comment", "find_comments", "get_my_mentions", "poll_changes",
             "get_top_active_issues", "get_top_blocked_issues", "get_team_dashboard", "get_multi_team_dashboard",
             "get_issues_digest", "get_at_risk_issues",
             "check_task_creation", "get_creation_activity", "get_project_health",
@@ -175,7 +175,7 @@ class TestToolRegistration:
         register_all(mcp, resolver, config=None)
 
         tools = _get_tool_names(mcp)
-        assert len(tools) == 83
+        assert len(tools) == 84
 
 
 class TestCoreToolset:
@@ -209,4 +209,4 @@ class TestCoreToolset:
         assert "create_issue" not in names
 
     def test_full_unchanged(self):
-        assert len(self._register(toolset="full")) == 83
+        assert len(self._register(toolset="full")) == 84

@@ -1,6 +1,6 @@
 # yt-mcp
 
-YouTrack MCP server. 83 tools across 21 modules.
+YouTrack MCP server. 84 tools across 21 modules.
 
 ## Build & test
 
