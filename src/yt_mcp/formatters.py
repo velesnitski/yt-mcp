@@ -1,6 +1,8 @@
 import os
 import re
 
+from yt_mcp import contract as _contract
+
 _ISSUE_URL_RE = re.compile(r"/issue/([A-Za-z]+-\d+)")
 
 # Compact mode: strips markdown formatting for token savings (~60%)
@@ -8,10 +10,10 @@ _ISSUE_URL_RE = re.compile(r"/issue/([A-Za-z]+-\d+)")
 COMPACT = os.environ.get("YOUTRACK_COMPACT", "").lower() in ("1", "true", "yes")
 
 
-def escape_query_value(value: str) -> str:
-    """Escape a value for safe use in YouTrack search queries."""
-    # Remove braces and backslashes that could break query syntax
-    return value.replace("\\", "").replace("{", "").replace("}", "")
+# Query/shape helpers that encode YouTrack quirks live in contract.py — the
+# stdlib-only module other consumers can import. Re-exported here so every
+# existing call site keeps working unchanged (ADR-044).
+escape_query_value = _contract.escape_query_value
 
 
 _OR_SPLIT_RE = re.compile(r"\s+OR\s+", re.IGNORECASE)
@@ -165,22 +167,13 @@ def normalize_issue(data: dict, include_comments: bool = True) -> dict:
 # nags (YouTrack workflow accounts follow the `workflow_user…` login shape)
 # and this server's own service stamps. Hidden by default, recoverable via
 # include_bots=True — counts are always surfaced so nothing hides silently.
-_SERVICE_AUTHOR_PREFIXES = ("workflow_user",)
-_SERVICE_TEXT_PREFIXES = ("[yt-mcp]",)
+_SERVICE_AUTHOR_PREFIXES = _contract.SERVICE_AUTHOR_PREFIXES
+_SERVICE_TEXT_PREFIXES = _contract.SERVICE_TEXT_PREFIXES
 
 
 def split_service_comments(comments: list[dict]) -> tuple[list[dict], int]:
     """(human_comments, hidden_count) — peel off bot/service comments."""
-    real: list[dict] = []
-    hidden = 0
-    for c in comments or []:
-        login = (c.get("author") or {}).get("login") or ""
-        text = (c.get("text") or "").lstrip()
-        if login.startswith(_SERVICE_AUTHOR_PREFIXES) or text.startswith(_SERVICE_TEXT_PREFIXES):
-            hidden += 1
-        else:
-            real.append(c)
-    return real, hidden
+    return _contract.split_service_comments(comments)
 
 
 def dedupe_comments(comments: list[dict]) -> list[dict]:
@@ -264,18 +257,8 @@ def _get_custom_field(issue: dict, field_name: str) -> str | None:
 
 
 def _linked_state(linked: dict) -> str:
-    """State of a linked issue, tolerant of where YT actually puts it.
-
-    Issues have NO top-level `state` field — State is a custom field, so a
-    `state(name)` selector silently returns nothing and every link rendered
-    as state "" in JSON mode (the report path had the fallback; the
-    normalize path didn't). Try top-level first for forward-compat, then
-    the custom field the selectors actually fetch.
-    """
-    ls = linked.get("state")
-    if isinstance(ls, dict) and ls.get("name"):
-        return ls["name"]
-    return _get_custom_field(linked, "State") or ""
+    """State of a linked issue, tolerant of where YT actually puts it."""
+    return _contract.linked_state(linked)
 
 
 def get_product(issue: dict) -> str:
