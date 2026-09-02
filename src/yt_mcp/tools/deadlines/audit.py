@@ -1,6 +1,6 @@
 """audit_deadline_changes tool — forensic view of every Due-Date shift."""
 
-from yt_mcp.annotations import read_only
+from mcp.types import ToolAnnotations
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.tools.deadlines import config as cfg
 from yt_mcp.tools.deadlines import fetcher
@@ -16,7 +16,9 @@ from yt_mcp.tools.deadlines.render import render_audit
 
 def register(mcp, resolver: InstanceResolver):
 
-    @mcp.tool(annotations=read_only())
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True))
     async def audit_deadline_changes(
         period_start: str = "",
         period_finish: str = "",

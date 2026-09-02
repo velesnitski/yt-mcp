@@ -1,11 +1,13 @@
-from yt_mcp.annotations import mutates, read_only
+from mcp.types import ToolAnnotations
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.templates import ISSUE_TEMPLATES, build_description
 
 
 def register(mcp, resolver: InstanceResolver):
 
-    @mcp.tool(annotations=read_only())
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True))
     async def list_templates() -> str:
         """List all available issue templates with their sections."""
         lines = ["## Available issue templates", ""]
@@ -16,7 +18,9 @@ def register(mcp, resolver: InstanceResolver):
         lines.append("Use `create_issue_from_template` to create an issue with a template.")
         return "\n".join(lines)
 
-    @mcp.tool(annotations=mutates(idempotent=False))
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False,
+        idempotentHint=False, openWorldHint=True))
     async def create_issue_from_template(
         project: str,
         template: str,

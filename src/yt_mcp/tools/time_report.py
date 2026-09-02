@@ -14,7 +14,7 @@ import calendar
 import re
 from datetime import datetime, timezone
 
-from yt_mcp.annotations import read_only
+from mcp.types import ToolAnnotations
 from yt_mcp.errors import UserInputError
 from yt_mcp.formatters import compact_lines, escape_query_value
 from yt_mcp.resolver import InstanceResolver
@@ -57,7 +57,9 @@ async def _fetch_work_items(client, params: dict) -> tuple[list, bool]:
 def register(mcp, resolver: InstanceResolver):
     """Register time reporting tools."""
 
-    @mcp.tool(annotations=read_only())
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True))
     async def monthly_time_report_by_user(
         instance: str = "",
         projects: str = "",
@@ -152,7 +154,9 @@ def register(mcp, resolver: InstanceResolver):
             )
         return compact_lines(lines)
 
-    @mcp.tool(annotations=read_only())
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True))
     async def user_time_summary(
         user: str,
         instance: str = "",

@@ -1,6 +1,6 @@
 import asyncio
 
-from yt_mcp.annotations import read_only
+from mcp.types import ToolAnnotations
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import (
     _resolve_state, _resolve_assignee, _get_custom_field,
@@ -89,7 +89,9 @@ def _format_grouped(
 
 def register(mcp, resolver: InstanceResolver):
 
-    @mcp.tool(annotations=read_only())
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True))
     async def get_top_active_issues(
         project: str,
         limit: int = 3,
@@ -153,7 +155,9 @@ def register(mcp, resolver: InstanceResolver):
 
         return compact_lines(lines)
 
-    @mcp.tool(annotations=read_only())
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True))
     async def get_top_blocked_issues(
         project: str,
         limit: int = 3,
@@ -211,7 +215,9 @@ def register(mcp, resolver: InstanceResolver):
 
         return compact_lines(lines)
 
-    @mcp.tool(annotations=read_only())
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True))
     async def get_team_dashboard(
         project: str,
         active_limit: int = 3,
@@ -321,7 +327,9 @@ def register(mcp, resolver: InstanceResolver):
 
         return compact_lines(lines)
 
-    @mcp.tool(annotations=read_only())
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True))
     async def get_multi_team_dashboard(
         projects: str,
         active_limit: int = 5,

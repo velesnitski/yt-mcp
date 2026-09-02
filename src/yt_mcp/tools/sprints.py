@@ -2,7 +2,7 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
-from yt_mcp.annotations import mutates, read_only
+from mcp.types import ToolAnnotations
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import compact_lines, _resolve_state
 
@@ -34,7 +34,9 @@ def _find_sprint(board: dict, sprint_name: str) -> tuple[dict | None, str]:
 
 def register(mcp, resolver: InstanceResolver):
 
-    @mcp.tool(annotations=mutates(idempotent=False))
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False,
+        idempotentHint=False, openWorldHint=True))
     async def create_sprint(
         board_name: str,
         sprint_name: str,
@@ -69,7 +71,9 @@ def register(mcp, resolver: InstanceResolver):
             f"**ID:** {data.get('id', '?')}"
         )
 
-    @mcp.tool(annotations=mutates())
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True))
     async def update_sprint(
         board_name: str,
         sprint_name: str,
@@ -119,7 +123,9 @@ def register(mcp, resolver: InstanceResolver):
             f"**Board:** {board.get('name', '?')}"
         )
 
-    @mcp.tool(annotations=mutates())
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True))
     async def add_issues_to_sprint(
         board_name: str,
         sprint_name: str,
@@ -167,7 +173,9 @@ def register(mcp, resolver: InstanceResolver):
             parts.append(f"**Failed ({len(failed)}):** {'; '.join(failed)}")
         return compact_lines(parts)
 
-    @mcp.tool(annotations=read_only())
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True))
     async def get_active_sprint_issues(
         boards: str = "",
         exclude_states: str = "",

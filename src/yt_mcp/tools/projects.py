@@ -1,7 +1,7 @@
 import re
 from datetime import datetime, timezone
 
-from yt_mcp.annotations import mutates, read_only
+from mcp.types import ToolAnnotations
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import _resolve_state, _resolve_assignee, _get_custom_field, compact_lines, escape_query_value
 
@@ -11,7 +11,9 @@ _BOARD_ID_RE = re.compile(r"^\d+-\d+$")
 
 def register(mcp, resolver: InstanceResolver):
 
-    @mcp.tool(annotations=read_only())
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True))
     async def list_projects(instance: str = "") -> str:
         """List all accessible YouTrack projects.
 
@@ -39,7 +41,9 @@ def register(mcp, resolver: InstanceResolver):
             )
         return "\n".join(lines) if lines else "No projects found."
 
-    @mcp.tool(annotations=read_only())
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True))
     async def get_agiles(instance: str = "") -> str:
         """List all agile boards.
 
@@ -61,7 +65,9 @@ def register(mcp, resolver: InstanceResolver):
             )
         return "\n".join(lines) if lines else "No agile boards found."
 
-    @mcp.tool(annotations=read_only())
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True))
     async def get_agile_board(name: str, instance: str = "") -> str:
         """Get agile board details by name, ID, or URL.
 
@@ -133,7 +139,9 @@ def register(mcp, resolver: InstanceResolver):
 
         return "\n".join(lines)
 
-    @mcp.tool(annotations=read_only())
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True))
     async def get_project_fields(project: str, instance: str = "") -> str:
         """List custom fields for a project with required status and available values.
 
@@ -228,7 +236,9 @@ def register(mcp, resolver: InstanceResolver):
 
         return "\n".join(lines)
 
-    @mcp.tool(annotations=mutates(idempotent=False))
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=False,
+        idempotentHint=False, openWorldHint=True))
     async def create_agile_board(
         name: str,
         projects: str,
@@ -270,7 +280,9 @@ def register(mcp, resolver: InstanceResolver):
             f"**Projects:** {', '.join(project_list)}"
         )
 
-    @mcp.tool(annotations=mutates(destructive=True))
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True,
+        idempotentHint=True, openWorldHint=True))
     async def delete_agile_board(board_name: str, instance: str = "") -> str:
         """Delete an agile board (issues are not deleted).
 
@@ -308,7 +320,9 @@ def register(mcp, resolver: InstanceResolver):
             f"Issues are not affected. To restore, call `create_agile_board`."
         )
 
-    @mcp.tool(annotations=read_only())
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True))
     async def get_sprint_board(board_name: str, sprint: str = "current", instance: str = "") -> str:
         """Get issues on an agile board grouped by column.
 

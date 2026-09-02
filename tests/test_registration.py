@@ -260,19 +260,30 @@ class TestToolAnnotations:
         assert DESTRUCTIVE_TOOLS <= WRITE_TOOLS
         assert NON_IDEMPOTENT_TOOLS <= WRITE_TOOLS
 
-    def test_hints_are_declared_in_source_not_only_at_runtime(self):
-        """ADR-046: a registry auditing the source must see the hints.
+    def test_all_four_hints_are_literal_in_source(self):
+        """ADR-047: the four hint names appear verbatim at every decorator.
 
-        Runtime-applied annotations are invisible to static analysis, so
-        every tool declares its own on the decorator. This asserts the
-        property directly rather than trusting the convention.
+        A registry that analyses source rather than calling tools/list
+        cannot resolve a helper — `annotations=read_only()` reads as no
+        hints at all. Only the identifiers themselves are portable across
+        readers, so this pins them rather than trusting a convention.
         """
         import pathlib
         import re
-        bare = []
+        HINTS = ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
         root = pathlib.Path(__file__).resolve().parents[1] / "src" / "yt_mcp" / "tools"
+        decorators, bad = 0, []
         for path in root.rglob("*.py"):
-            for n, line in enumerate(path.read_text().splitlines(), 1):
+            src = path.read_text()
+            if "@mcp.tool(" not in src:
+                continue
+            for m in re.finditer(r"@mcp\.tool\(.*?\)\)\n", src, re.S):
+                decorators += 1
+                if any(h not in m.group(0) for h in HINTS):
+                    bad.append(f"{path.name}:{src[:m.start()].count(chr(10)) + 1}")
+            # a bare decorator declares nothing at all
+            for n, line in enumerate(src.splitlines(), 1):
                 if re.match(r"\s*@mcp\.tool\(\s*\)\s*$", line):
-                    bare.append(f"{path.name}:{n}")
-        assert not bare, f"tools registered without declared annotations: {bare}"
+                    bad.append(f"{path.name}:{n} (bare)")
+        assert not bad, f"decorators without all four literal hints: {bad}"
+        assert decorators >= 84, f"only {decorators} decorators scanned — regex drifted"

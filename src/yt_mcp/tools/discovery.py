@@ -1,6 +1,6 @@
 import asyncio
 
-from yt_mcp.annotations import read_only
+from mcp.types import ToolAnnotations
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import (
     format_issue_list, parse_issue_id, compact_lines,
@@ -10,7 +10,9 @@ from yt_mcp.formatters import (
 
 def register(mcp, resolver: InstanceResolver):
 
-    @mcp.tool(annotations=read_only())
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True))
     async def list_tags(instance: str = "") -> str:
         """List all issue tags with issue counts.
 
@@ -32,7 +34,9 @@ def register(mcp, resolver: InstanceResolver):
             lines.append(f"- **{name}** ({count} issues)")
         return "\n".join(lines)
 
-    @mcp.tool(annotations=read_only())
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True))
     async def list_saved_searches(instance: str = "") -> str:
         """List all saved searches (queries).
 
@@ -52,7 +56,9 @@ def register(mcp, resolver: InstanceResolver):
             lines.append(f"- **{q.get('name', '?')}**: `{q.get('query', '?')}`")
         return "\n".join(lines)
 
-    @mcp.tool(annotations=read_only())
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True))
     async def run_saved_search(name: str, max_results: int = 50, instance: str = "") -> str:
         """Run a saved search by name and return matching issues.
 
@@ -96,7 +102,9 @@ def register(mcp, resolver: InstanceResolver):
             return f"{header}\n\nNo issues match this saved search."
         return f"{header}\n\n{result}"
 
-    @mcp.tool(annotations=read_only())
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True))
     async def audit_issue_list(issue_ids: str, instance: str = "") -> str:
         """Get current status, assignee, and last update for a list of issues.
 
@@ -168,7 +176,9 @@ def register(mcp, resolver: InstanceResolver):
             )
         return compact_lines(lines)
 
-    @mcp.tool(annotations=read_only())
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True))
     async def compare_issue_lists(known_ids: str, query: str, instance: str = "") -> str:
         """Diff a known issue list against a YouTrack query.
 
@@ -232,7 +242,9 @@ def register(mcp, resolver: InstanceResolver):
 
         return compact_lines(lines)
 
-    @mcp.tool(annotations=read_only())
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True))
     async def get_roadmap(
         projects: str = "",
         types: str = "",

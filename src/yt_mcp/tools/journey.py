@@ -2,7 +2,7 @@
 import asyncio
 from datetime import datetime, timezone
 
-from yt_mcp.annotations import read_only
+from mcp.types import ToolAnnotations
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import compact_lines, build_state_clause, build_absolute_date_clause
 
@@ -158,7 +158,9 @@ _DEFAULT_HANDOFF_STATES = (
 
 def register(mcp, resolver: InstanceResolver):
 
-    @mcp.tool(annotations=read_only())
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True))
     async def get_handoff_snapshot(
         projects: str = "",
         states: str = "",
@@ -272,7 +274,9 @@ def register(mcp, resolver: InstanceResolver):
         lines.append(f"**Stuck (>{stale_days}d):** {stale_count} of {total}")
         return compact_lines(lines)
 
-    @mcp.tool(annotations=read_only())
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True))
     async def track_cross_dept_journey(
         query: str,
         stale_days: int = 5,

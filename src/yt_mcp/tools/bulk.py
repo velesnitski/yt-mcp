@@ -3,7 +3,7 @@ import time
 
 import httpx
 
-from yt_mcp.annotations import mutates, read_only
+from mcp.types import ToolAnnotations
 from yt_mcp.resolver import InstanceResolver
 
 MAX_BULK_RESULTS = 100
@@ -21,7 +21,9 @@ def _validate_batch_tag(tag: str) -> str | None:
 
 def register(mcp, resolver: InstanceResolver):
 
-    @mcp.tool(annotations=read_only())
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=True, destructiveHint=False,
+        idempotentHint=True, openWorldHint=True))
     async def bulk_update_preview(query: str, command: str, max_results: int = 50, instance: str = "") -> str:
         """Preview which issues would be affected by a bulk update (dry run). Call before bulk_update_execute.
 
@@ -66,7 +68,9 @@ def register(mcp, resolver: InstanceResolver):
         lines.append("⚠ Call `bulk_update_execute` with the same query and command to apply.")
         return "\n".join(lines)
 
-    @mcp.tool(annotations=mutates(destructive=True))
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True,
+        idempotentHint=True, openWorldHint=True))
     async def bulk_update_execute(query: str, command: str, max_results: int = 50, instance: str = "") -> str:
         """Execute a bulk update. DESTRUCTIVE -- call bulk_update_preview first. Tags batch for rollback.
 
@@ -125,7 +129,9 @@ def register(mcp, resolver: InstanceResolver):
         lines.append(f"To undo: `bulk_rollback(batch_tag=\"{batch_tag}\")`")
         return "\n".join(lines)
 
-    @mcp.tool(annotations=mutates(destructive=True))
+    @mcp.tool(annotations=ToolAnnotations(
+        readOnlyHint=False, destructiveHint=True,
+        idempotentHint=True, openWorldHint=True))
     async def bulk_rollback(batch_tag: str, instance: str = "") -> str:
         """Rollback all changes from a bulk update batch.
 
