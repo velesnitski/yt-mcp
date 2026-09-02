@@ -1,6 +1,7 @@
 import asyncio
 from datetime import datetime, timezone
 
+from yt_mcp.annotations import mutates, read_only
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.errors import UserInputError
 from yt_mcp.formatters import format_value, parse_issue_id
@@ -8,7 +9,7 @@ from yt_mcp.formatters import format_value, parse_issue_id
 
 def register(mcp, resolver: InstanceResolver):
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def get_issue_history(issue_id: str, max_results: int = 20, instance: str = "") -> str:
         """Get the change history of a YouTrack issue.
 
@@ -49,7 +50,7 @@ def register(mcp, resolver: InstanceResolver):
 
         return "\n".join(lines)
 
-    @mcp.tool()
+    @mcp.tool(annotations=mutates(destructive=True))
     async def rollback_issue(issue_id: str, activity_id: str, instance: str = "") -> str:
         """Rollback a specific change by restoring the previous value.
 
@@ -118,7 +119,7 @@ def register(mcp, resolver: InstanceResolver):
             f"**{field_name}:** restored to **{old_value}**"
         )
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def get_work_items(
         issue_id: str,
         instance: str = "",
@@ -218,7 +219,7 @@ def register(mcp, resolver: InstanceResolver):
 
         return "\n".join(lines)
 
-    @mcp.tool()
+    @mcp.tool(annotations=mutates(idempotent=False))
     async def add_work_item(
         issue_id: str,
         duration_minutes: int,
@@ -275,7 +276,7 @@ def register(mcp, resolver: InstanceResolver):
         type_str = f" [{work_type}]" if work_type else ""
         return f"Logged **{dur_str}** on **{issue_id}** ({date_str}){type_str}{desc_str}\n**Work item ID:** `{item_id}`"
 
-    @mcp.tool()
+    @mcp.tool(annotations=mutates())
     async def update_work_item(
         issue_id: str,
         work_item_id: str,
@@ -354,7 +355,7 @@ def register(mcp, resolver: InstanceResolver):
         )
         return "\n".join(parts)
 
-    @mcp.tool()
+    @mcp.tool(annotations=mutates(destructive=True))
     async def delete_work_item(issue_id: str, work_item_id: str, instance: str = "") -> str:
         """Delete a work item. Returns deleted details for restoration.
 
@@ -407,7 +408,7 @@ def register(mcp, resolver: InstanceResolver):
         )
         return "\n".join(parts)
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def get_issue_changes_summary(
         issue_id: str,
         since: str = "",

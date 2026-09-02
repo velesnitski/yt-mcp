@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 
+from yt_mcp.annotations import mutates, read_only
 from yt_mcp.errors import UserInputError
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import compact_lines, escape_query_value, parse_issue_id, split_service_comments
@@ -7,7 +8,7 @@ from yt_mcp.formatters import compact_lines, escape_query_value, parse_issue_id,
 
 def register(mcp, resolver: InstanceResolver):
 
-    @mcp.tool()
+    @mcp.tool(annotations=mutates(idempotent=False))
     async def add_comment(issue_id: str, text: str, instance: str = "") -> str:
         """Add a comment to a YouTrack issue.
 
@@ -25,7 +26,7 @@ def register(mcp, resolver: InstanceResolver):
         author = (data.get("author") or {}).get("name", "?") if data else "?"
         return f"Comment added to **{issue_id}** by {author}:\n> {text[:200]}"
 
-    @mcp.tool()
+    @mcp.tool(annotations=mutates())
     async def update_comment(issue_id: str, comment_id: str, text: str, instance: str = "") -> str:
         """Update an existing comment. Returns previous text for rollback.
 
@@ -51,7 +52,7 @@ def register(mcp, resolver: InstanceResolver):
             f"To restore, call `update_comment` with the previous text."
         )
 
-    @mcp.tool()
+    @mcp.tool(annotations=mutates(destructive=True))
     async def delete_comment(issue_id: str, comment_id: str, instance: str = "") -> str:
         """Delete a comment from a YouTrack issue. Returns deleted text for restoration.
 
@@ -77,7 +78,7 @@ def register(mcp, resolver: InstanceResolver):
             f"To restore, call `add_comment` with the text above."
         )
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def find_comments(
         text: str,
         author: str = "",
@@ -166,7 +167,7 @@ def register(mcp, resolver: InstanceResolver):
             lines.append(f"…and {len(matches) - max_results} more — raise max_results or narrow the query.")
         return compact_lines(lines)
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def get_my_mentions(
         days: int = 14,
         max_results: int = 15,

@@ -4,6 +4,7 @@ import mimetypes
 import os
 from datetime import datetime, timezone
 
+from yt_mcp.annotations import mutates, read_only
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import parse_issue_id, compact_lines
 
@@ -75,7 +76,7 @@ def _full_url(client, url: str) -> str:
 
 def register(mcp, resolver: InstanceResolver):
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def list_attachments(issue_id: str, instance: str = "") -> str:
         """List all attachments on a YouTrack issue.
 
@@ -116,7 +117,7 @@ def register(mcp, resolver: InstanceResolver):
             )
         return compact_lines(lines)
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def get_attachment_url(issue_id: str, attachment_name: str, instance: str = "") -> str:
         """Get the download URL for a specific attachment on an issue.
 
@@ -153,7 +154,7 @@ def register(mcp, resolver: InstanceResolver):
 
         return f"**{att.get('name', '?')}** on {data.get('idReadable', issue_id)}\n**URL:** {url}"
 
-    @mcp.tool()
+    @mcp.tool(annotations=mutates(idempotent=False))
     async def add_attachment(
         issue_id: str,
         file_path: str = "",

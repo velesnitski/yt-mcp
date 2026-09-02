@@ -1,11 +1,12 @@
 import json
 
+from yt_mcp.annotations import read_only
 from yt_mcp.resolver import InstanceResolver
 
 
 def register(mcp, resolver: InstanceResolver):
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def get_current_user(format: str = "report", instance: str = "") -> str:
         """Get the currently authenticated YouTrack user.
 
@@ -53,7 +54,7 @@ def register(mcp, resolver: InstanceResolver):
         parts.append(f"**Instance:** {client.base_url}")
         return "\n".join(parts)
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def get_instance_url(format: str = "report", instance: str = "") -> str:
         """Return the base URL of the configured YouTrack instance.
 
@@ -70,7 +71,7 @@ def register(mcp, resolver: InstanceResolver):
             return json.dumps({"base_url": client.base_url}, ensure_ascii=False)
         return client.base_url
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def search_users(query: str, max_results: int = 20, instance: str = "") -> str:
         """Search YouTrack users by name or login.
 

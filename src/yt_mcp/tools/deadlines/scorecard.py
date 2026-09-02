@@ -3,6 +3,7 @@
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
 
+from yt_mcp.annotations import read_only
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.tools.deadlines import config as cfg
 from yt_mcp.tools.deadlines import fetcher
@@ -20,7 +21,7 @@ from yt_mcp.tools.deadlines.render import render_scorecard
 
 def register(mcp, resolver: InstanceResolver):
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def deadline_scorecard(
         quarter: str = "",
         user: str = "",

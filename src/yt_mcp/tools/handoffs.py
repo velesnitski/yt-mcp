@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from statistics import median
 from typing import Any
 
+from yt_mcp.annotations import read_only
 from yt_mcp.formatters import (
     _resolve_state, _resolve_assignee, _resolve_assignee_login,
     _get_custom_field, compact_lines, build_state_clause,
@@ -380,7 +381,7 @@ def _transition_label(from_role: str, to_role: str) -> str:
 
 def register(mcp, resolver: InstanceResolver):
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def get_stuck_handoffs(
         board_name: str,
         stuck_days: int = 4,

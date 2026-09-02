@@ -289,7 +289,7 @@ def _register_translate_tools():
     tools = {}
 
     class FakeMcp:
-        def tool(self):
+        def tool(self, **kwargs):  # accepts annotations= like FastMCP
             def decorator(fn):
                 tools[fn.__name__] = fn
                 return fn

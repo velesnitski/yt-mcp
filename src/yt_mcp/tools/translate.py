@@ -3,6 +3,7 @@ import time
 
 import httpx
 
+from yt_mcp.annotations import mutates, read_only
 from yt_mcp.resolver import InstanceResolver
 
 
@@ -48,7 +49,7 @@ def _is_bilingual(desc: str, delimiter: str = "----") -> bool:
 
 def register(mcp, resolver: InstanceResolver):
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def get_issues_for_translation(
         query: str,
         include_comments: bool = True,
@@ -166,7 +167,7 @@ def register(mcp, resolver: InstanceResolver):
 
         return "\n".join(lines)
 
-    @mcp.tool()
+    @mcp.tool(annotations=mutates())
     async def apply_translations(
         translations: str,
         batch_tag: str = "",

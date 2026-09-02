@@ -86,16 +86,19 @@ NON_IDEMPOTENT_TOOLS = frozenset({
 
 
 def _annotate_tools(tools: dict) -> None:
-    """Attach MCP annotations to every registered tool.
+    """Backstop for any tool registered without explicit annotations.
 
-    One pass over the registry instead of 84 decorator arguments: the
-    classification is a property of the tool's role (already encoded in
-    WRITE_TOOLS), not of its call site, so it belongs here where the sets
-    live and can be tested as a whole.
+    Tools declare their hints at the definition site (`annotations=` on the
+    decorator, ADR-046) so a reader — or a registry auditing the source —
+    sees them without running the server. This pass only fills a tool that
+    declared none, so a future omission degrades to a correct default
+    instead of shipping a tool with no hints. Tests assert the two agree.
     """
     from mcp.types import ToolAnnotations
 
     for name, tool in tools.items():
+        if tool.annotations is not None:
+            continue
         read_only = name not in WRITE_TOOLS
         tool.annotations = ToolAnnotations(
             readOnlyHint=read_only,

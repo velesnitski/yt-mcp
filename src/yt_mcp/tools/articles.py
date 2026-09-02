@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+from yt_mcp.annotations import mutates, read_only
 from yt_mcp.resolver import InstanceResolver
 
 
@@ -15,7 +16,7 @@ def _safe_date(ms: int | None, fmt: str = "%Y-%m-%d %H:%M") -> str:
 
 def register(mcp, resolver: InstanceResolver):
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def search_articles(query: str, max_results: int = 20, instance: str = "") -> str:
         """Search Knowledge Base articles.
 
@@ -52,7 +53,7 @@ def register(mcp, resolver: InstanceResolver):
             )
         return "\n".join(lines)
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def get_article(article_id: str, include_comments: bool = True, instance: str = "") -> str:
         """Get a Knowledge Base article with full content.
 
@@ -134,7 +135,7 @@ def register(mcp, resolver: InstanceResolver):
 
         return "\n".join(parts)
 
-    @mcp.tool()
+    @mcp.tool(annotations=mutates(idempotent=False))
     async def create_article(
         project: str,
         summary: str,
@@ -171,7 +172,7 @@ def register(mcp, resolver: InstanceResolver):
         article_id = data.get("idReadable", data.get("id", "?"))
         return f"Created article: **{article_id}** — {data.get('summary', summary)}"
 
-    @mcp.tool()
+    @mcp.tool(annotations=mutates())
     async def update_article(
         article_id: str,
         summary: str = "",
@@ -213,7 +214,7 @@ def register(mcp, resolver: InstanceResolver):
         parts.append("To restore, call `update_article` with the previous values.")
         return "\n".join(parts)
 
-    @mcp.tool()
+    @mcp.tool(annotations=mutates(destructive=True))
     async def delete_article(article_id: str, instance: str = "") -> str:
         """Delete a Knowledge Base article. Returns details for restoration.
 
@@ -241,7 +242,7 @@ def register(mcp, resolver: InstanceResolver):
             f"To restore, call `create_article` with the details above."
         )
 
-    @mcp.tool()
+    @mcp.tool(annotations=mutates(idempotent=False))
     async def add_article_comment(article_id: str, text: str, instance: str = "") -> str:
         """Add a comment to a Knowledge Base article.
 
@@ -262,7 +263,7 @@ def register(mcp, resolver: InstanceResolver):
             f"> {text[:200]}"
         )
 
-    @mcp.tool()
+    @mcp.tool(annotations=mutates())
     async def update_article_comment(
         article_id: str, comment_id: str, text: str, instance: str = "",
     ) -> str:
@@ -292,7 +293,7 @@ def register(mcp, resolver: InstanceResolver):
             f"To restore, call `update_article_comment` with the previous text."
         )
 
-    @mcp.tool()
+    @mcp.tool(annotations=mutates(destructive=True))
     async def delete_article_comment(article_id: str, comment_id: str, instance: str = "") -> str:
         """Delete an article comment. Returns text for restoration.
 

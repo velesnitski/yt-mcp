@@ -4,6 +4,7 @@ import re
 import httpx
 from datetime import datetime, timezone
 
+from yt_mcp.annotations import mutates, read_only
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.errors import YouTrackPermissionError
 from yt_mcp.formatters import format_issue_list, format_issue_detail, _resolve_state, _resolve_assignee, _get_custom_field, parse_issue_id, compact_lines, normalize_issue, split_service_comments
@@ -55,7 +56,7 @@ async def _get_required_fields_info(client, project_id: str, project_short: str)
 
 def register(mcp, resolver: InstanceResolver):
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def search_issues(query: str, max_results: int = 50, instance: str = "") -> str:
         """Search YouTrack issues using query syntax. Use named periods in curly braces for relative dates.
 
@@ -84,7 +85,7 @@ def register(mcp, resolver: InstanceResolver):
             header += f" (showing first {max_results}, more may exist)"
         return f"{header}\n\n{result}"
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def get_issue(
         issue_id: str,
         include_comments: bool = True,
@@ -165,7 +166,7 @@ def register(mcp, resolver: InstanceResolver):
             out += f"\n_({hidden} service/bot comments hidden — include_bots=True to show)_"
         return out
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def get_issues(
         ids: str,
         fields: str = "",
@@ -249,7 +250,7 @@ def register(mcp, resolver: InstanceResolver):
         lines.append(format_issue_list(data))
         return compact_lines(lines)
 
-    @mcp.tool()
+    @mcp.tool(annotations=mutates(idempotent=False))
     async def create_issue(
         project: str, summary: str, description: str = "", product: str = "",
         command: str = "",
@@ -376,7 +377,7 @@ def register(mcp, resolver: InstanceResolver):
             parts.append("Set these fields manually in YouTrack.")
         return " | ".join(parts[:3]) + ("".join(parts[3:]) if len(parts) > 3 else "")
 
-    @mcp.tool()
+    @mcp.tool(annotations=mutates())
     async def update_issue(
         issue_id: str,
         summary: str = "",
@@ -582,7 +583,7 @@ def register(mcp, resolver: InstanceResolver):
 
         return compact_lines(parts)
 
-    @mcp.tool()
+    @mcp.tool(annotations=mutates())
     async def transition_issue(
         issue_id: str,
         state: str,
@@ -693,7 +694,7 @@ def register(mcp, resolver: InstanceResolver):
             )
         return compact_lines(parts)
 
-    @mcp.tool()
+    @mcp.tool(annotations=mutates(destructive=True))
     async def delete_issue(issue_id: str, permanent: bool = False, instance: str = "") -> str:
         """Delete a YouTrack issue. Default: soft delete (state Obsolete). permanent=True is irreversible.
 
@@ -739,7 +740,7 @@ def register(mcp, resolver: InstanceResolver):
             f"**{state_field}:** {old_state} → Obsolete"
         )
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def get_issue_links(issue_id: str, instance: str = "") -> str:
         """Get all linked issues for an issue.
 
@@ -795,7 +796,7 @@ def register(mcp, resolver: InstanceResolver):
 
         return compact_lines(parts)
 
-    @mcp.tool()
+    @mcp.tool(annotations=mutates())
     async def add_issue_link(
         issue_id: str,
         target_id: str,
@@ -817,7 +818,7 @@ def register(mcp, resolver: InstanceResolver):
         await client.execute_command(issue_id, command)
         return f"Linked **{issue_id}** → **{target_id}** ({link_type})"
 
-    @mcp.tool()
+    @mcp.tool(annotations=mutates(destructive=True))
     async def remove_issue_link(
         issue_id: str,
         target_id: str,
@@ -839,7 +840,7 @@ def register(mcp, resolver: InstanceResolver):
         await client.execute_command(issue_id, command)
         return f"Unlinked **{issue_id}** → **{target_id}** ({link_type})"
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def poll_changes(
         query: str = "",
         since_minutes: int = 5,
@@ -907,7 +908,7 @@ def register(mcp, resolver: InstanceResolver):
 
         return compact_lines(lines)
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def count_issues(query: str, instance: str = "") -> str:
         """Count issues matching a YouTrack query.
 

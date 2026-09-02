@@ -5,6 +5,7 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
+from yt_mcp.annotations import read_only
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.tools.deadlines import config as cfg
 from yt_mcp.tools.deadlines import fetcher
@@ -23,7 +24,7 @@ _PM_MIN_FANOUT = 6
 
 def register(mcp, resolver: InstanceResolver):
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def suggest_managers(
         lookback_days: int = 90,
         projects: str = "",

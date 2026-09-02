@@ -21,6 +21,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from yt_mcp.annotations import read_only
 from yt_mcp.formatters import (
     _resolve_state, _resolve_assignee, _resolve_assignee_login,
     _get_custom_field, compact_lines,
@@ -554,7 +555,7 @@ def compute_insights(
 
 def register(mcp, resolver: InstanceResolver):
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def get_team_pulse(
         board_name: str,
         horizon_days: int = 14,
@@ -619,7 +620,7 @@ def register(mcp, resolver: InstanceResolver):
             return json.dumps(payload, indent=2, ensure_ascii=False)
         return _render_markdown(payload, limit)
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def get_multi_team_pulse(
         boards: str,
         horizon_days: int = 14,

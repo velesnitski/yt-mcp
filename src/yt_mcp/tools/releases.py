@@ -14,6 +14,7 @@ import re
 import statistics
 from datetime import datetime, timedelta, timezone
 
+from yt_mcp.annotations import read_only
 from yt_mcp.formatters import compact_lines
 from yt_mcp.resolver import InstanceResolver
 
@@ -60,7 +61,7 @@ def _is_release_ticket(summary: str) -> bool:
 def register(mcp, resolver: InstanceResolver):
     """Register release calendar tools."""
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def get_release_calendar(
         projects: str = "",
         lookback_days: int = 30,

@@ -1,5 +1,6 @@
 import asyncio
 
+from yt_mcp.annotations import read_only
 from yt_mcp.client import YouTrackClient
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import _resolve_state, get_product, parse_issue_id, escape_query_value
@@ -117,7 +118,7 @@ def register(mcp, resolver: InstanceResolver):
 
         return visited
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def get_impact_map(issue_id: str, depth: int = 2, instance: str = "") -> str:
         """Build a cross-product dependency graph from an issue via links, product overlap, and mentions.
 
@@ -199,7 +200,7 @@ def register(mcp, resolver: InstanceResolver):
 
         return "\n".join(lines)
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def get_deadline_impact(issue_id: str, deadline: str = "", instance: str = "") -> str:
         """Analyze what breaks if an issue slips past a deadline. Categorizes as BLOCKED, AT RISK, or DONE.
 

@@ -4,6 +4,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 
+from yt_mcp.annotations import read_only
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import (
     _resolve_state, _resolve_assignee, _get_custom_field,
@@ -325,7 +326,7 @@ def _risk_record(
 
 def register(mcp, resolver: InstanceResolver):
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def get_issues_digest(
         query: str,
         since: str = "24h",
@@ -467,7 +468,7 @@ def register(mcp, resolver: InstanceResolver):
 
         return compact_lines(lines)
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def get_at_risk_issues(
         project: str,
         stale_days: int = 7,
@@ -774,7 +775,7 @@ def register(mcp, resolver: InstanceResolver):
 
         return compact_lines(lines)
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def check_task_creation(
         keywords: str,
         project: str = "",
@@ -929,7 +930,7 @@ def register(mcp, resolver: InstanceResolver):
 
         return compact_lines(lines)
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def get_creation_activity(
         project: str,
         since: str = "7d",
@@ -1047,7 +1048,7 @@ def register(mcp, resolver: InstanceResolver):
 
         return compact_lines(lines)
 
-    @mcp.tool()
+    @mcp.tool(annotations=read_only())
     async def get_project_health(
         project: str,
         since: str = "24h",
