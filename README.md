@@ -4,9 +4,10 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/velesnitski/yt-mcp)](https://github.com/velesnitski/yt-mcp/releases)
-[![Tools](https://img.shields.io/badge/tools-66-purple.svg)](#available-tools-66)
+[![Tools](https://img.shields.io/badge/tools-84-purple.svg)](#available-tools-84)
 [![Docker](https://img.shields.io/badge/docker-velesnitski%2Fyt--mcp-blue?logo=docker)](https://hub.docker.com/r/velesnitski/yt-mcp)
 [![Stars](https://img.shields.io/github/stars/velesnitski/yt-mcp?style=social)](https://github.com/velesnitski/yt-mcp/stargazers)
+[![M8ven Score](https://m8ven.ai/badge/mcp/velesnitski-yt-mcp-v541q4?v=2bf82a8ce8a539e6d1b8574f35349a29)](https://m8ven.ai/mcp/velesnitski-yt-mcp-v541q4)
 
 YouTrack MCP server for [Claude Code](https://claude.com/claude-code), [GitHub Copilot](https://github.com/features/copilot), [Cursor](https://cursor.com), [JetBrains IDEs](https://www.jetbrains.com/help/idea/mcp.html), [n8n](https://n8n.io), and any MCP-compatible client. Talk to your YouTrack instance in natural language.
 
@@ -194,9 +195,9 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 - *"Log 2 hours of development on PROJ-1828"*
 - *"Find articles about deployment"*
 
-### Available tools (66)
+### Available tools (84)
 
-#### Issues (18)
+#### Issues (22)
 
 | Tool | Description |
 |---|---|
@@ -218,15 +219,20 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `poll_changes` | Poll for recently changed issues (for automation triggers — Make.com, n8n, cron) |
 | `count_issues` | Lightweight count of issues matching a query (no full data) |
 | `list_templates` | List available issue templates |
+| `get_issues` | Batch-fetch several issues by ID in one request (report enrichment, digests) |
+| `transition_issue` | Change State gate-aware: set required fields first, then transition, and surface the blocking workflow rule's own text |
+| `find_comments` | Find issues by what their comments say — phrase search with author and project filters |
+| `get_my_mentions` | Mentions of you plus likely replies to your comments, within a lookback window |
 
-#### Attachments (2)
+#### Attachments (3)
 
 | Tool | Description |
 |---|---|
 | `list_attachments` | List all attachments on an issue (name, size, type, author, date) |
 | `get_attachment_url` | Get the download URL for a specific attachment |
+| `add_attachment` | Attach a file to an issue from inline content, or from disk when the operator allowlists directories |
 
-#### Time tracking (4)
+#### Time tracking (6)
 
 | Tool | Description |
 |---|---|
@@ -234,8 +240,10 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `add_work_item` | Log time to an issue (duration, date, type, description) |
 | `update_work_item` | Update an existing work item (duration, date, description) |
 | `delete_work_item` | Delete a work item from an issue |
+| `monthly_time_report_by_user` | Monthly time report grouped by the user who logged the work (optionally by project) |
+| `user_time_summary` | One user's logged time for a period, with a per-issue breakdown |
 
-#### Agile boards & sprints (8)
+#### Agile boards & sprints (9)
 
 | Tool | Description |
 |---|---|
@@ -247,8 +255,9 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `create_sprint` | Create a new sprint on an agile board (with optional dates) |
 | `update_sprint` | Update an existing sprint (rename, reschedule, archive) |
 | `add_issues_to_sprint` | Assign issues to a sprint via YouTrack commands |
+| `get_active_sprint_issues` | Issues in a board's currently active sprint |
 
-#### Projects & users (4)
+#### Projects & users (5)
 
 | Tool | Description |
 |---|---|
@@ -256,8 +265,9 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `get_project_fields` | List custom fields with required status and valid values (use before `create_issue`) |
 | `get_current_user` | Get the authenticated user's profile |
 | `search_users` | Search users by name, login, or email |
+| `get_instance_url` | The configured instance URL, for building issue links |
 
-#### Discovery & cross-issue analysis (6)
+#### Discovery & cross-issue analysis (7)
 
 | Tool | Description |
 |---|---|
@@ -267,6 +277,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `audit_issue_list` | Get current status/assignee/idle for a list of IDs (validate stale roadmaps) |
 | `compare_issue_lists` | Diff a known list vs a query — find untracked items or stale entries |
 | `get_roadmap` | Cross-project unresolved view filtered by type and state (parallel fetch) |
+| `track_cross_dept_journey` | Follow a request across departments via issue links, with per-stage timings |
 
 #### Knowledge Base (8)
 
@@ -296,7 +307,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `get_issues_for_translation` | Fetch issues with non-English text for LLM-assisted translation |
 | `apply_translations` | Apply translated text to issues with batch tagging for rollback |
 
-#### Priority dashboard & monitoring (9)
+#### Priority dashboard & monitoring (17)
 
 | Tool | Description |
 |---|---|
@@ -309,6 +320,14 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `check_task_creation` | Verify a requested task was created with proper fields (priority, assignee, description) + quality score |
 | `get_creation_activity` | Report of recently created issues with quality indicators and PM follow-through stats |
 | `get_project_health` | Project health score (0-100, dedup'd) + state/product distribution, metrics, recently resolved |
+| `get_team_pulse` | Team flow snapshot for one board: throughput, pipeline, insight flags, ready-to-pull picks |
+| `get_multi_team_pulse` | The same pulse across several boards, aggregated org-wide |
+| `get_stuck_handoffs` | Cross-team transitions that stalled after a handoff |
+| `get_handoff_snapshot` | Current state of issues waiting at each handoff point |
+| `audit_deadline_changes` | Deadline moves over a period — who changed what, and when |
+| `deadline_scorecard` | Per-assignee deadline reliability scoring |
+| `suggest_managers` | Suggest the responsible manager for issues from historical assignment patterns |
+| `get_release_calendar` | Releases in flight and recently shipped, with cadence-based ETAs and store-queue flags |
 
 #### Impact analysis (2)
 
@@ -386,7 +405,7 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{
     uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
 ```
 
-You should see all 66 tools listed.
+You should see all 84 tools listed.
 
 ## Setup for Windows
 
@@ -564,7 +583,7 @@ Put it behind a reverse proxy (Caddy, nginx, Cloudflare Tunnel) for HTTPS.
 
 ### 3. Use it
 
-Start a conversation in claude.ai and ask about your YouTrack issues. All 66 tools are available.
+Start a conversation in claude.ai and ask about your YouTrack issues. All 84 tools are available.
 
 > Without `YOUTRACK_OAUTH_URL`, OAuth is disabled and the server works in standard mode (stdio/SSE without auth) — no changes to existing setups.
 
