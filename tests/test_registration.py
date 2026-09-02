@@ -6,6 +6,7 @@ from mcp.server.fastmcp import FastMCP
 from yt_mcp.config import YouTrackConfig
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.tools import register_all, WRITE_TOOLS
+from yt_mcp.tools import DESTRUCTIVE_TOOLS, NON_IDEMPOTENT_TOOLS, _registered_tools
 
 
 def _make_client():
@@ -210,3 +211,51 @@ class TestCoreToolset:
 
     def test_full_unchanged(self):
         assert len(self._register(toolset="full")) == 84
+
+
+class TestToolAnnotations:
+    """ADR-045: every tool advertises the four MCP hints, derived from role."""
+
+    def _tools(self):
+        mcp = FastMCP("test")
+        register_all(mcp, _make_resolver(),
+                     YouTrackConfig(url="https://test.youtrack.cloud", token="perm:test"))
+        return _registered_tools(mcp)
+
+    def test_every_tool_is_annotated(self):
+        missing = [n for n, t in self._tools().items() if not t.annotations]
+        assert not missing, f"tools without annotations: {missing}"
+
+    def test_read_only_is_derived_from_write_tools(self):
+        for name, tool in self._tools().items():
+            assert tool.annotations.readOnlyHint == (name not in WRITE_TOOLS), name
+
+    def test_read_tools_are_never_destructive(self):
+        for name, tool in self._tools().items():
+            if tool.annotations.readOnlyHint:
+                assert tool.annotations.destructiveHint is False, name
+                assert tool.annotations.idempotentHint is True, name
+
+    def test_deletes_are_flagged_destructive(self):
+        tools = self._tools()
+        for name in ("delete_issue", "delete_comment", "rollback_issue", "bulk_rollback"):
+            assert tools[name].annotations.destructiveHint is True, name
+
+    def test_creates_are_not_idempotent(self):
+        tools = self._tools()
+        for name in ("create_issue", "add_comment", "create_sprint"):
+            assert tools[name].annotations.idempotentHint is False, name
+
+    def test_updates_are_idempotent_but_not_destructive(self):
+        a = self._tools()["update_issue"].annotations
+        assert a.idempotentHint is True and a.destructiveHint is False
+
+    def test_open_world_everywhere(self):
+        # Every tool reaches an external YouTrack instance.
+        assert all(t.annotations.openWorldHint is True for t in self._tools().values())
+
+    def test_destructive_and_non_idempotent_sets_are_write_tools(self):
+        # A name in either set that is not a write tool is a typo that would
+        # silently annotate nothing.
+        assert DESTRUCTIVE_TOOLS <= WRITE_TOOLS
+        assert NON_IDEMPOTENT_TOOLS <= WRITE_TOOLS

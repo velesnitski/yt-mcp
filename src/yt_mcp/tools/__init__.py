@@ -57,6 +57,56 @@ CORE_TOOLS = frozenset({
 })
 
 
+# --- MCP tool annotations (ADR-045) -----------------------------------------
+# The spec's four hints let a client reason about a tool before calling it:
+# gate writes behind confirmation, parallelize reads, retry safely. They are
+# advertised in tools/list and cost nothing at runtime.
+#
+# readOnlyHint is DERIVED from WRITE_TOOLS above rather than restated, so a
+# new write tool cannot be annotated read-only by omission — the existing set
+# is already the thing every write path must be registered in.
+
+# Write tools that remove or revert data. Per spec, destructiveHint is only
+# meaningful for non-read-only tools; additive writes get False.
+DESTRUCTIVE_TOOLS = frozenset({
+    "delete_issue", "delete_comment", "delete_work_item", "delete_article",
+    "delete_article_comment", "delete_agile_board",
+    "rollback_issue", "bulk_rollback", "remove_issue_link",
+    "bulk_update_execute",  # mass field overwrite; rollback exists but it is a bulk mutation
+})
+
+# Writes that create a NEW entity each call — calling twice is not the same as
+# calling once. Everything else (setting a field to a value, deleting a thing
+# already gone) converges on the same state.
+NON_IDEMPOTENT_TOOLS = frozenset({
+    "create_issue", "create_issue_from_template", "create_article",
+    "create_agile_board", "create_sprint",
+    "add_comment", "add_article_comment", "add_work_item", "add_attachment",
+})
+
+
+def _annotate_tools(tools: dict) -> None:
+    """Attach MCP annotations to every registered tool.
+
+    One pass over the registry instead of 84 decorator arguments: the
+    classification is a property of the tool's role (already encoded in
+    WRITE_TOOLS), not of its call site, so it belongs here where the sets
+    live and can be tested as a whole.
+    """
+    from mcp.types import ToolAnnotations
+
+    for name, tool in tools.items():
+        read_only = name not in WRITE_TOOLS
+        tool.annotations = ToolAnnotations(
+            readOnlyHint=read_only,
+            destructiveHint=False if read_only else name in DESTRUCTIVE_TOOLS,
+            idempotentHint=True if read_only else name not in NON_IDEMPOTENT_TOOLS,
+            # Every tool talks to a YouTrack instance — an external system
+            # whose contents change outside this server.
+            openWorldHint=True,
+        )
+
+
 def _registered_tools(mcp) -> dict:
     """The ONE place that touches FastMCP's private tool registry.
 
@@ -77,6 +127,7 @@ def register_all(mcp, resolver: InstanceResolver, config: YouTrackConfig | None 
         module.register(mcp, resolver)
 
     tools = _registered_tools(mcp)
+    _annotate_tools(tools)
 
     # Wrap all tool functions with analytics logging
     for tool in tools.values():
