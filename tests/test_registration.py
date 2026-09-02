@@ -287,3 +287,50 @@ class TestToolAnnotations:
                     bad.append(f"{path.name}:{n} (bare)")
         assert not bad, f"decorators without all four literal hints: {bad}"
         assert decorators >= 84, f"only {decorators} decorators scanned — regex drifted"
+
+    def test_backstop_fills_a_tool_that_declared_nothing(self):
+        """The runtime pass is a safety net; an untested one is not a net.
+
+        No shipped tool relies on it — every decorator declares its hints —
+        so this is the only place its contract is exercised: a bare
+        registration must still end up annotated, and correctly.
+        """
+        from yt_mcp.tools import _annotate_tools
+
+        mcp = FastMCP("test")
+
+        @mcp.tool()
+        async def delete_issue(issue_id: str) -> str:  # a known write tool
+            """Stand-in for a tool registered without annotations."""
+            return ""
+
+        @mcp.tool()
+        async def search_issues(query: str) -> str:  # a known read tool
+            """Stand-in for a read tool registered without annotations."""
+            return ""
+
+        tools = _registered_tools(mcp)
+        assert all(t.annotations is None for t in tools.values())
+        _annotate_tools(tools)
+        assert tools["search_issues"].annotations.readOnlyHint is True
+        assert tools["delete_issue"].annotations.readOnlyHint is False
+        assert tools["delete_issue"].annotations.destructiveHint is True
+
+    def test_backstop_never_overwrites_a_declaration(self):
+        """A declared value wins: the net fills gaps, it does not correct."""
+        from mcp.types import ToolAnnotations
+
+        from yt_mcp.tools import _annotate_tools
+
+        mcp = FastMCP("test")
+
+        @mcp.tool(annotations=ToolAnnotations(
+            readOnlyHint=True, destructiveHint=False,
+            idempotentHint=True, openWorldHint=True))
+        async def some_read_tool(x: str = "") -> str:
+            """Declared explicitly."""
+            return ""
+
+        tools = _registered_tools(mcp)
+        _annotate_tools(tools)
+        assert tools["some_read_tool"].annotations.readOnlyHint is True

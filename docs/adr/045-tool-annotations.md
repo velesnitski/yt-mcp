@@ -1,5 +1,10 @@
 # 045 — MCP tool annotations, derived from the write-tool set
 
+> **Superseded by [ADR-046](046-annotations-declared-at-definition-site.md) and [ADR-047](047-hints-literal-in-source.md).** The classification here still
+> holds and is enforced by tests; only the *place* the values are written has
+> changed — from a registration pass to each decorator.
+
+
 ## Context
 
 An external MCP audit scored this server and flagged that ~80 of its tools

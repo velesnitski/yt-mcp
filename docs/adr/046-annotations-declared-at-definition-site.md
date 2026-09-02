@@ -1,5 +1,11 @@
 # 046 — Declare tool annotations at the definition site
 
+> **Superseded by [ADR-047](047-hints-literal-in-source.md).** Declaring at the
+> definition site was right; doing it through `read_only()` / `mutates()` helpers
+> was not, because a source reader cannot resolve a call. The hints are now
+> written out literally.
+
+
 ## Context
 
 ADR-045 added the four protocol hints to every tool in a single pass at
