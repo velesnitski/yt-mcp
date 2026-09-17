@@ -243,7 +243,7 @@ def register(mcp, resolver: InstanceResolver):
             duration_minutes: Time spent in minutes
             date: Date YYYY-MM-DD (default: today)
             description: Work description (optional)
-            work_type: Work type (optional)
+            work_type: WorkItemType ID (preferred, e.g. 251-9) or name (optional)
             instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance, issue_id)
@@ -266,7 +266,11 @@ def register(mcp, resolver: InstanceResolver):
             payload["text"] = description
 
         if work_type:
-            payload["type"] = {"name": work_type}
+            # YouTrack rejects name-only WorkItemType lookup with 400 unless id is set.
+            if work_type[0].isdigit() and "-" in work_type:
+                payload["type"] = {"id": work_type}
+            else:
+                payload["type"] = {"name": work_type}
 
         data = await client.post(
             f"/api/issues/{issue_id}/timeTracking/workItems",

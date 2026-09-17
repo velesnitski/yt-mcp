@@ -84,3 +84,36 @@ class TestDateFilters:
         client, fn = _setup([])
         with pytest.raises(ValueError, match="since must be YYYY-MM-DD"):
             await fn(issue_id="PROJ-1", since="June 17")
+
+
+def _setup_add():
+    client = MagicMock()
+    client.post = AsyncMock(return_value={"id": "111-1"})
+    resolver = MagicMock()
+    resolver.resolve = MagicMock(return_value=client)
+    mcp = FastMCP("test")
+    history.register(mcp, resolver)
+    return client, mcp._tool_manager._tools["add_work_item"].fn
+
+
+class TestAddWorkItemType:
+    """YouTrack rejects a name-only WorkItemType with HTTP 400:
+    'unable to locate a WorkItemType-type entity unless its ID is also provided'."""
+
+    async def test_id_shaped_work_type_sent_as_id(self):
+        client, fn = _setup_add()
+        await fn(issue_id="PROJ-1", duration_minutes=30, work_type="251-9")
+        payload = client.post.call_args.kwargs["json"]
+        assert payload["type"] == {"id": "251-9"}
+
+    async def test_name_work_type_still_sent_as_name(self):
+        client, fn = _setup_add()
+        await fn(issue_id="PROJ-1", duration_minutes=30, work_type="Development")
+        payload = client.post.call_args.kwargs["json"]
+        assert payload["type"] == {"name": "Development"}
+
+    async def test_no_work_type_omits_type(self):
+        client, fn = _setup_add()
+        await fn(issue_id="PROJ-1", duration_minutes=30)
+        payload = client.post.call_args.kwargs["json"]
+        assert "type" not in payload
