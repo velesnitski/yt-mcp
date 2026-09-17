@@ -1,10 +1,61 @@
 import asyncio
+import re
 from datetime import datetime, timezone
+
+import httpx
 
 from mcp.types import ToolAnnotations
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.errors import UserInputError
 from yt_mcp.formatters import format_value, parse_issue_id
+
+
+# A YouTrack entity id is `<digits>-<digits>` (e.g. `251-9`). Matching
+# loosely — a leading digit plus any hyphen — would capture perfectly ordinary
+# type NAMES like "1-on-1" or "24-7 oncall" and send them as ids.
+_ENTITY_ID_RE = re.compile(r"^\d+-\d+$")
+
+_WORK_ITEM_TYPES_PATH = "/api/admin/timeTrackingSettings/workItemTypes"
+
+
+async def _work_type_payload(client, work_type: str) -> dict:
+    """Build the `type` reference for a work item, resolving a name to an id.
+
+    This endpoint will not look a WorkItemType up by name: posting
+    `{"name": ...}` fails with "unable to locate a WorkItemType-type entity
+    unless its ID is also provided". The caller here is usually a model,
+    which knows the human name ("Development") and cannot know the opaque
+    id, so we resolve the name ourselves instead of pushing that lookup onto
+    the caller.
+
+    Reading the type catalogue needs admin rights. When the token lacks them
+    we fall back to sending the name and let YouTrack answer — no worse than
+    before, and it keeps a low-privilege token working for every other field.
+    """
+    work_type = work_type.strip()
+    if _ENTITY_ID_RE.match(work_type):
+        return {"id": work_type}
+
+    try:
+        types = await client.get(_WORK_ITEM_TYPES_PATH, params={"fields": "id,name"})
+    except (ValueError, httpx.HTTPStatusError):
+        # YouTrackPermissionError (a ValueError) or any admin-endpoint refusal.
+        return {"name": work_type}
+
+    # A refusal or an error payload can arrive shaped as a dict rather than the
+    # documented list; iterating that yields strings and blows up on .get.
+    if not isinstance(types, list) or not types:
+        return {"name": work_type}
+
+    wanted = work_type.lower()
+    for t in types:
+        if (t.get("name") or "").strip().lower() == wanted and t.get("id"):
+            return {"id": t["id"]}
+
+    known = ", ".join(sorted(t["name"] for t in types if t.get("name"))) or "none defined"
+    raise UserInputError(
+        f"Unknown work type '{work_type}'. Available types: {known}."
+    )
 
 
 def register(mcp, resolver: InstanceResolver):
@@ -243,7 +294,8 @@ def register(mcp, resolver: InstanceResolver):
             duration_minutes: Time spent in minutes
             date: Date YYYY-MM-DD (default: today)
             description: Work description (optional)
-            work_type: Work type (optional)
+            work_type: Work type name as shown in YouTrack, e.g.
+                "Development" (a WorkItemType id like 251-9 also works)
             instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance, issue_id)
@@ -265,8 +317,8 @@ def register(mcp, resolver: InstanceResolver):
         if description:
             payload["text"] = description
 
-        if work_type:
-            payload["type"] = {"name": work_type}
+        if work_type.strip():
+            payload["type"] = await _work_type_payload(client, work_type)
 
         data = await client.post(
             f"/api/issues/{issue_id}/timeTracking/workItems",
