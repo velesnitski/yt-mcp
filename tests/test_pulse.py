@@ -11,8 +11,11 @@ Coverage:
 
 from datetime import datetime, timezone
 
+from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 
+from yt_mcp.tools import pulse
 from yt_mcp.tools.pulse import (
     classify_column,
     compute_pulse_score,
@@ -1053,3 +1056,53 @@ class TestUnderloadedRecalibration:
             pipeline, [], NOW_MS,
         )
         assert any("underloaded" in f.lower() for f in flags)
+
+
+class TestMultiProjectBoardClause:
+    """A board bound to several projects must not emit an OR-joined clause.
+
+    The live failure: the one board bound to more than one project made
+    every pulse call return a 400. Single-project boards took a different
+    branch, so the bug was invisible to every existing test.
+    """
+
+    def _board(self, *shortnames):
+        return {
+            "name": "Shared Board",
+            "projects": [{"shortName": s} for s in shortnames],
+            "columnSettings": {"columns": [
+                {"presentation": "In Progress"}, {"presentation": "Closed"},
+            ]},
+        }
+
+    async def _captured_queries(self, board):
+        """Run the payload builder, returning every query it sent."""
+        queries: list[str] = []
+
+        async def fake_get(path, params=None, **kw):
+            if params and "query" in params:
+                queries.append(params["query"])
+            return []
+
+        client = MagicMock()
+        client.get = AsyncMock(side_effect=fake_get)
+        await pulse._build_pulse_payload(
+            client, board, horizon_days=14, lookback_days=30, limit=10,
+            max_idle_days=60, max_overdue_days=30,
+            now_ms=int(datetime(2026, 9, 21, tzinfo=timezone.utc).timestamp() * 1000),
+        )
+        return queries
+
+    async def test_multi_project_board_uses_comma_list(self):
+        queries = await self._captured_queries(self._board("PROJ", "OPS", "DEMO"))
+        assert queries, "builder sent no queries — test would prove nothing"
+        for q in queries:
+            assert " or project:" not in q.lower(), f"OR-joined clause leaked: {q}"
+        assert any("project: PROJ, OPS, DEMO" in q for q in queries)
+
+    async def test_single_project_board_still_plain(self):
+        queries = await self._captured_queries(self._board("PROJ"))
+        assert queries
+        assert any("project: PROJ" in q for q in queries)
+        for q in queries:
+            assert " or " not in q.lower()

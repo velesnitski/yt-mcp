@@ -73,7 +73,9 @@ ship)
     pkill -f "archive-v0/.*/bin/yt-mcp" 2>/dev/null && killed=1
     pkill -f "uvx --from git\+https://github.com/velesnitski/yt-mcp" 2>/dev/null && killed=1
     [[ "$killed" == 1 ]] && echo "stale yt-mcp server processes killed"
-    echo "ship OK ($tag pinned) — reconnect /mcp to load the new build"
+    echo "ship OK ($tag pinned) — RESTART Claude Code to load it (a /mcp"
+    echo "reconnect re-spawns the spec the session read at startup, so it"
+    echo "keeps running the old pin no matter how often you reconnect)"
     ;;
 *)
     echo "usage: release.sh prepare <version> | ship" >&2

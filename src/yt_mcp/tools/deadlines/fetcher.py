@@ -180,10 +180,12 @@ def build_project_clause(projects: str) -> tuple[str, list[str]]:
     the deadline tools failed. Single-project calls were unaffected, which
     is why it survived: the shape only breaks once a second key appears.
     """
+    from yt_mcp import contract
+
     proj_list = [p.strip() for p in projects.split(",") if p.strip()]
     if not proj_list:
         return "", []
-    return "project: " + ", ".join(proj_list), proj_list
+    return contract.project_clause(proj_list), proj_list
 
 
 async def resolve_deadline_field(client: Any, proj_clause: str) -> str | None:

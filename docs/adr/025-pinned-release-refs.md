@@ -43,7 +43,18 @@ old builds. The label was cosmetic; the loop was never closed.
 
 ## Consequences
 
-- What `/mcp` runs after a reconnect is exactly what was shipped — by
+> **Correction (2026-09-21).** The consequence below is wrong, and was
+> wrong when written. Pinning and pkill are necessary but not sufficient:
+> a `/mcp` reconnect re-spawns the server from the spec **the session read
+> at startup**, not from the file on disk. Measured today — the config held
+> `@v1.28.0` while the live process command line still read `@v1.26.0`,
+> after a pkill and three reconnects across three releases. A restart of
+> the client is the only thing that picks up a re-keyed entry. The original
+> symptom that prompted this ADR (a reconnect reporting a two-release-old
+> version) therefore had a third cause that went unexamined once two
+> plausible ones were fixed.
+
+- ~~What `/mcp` runs after a reconnect is exactly what was shipped~~ — by
   construction, not by cache luck. The uvx warm-up step also becomes
   meaningful: it pre-builds the tag the config now points at.
 - Rollback story improves for free: pinning the previous tag in the config

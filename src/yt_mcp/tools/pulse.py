@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from mcp.types import ToolAnnotations
+from yt_mcp import contract
 from yt_mcp.formatters import (
     _resolve_state, _resolve_assignee, _resolve_assignee_login,
     _get_custom_field, compact_lines,
@@ -812,10 +813,9 @@ async def _build_pulse_payload(
     state_to_role, unmapped_columns = _classify_board_columns(board)
     standup_patterns = _compile_standup_patterns({})
 
-    if len(projects) == 1:
-        project_clause = f"project: {projects[0]}"
-    else:
-        project_clause = "(" + " or ".join(f"project: {p}" for p in projects) + ")"
+    # Comma-list, never OR-joined (registry Q17). The OR form 400s, which
+    # broke pulse outright for every board bound to more than one project.
+    project_clause = contract.project_clause(projects)
 
     triaged_states = [s for s, r in state_to_role.items() if r == "triaged"]
     re_entry_states = [s for s, r in state_to_role.items() if r == "re_entry"]

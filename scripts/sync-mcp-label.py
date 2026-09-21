@@ -205,7 +205,8 @@ def main():
         json.dump(cfg, f, indent=2, ensure_ascii=False)
     os.replace(tmp, CLAUDE)
     print(f"updated {CLAUDE} (backup: {CLAUDE}.bak)")
-    print("→ run '/mcp' reconnect (or restart Claude Code) to see the new label")
+    print("→ RESTART Claude Code to run the new build; a '/mcp' reconnect\n"
+          "  re-spawns the spec this session loaded at startup (ADR-025 note)")
     return 0
 
 

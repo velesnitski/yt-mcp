@@ -5,6 +5,8 @@ CORRECT form is produced and, where the broken form is what a naive
 implementation would emit, that it is not.
 """
 
+import pathlib
+import re
 from datetime import datetime, timezone
 
 import pytest
@@ -166,3 +168,56 @@ class TestNoHeavyDependencies:
         src = pathlib.Path(contract.__file__).read_text()
         for banned in ("import httpx", "from mcp", "import mcp", "async def"):
             assert banned not in src, f"contract.py must stay dependency-free: {banned}"
+
+
+class TestNoHandRolledOrClauses:
+    """Q17 as a source-level guard, not a per-site promise.
+
+    The OR-joined form `(project: A or project: B)` parses nowhere — it
+    returns a generic 400. It shipped twice: once in the deadline tools,
+    where it broke every multi-project call, and once in the pulse
+    pipeline, where it broke the only board bound to several projects.
+    Neither had a test, because each site tested its own output rather
+    than the shape the API refuses.
+
+    So this scans the source instead: any module that joins repeated
+    same-prefix clauses with `or` fails here, including a third copy
+    written next year by someone who never read this file.
+    """
+
+    _SAME_PREFIX_OR = re.compile(
+        r'["\']\s+or\s+["\']\s*\.\s*join\s*\(\s*f?["\'](\w+)\s*:', re.IGNORECASE
+    )
+
+    def _sources(self):
+        root = pathlib.Path(__file__).resolve().parents[1] / "src" / "yt_mcp"
+        return [(p, p.read_text()) for p in root.rglob("*.py")]
+
+    def test_no_module_or_joins_same_prefix_clauses(self):
+        offenders = []
+        for path, src in self._sources():
+            for m in self._SAME_PREFIX_OR.finditer(src):
+                line = src[: m.start()].count("\n") + 1
+                offenders.append(f"{path.name}:{line} joins `{m.group(1)}:` with ' or '")
+        assert not offenders, (
+            "OR-joined same-prefix clauses are rejected by YouTrack (Q17); "
+            "use contract.project_clause / a comma-list instead: " + "; ".join(offenders)
+        )
+
+    def test_the_scan_can_actually_see_the_pattern(self):
+        """Positive control: the detector must match the shape it hunts.
+
+        Without this, a regex that silently stops matching would make the
+        guard above pass forever while reporting nothing.
+        """
+        sample = '''project_clause = "(" + " or ".join(f"project: {p}" for p in projects) + ")"'''
+        assert self._SAME_PREFIX_OR.search(sample), "detector no longer matches the known-bad form"
+
+    def test_issue_id_or_join_is_not_flagged(self):
+        """`#PROJ-1 or #PROJ-2` is the documented batch form and is valid.
+
+        The guard must not fire on it, or the next author will silence the
+        guard rather than the bug.
+        """
+        sample = '''query = " or ".join(f"#{iid}" for iid in id_list)'''
+        assert not self._SAME_PREFIX_OR.search(sample)
