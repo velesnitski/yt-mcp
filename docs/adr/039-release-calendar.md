@@ -14,7 +14,9 @@ Two live-validated parser facts feed the design:
   `release-X.Y.Z`, `Release_lite`, `[Tag] Release …`, `RC-X.Y.Z` — while
   false positives ("Validate … before release", CI-failure noise) share the
   keyword but not the shape. A summary-shape regex separates them.
-- A `resolved date:` range clause must be the FIRST clause in the query —
+- ~~A `resolved date:` range clause must be the FIRST clause in the query~~
+  **(retracted 2026-09-21 — see ADR-049; ordering is free, the real
+  requirement is the canonical attribute)** —
   the reversed order is rejected by the parser (same family as ADR-035's
   `resolved:` alias breakage). A test pins the clause order.
 

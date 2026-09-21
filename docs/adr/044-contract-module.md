@@ -32,9 +32,21 @@ Existing modules delegate to it rather than keeping copies, so there is
 one implementation and every current call site keeps working unchanged.
 
 The module is **stdlib-only and synchronous** — no httpx, no MCP SDK, no
-async — and a test asserts that property. That is what makes it importable
-by a consumer that cannot take the server's dependency tree, which is the
-prerequisite for retiring hand-mirroring later. Whether any consumer
+async — and a test asserts that property.
+
+> **Correction (2026-09-21).** This ADR went on to claim the property makes
+> the module "importable by a consumer that cannot take the server's
+> dependency tree". That is true of the *module* and false of the
+> *package*: installing `yt-mcp` pulls five mandatory dependencies (the MCP
+> SDK, `httpx[http2]`, `sentry-sdk`, `PyJWT`, `cryptography`), so importing
+> 140 stdlib lines would drag the whole server tree — a `cryptography`
+> build included — into a consumer's CI. The stdlib-only property removes
+> the *async/MCP-shape* objection to sharing this code; it does not remove
+> the *dependency* one. Sharing it by byte-identical mirror with a parity
+> check, as `docs/YT_QUIRKS.md` already is, costs nothing and carries no
+> supply-chain surface. See the reporting repo's own ADR on that choice.
+
+The stdlib-only property remains Whether any consumer
 actually takes that dependency is a separate decision, made where its
 supply-chain implications are visible; this change is worth making on its
 own for the single-home property.

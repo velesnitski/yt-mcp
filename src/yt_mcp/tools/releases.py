@@ -5,9 +5,10 @@ Convention-driven: teams name release tickets "Release X.Y.Z", "release-X.Y.Z",
 *mention* a release ("Validate payments before release", "…after release",
 CI-failure noise) are filtered out by shape.
 
-Query-syntax notes (validated live, ADR-039): `summary: <word>` works; a
-`resolved date:` range must come FIRST in the query — the reversed clause
-order is rejected by the parser.
+Query-syntax notes (validated live, ADR-039): `summary: <word>` works, and
+the canonical `resolved date:` attribute is required — the `resolved:`
+alias 400s (registry Q1). Clause order is free; the range is emitted first
+only for consistency (registry Q2, retracted after a 2026-09-21 retest).
 """
 
 import re
@@ -99,7 +100,7 @@ def register(mcp, resolver: InstanceResolver):
         raw: list = []
         for term in ("Release", "RC"):
             raw += await _search(f"summary: {term} #Unresolved sort by: updated desc")
-            # resolved-date range MUST precede other clauses (parser quirk).
+            # Range first by convention, not necessity (Q2 retracted).
             raw += await _search(f"resolved date: {window} summary: {term}")
 
         seen: set = set()

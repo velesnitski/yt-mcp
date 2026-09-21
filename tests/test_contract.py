@@ -32,7 +32,11 @@ class TestDateRange:
 
 
 class TestClauseOrder:
-    """Q2: the range clause must come FIRST in a composed query."""
+    """Range-first output: a formatting convention, not a parser rule.
+
+    Q2 claimed the parser required it and was retracted on 2026-09-21.
+    These pin deterministic output; Q1 (the attribute) is the real guard.
+    """
 
     def test_range_leads_the_query(self):
         q = contract.resolved_window_query(30, "summary: Release", now_ms=NOW_MS)

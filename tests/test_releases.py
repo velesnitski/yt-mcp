@@ -111,7 +111,7 @@ class TestCalendar:
             if "resolved date:" in c.kwargs["params"]["query"]
         ]
         assert shipped_queries, "expected shipped-window queries"
-        # Parser quirk: the range must be the FIRST clause (ADR-039).
+        # Convention, not a parser rule (Q2 retracted 2026-09-21).
         assert all(q.startswith("resolved date:") for q in shipped_queries)
 
     async def test_projects_filter(self):

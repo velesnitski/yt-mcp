@@ -3,7 +3,7 @@
 ## Context
 
 While verifying a "Deadline Demon" daily Slack report against live data,
-`get_at_risk_issues(project="DO")` returned **no Overdue category at all**
+`get_at_risk_issues(project="PROJ")` returned **no Overdue category at all**
 and an implausibly large **Unestimated (62)** — despite many DO issues
 having both a deadline and a logged estimate.
 

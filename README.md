@@ -631,7 +631,7 @@ The server will be available at `http://localhost:8000/mcp`.
 1. Start the server in SSE mode (see above)
 2. In Make.com, use an **HTTP** or **MCP** module to connect to `http://localhost:8000/sse`
 3. Use the `poll_changes` tool on a schedule to detect new activity:
-   - Set `query` to filter issues (e.g., `project: DO`)
+   - Set `query` to filter issues (e.g., `project: PROJ`)
    - Set `since_minutes` to match your polling interval (e.g., `5`)
 4. Route changed issues to other Make.com modules (Slack, email, Jira, etc.)
 

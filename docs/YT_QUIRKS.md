@@ -6,8 +6,10 @@ new quirk, add it HERE in both copies in the same change. Every entry
 names its guard (the test or code pattern that prevents reintroduction);
 a quirk without a guard is a regression waiting to happen.
 
-Why this exists: four separate incidents (Q1, Q2, Q3, Q4) were each
-discovered by a production report silently breaking or silently lying.
+Why this exists: separate incidents (Q1, Q3, Q4 and later entries) were
+each discovered by a production report silently breaking or silently
+lying. (Q2 was one of them until a 2026-09-21 retest showed it was Q1
+misattributed — see rule 4 below.)
 The shared failure mode is **YouTrack Cloud rejecting or silently
 ignoring things that used to work** — upgrades change parser/selector
 behavior with no notice and no error.
@@ -15,7 +17,7 @@ behavior with no notice and no error.
 | ID | Quirk | Symptom if ignored | Correct handling | Guard |
 |----|-------|--------------------|------------------|-------|
 | Q1 | `resolved:` alias broken for date ranges (since a 2026-07 Cloud upgrade) | Spaced range → 400; **unspaced range → parses but silently matches zero** (the trap variant) | Always query the canonical `resolved date:` attribute | Source-pinning tests in both repos (yt-mcp ADR-035; reports ADR 021 — word-boundary form, `Unresolved: {` in log lines false-positives the naive check) |
-| Q2 | Clause order matters in composed queries: a `resolved date:` range must be the FIRST clause | Reversed order → parser rejection on composed queries | Put the date-range clause first; note single-clause forms tolerate both orders (verified live) | yt-mcp ADR-039 test; reports verified 2026-07-28, comment at query site |
+| Q2 | ~~Clause order matters: a `resolved date:` range must be the FIRST clause~~ — **RETRACTED 2026-09-21, does not reproduce** | None. Ordering is free | Retested live on Cloud: `project: PROJ resolved date: A .. B` and the reverse both return 62; `summary: Release` + range both return 18; a four-clause query with `sort by:` agrees in both orders. The original incident is explained by **Q1** — the change that reordered the clauses *also* switched `resolved:` → `resolved date:`, and the fix was credited to the reorder. The alias still 400s in **both** orders, which isolates the variable | Retest above. Builders may still emit range-first for determinism, but no code or comment should claim the parser requires it |
 | Q3 | Issue links carry **no top-level `state` field** — `state(name)` on linked issues is silently ignored | Every linked issue renders state `""` while tests mocking the imagined shape pass | Read State from `customFields`; fallback chain `top-level → custom field` | yt-mcp ADR-034 (`_linked_state`); reports `_resolve_native(...) or get_field(...)` |
 | Q4 | Board-column nested `issues` selector silently ignored | Every sprint-board column renders `(0)` while the sprint holds issues | Fetch the sprint-level issue list; group into columns client-side | yt-mcp ADR-038 + behavior tests pinning the real API shape |
 | Q5 | `tag:` clause 400s on instances where the referenced tags don't exist | Whole query fails on multi-instance deployments | Graceful retry without the tag clause; degrade, don't die | reports ADR 008 |
@@ -40,3 +42,10 @@ behavior with no notice and no error.
 3. When a Cloud upgrade breaks something new: bisect the query live before
    suspecting the code (a formerly-stable tool failing on ALL
    boards/instances at once is the upgrade signature — Q1's lesson).
+4. Retract by rewriting the row in place, never by deleting it: the ID is
+   cited from code comments, tests and ADRs, and a vanished ID reads as an
+   editing slip rather than a decision. State the retest and what it
+   measured. An entry only earns retraction from evidence that **isolates
+   one variable** — Q2 survived a year because the change that "fixed" it
+   altered two things at once (clause order and the attribute name), and
+   nobody re-ran the losing case afterwards.

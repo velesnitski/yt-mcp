@@ -40,12 +40,13 @@ def build_date_range(days: int, now_ms: int | None = None) -> str:
 
 
 def resolved_window_query(days: int, *rest: str, now_ms: int | None = None) -> str:
-    """A resolved-in-window query with the range clause FIRST.
+    """A resolved-in-window query, range clause first.
 
-    Clause order is load-bearing (Q2): the parser rejects a composed query
-    whose `resolved date:` range is not the leading clause. Passing the rest
-    of the query through this builder makes the ordering impossible to get
-    wrong at a call site.
+    Ordering is a convention, not a requirement: a 2026-09-21 retest showed
+    both orders return identical counts, and registry Q2 — which claimed the
+    parser enforced it — is retracted. What this builder actually guarantees
+    is the canonical `resolved date:` attribute (Q1), which IS load-bearing:
+    the `resolved:` alias 400s in either order.
     """
     tail = " ".join(c.strip() for c in rest if c and c.strip())
     head = f"{RESOLVED_DATE_ATTR} {build_date_range(days, now_ms)}"
