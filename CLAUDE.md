@@ -5,9 +5,15 @@ YouTrack MCP server. 84 tools across 21 modules.
 ## Build & test
 
 ```bash
-uv run python -m pytest tests/ -q     # run all tests (657+)
+uv run python -m pytest tests/ -q     # run all tests (950+)
 uv run python -m pytest tests/ -v      # verbose
 uv pip install -e .                     # editable install
+
+# Probe the LIVE API for every query shape the code builds (ADR-052).
+# Asserts both directions: shapes we rely on must work, shapes the quirk
+# registry calls rejected must still be rejected. Run after a Cloud
+# upgrade, or when touching query construction.
+YOUTRACK_URL=... YOUTRACK_TOKEN=... uv run python scripts/verify_contract.py
 ```
 
 ## Architecture
@@ -104,6 +110,9 @@ The `/mcp` dialog labels servers by their **config key** in
 `youtrack v<version>` (via `_SERVER_NAME` in `server.py`), but that only
 shows in the instructions header — never in the dialog. After a version
 bump, run `python3 scripts/sync-mcp-label.py` to re-key the entry to
-`youtrack v<version>` across all config containers, then reconnect `/mcp`.
+`youtrack v<version>` across all config containers, then **restart Claude
+Code** — a `/mcp` reconnect re-spawns the spec the session read at
+startup, so it keeps running the old pin however often you reconnect
+(measured 2026-09-21; ADR-025 correction).
 Check the running build any time with `uv run yt-mcp --version`. See
 ADR-011. (Fleet pattern shared with zbbx-mcp / slk-mcp.)
