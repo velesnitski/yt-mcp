@@ -173,9 +173,44 @@ def extract_current_state(issue: dict) -> str:
 
 
 def build_project_clause(projects: str) -> tuple[str, list[str]]:
+    """`project: A, B` — the comma-list idiom (registry Q17).
+
+    The OR-joined form `(project: A or project: B)` this used to emit is
+    rejected outright with a generic 400, so every multi-project call to
+    the deadline tools failed. Single-project calls were unaffected, which
+    is why it survived: the shape only breaks once a second key appears.
+    """
     proj_list = [p.strip() for p in projects.split(",") if p.strip()]
     if not proj_list:
         return "", []
-    if len(proj_list) == 1:
-        return f"project: {proj_list[0]}", proj_list
-    return "(" + " or ".join(f"project: {p}" for p in proj_list) + ")", proj_list
+    return "project: " + ", ".join(proj_list), proj_list
+
+
+async def resolve_deadline_field(client: Any, proj_clause: str) -> str | None:
+    """Name of the deadline custom field in scope, or None if absent.
+
+    There is no `due date:` search attribute — the deadline lives in a
+    per-project custom field whose name varies by project ("Deadline ☠️",
+    "Due Date", localized variants). Querying the literal `due date:`
+    returns a parse error, so the caller has to learn the real name first.
+
+    Read from issues rather than from the admin API: the field names come
+    back on a normal issue read, so this works with a plain reporting
+    token and needs no admin rights.
+    """
+    from yt_mcp.tools.deadlines.parser import _is_deadline_field
+
+    issues = await client.get(
+        "/api/issues",
+        params={
+            "query": (proj_clause + " sort by: updated desc").strip(),
+            "fields": "customFields(name)",
+            "$top": "50",
+        },
+    ) or []
+    for issue in issues:
+        for cf in issue.get("customFields", []) or []:
+            name = cf.get("name") or ""
+            if _is_deadline_field(name):
+                return name
+    return None

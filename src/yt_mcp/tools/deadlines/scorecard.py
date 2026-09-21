@@ -62,36 +62,36 @@ def register(mcp, resolver: InstanceResolver):
         operator = await fetcher.get_operator_login(client)
 
         proj_clause, proj_list = fetcher.build_project_clause(projects)
-        date_clause = (
-            f"(updated: {start_dt.strftime('%Y-%m-%d')} .. {end_dt.strftime('%Y-%m-%d')} "
-            f"or due date: {start_dt.strftime('%Y-%m-%d')} .. {end_dt.strftime('%Y-%m-%d')})"
-        )
-        query = (proj_clause + " " + date_clause).strip()
-        fallback_used = False
-        try:
-            issues = await client.get(
+        win = (f"{start_dt.strftime('%Y-%m-%d')} .. {end_dt.strftime('%Y-%m-%d')}")
+
+        # Two queries, merged — not one OR-composed query. `(updated: R or
+        # <deadline>: R)` is rejected by the parser, as is the OR-joined
+        # project form (Q17), so the scorecard used to fall back to
+        # `updated:` alone and silently miss any issue whose deadline sits
+        # in the quarter but wasn't touched recently.
+        fields = fetcher.ISSUE_FIELDS + ",state(name)"
+
+        async def _search(q: str) -> list:
+            return await client.get(
                 "/api/issues",
-                params={
-                    "query": query,
-                    "fields": fetcher.ISSUE_FIELDS + ",state(name)",
-                    "$top": "500",
-                },
-            )
-        except ValueError:
-            fallback_used = True
-            fallback_query = (
-                proj_clause
-                + f" updated: {start_dt.strftime('%Y-%m-%d')} .. {end_dt.strftime('%Y-%m-%d')}"
-            ).strip()
-            issues = await client.get(
-                "/api/issues",
-                params={
-                    "query": fallback_query,
-                    "fields": fetcher.ISSUE_FIELDS + ",state(name)",
-                    "$top": "500",
-                },
-            )
-            query = fallback_query
+                params={"query": q.strip(), "fields": fields, "$top": "500"},
+            ) or []
+
+        query = (proj_clause + f" updated: {win}").strip()
+        issues = await _search(query)
+
+        deadline_field = await fetcher.resolve_deadline_field(client, proj_clause)
+        deadline_scanned = bool(deadline_field)
+        if deadline_field:
+            dl_query = (proj_clause + f" {{{deadline_field}}}: {win}").strip()
+            seen = {i.get("idReadable") for i in issues}
+            added = [
+                i for i in await _search(dl_query)
+                if i.get("idReadable") not in seen
+            ]
+            issues += added
+            query = f"{query}  +  {dl_query}"
+
         if not issues:
             cfg._audit(operator, "deadline_scorecard", {"quarter": q}, 0)
             return f"## Deadline scorecard — {q}\nNo issues in scope. Query: `{query}`"
@@ -181,7 +181,7 @@ def register(mcp, resolver: InstanceResolver):
             per_user, per_user_details, q, operator, strict,
             metadata.get("source_file", ""),
             coverage_missing,
-            fallback_query_used=fallback_used,
+            deadline_scanned=deadline_scanned,
             policy_effective_set=policy_effective_ms > 0,
             observed_fields=observed_field_names,
         )

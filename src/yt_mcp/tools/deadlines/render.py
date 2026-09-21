@@ -98,7 +98,7 @@ def render_audit(rows, operator, query, strict, source_file, coverage_missing,
 
 
 def render_scorecard(per_user, per_user_details, quarter, operator, strict,
-                      source_file, coverage_missing, fallback_query_used: bool,
+                      source_file, coverage_missing, deadline_scanned: bool,
                       policy_effective_set: bool,
                       observed_fields: set[str] | None = None) -> str:
     lines = [
@@ -106,11 +106,11 @@ def render_scorecard(per_user, per_user_details, quarter, operator, strict,
         f"**Operator:** {operator} | **Strict:** {strict} | "
         f"**Config:** {source_file or '(none)'}",
     ]
-    if fallback_query_used:
+    if not deadline_scanned:
         lines.append(
-            "⚠ YouTrack rejected the `due date:` query clause — fell back to "
-            "`updated:` only. Issues whose deadline is in this quarter but "
-            "weren't updated recently may be under-counted."
+            "⚠ No deadline field found in the projects scanned — scope is "
+            "`updated:` only, so an issue whose deadline falls in this "
+            "quarter but wasn't touched recently is not counted."
         )
     if not policy_effective_set:
         lines.append(

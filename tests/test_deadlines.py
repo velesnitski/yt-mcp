@@ -786,3 +786,73 @@ class TestSuggesterTool:
         written = json.loads(suggested_path.read_text())
         assert written["alice.user"]["primary"] is None
         assert written["alice.user"]["manual_review"] is True
+
+
+# --- query construction (ADR-050) -------------------------------------------
+
+class TestProjectClauseIsCommaList:
+    """Registry Q17: same-prefix clauses are comma-joined, never OR-joined.
+
+    The OR form parses nowhere — it returns a generic 400 — so every
+    multi-project call to the deadline tools failed outright. Single-project
+    calls were unaffected, which is how it survived unnoticed.
+    """
+
+    def test_single_project_unchanged(self):
+        clause, projects = dfetch.build_project_clause("PROJ")
+        assert clause == "project: PROJ"
+        assert projects == ["PROJ"]
+
+    def test_multiple_projects_use_comma_list(self):
+        clause, projects = dfetch.build_project_clause("PROJ, OPS, DEMO")
+        assert clause == "project: PROJ, OPS, DEMO"
+        assert projects == ["PROJ", "OPS", "DEMO"]
+
+    def test_never_emits_or_joined_clauses(self):
+        clause, _ = dfetch.build_project_clause("PROJ,OPS")
+        assert " or " not in clause.lower()
+        assert clause.count("project:") == 1
+
+    def test_empty_input(self):
+        assert dfetch.build_project_clause("") == ("", [])
+        assert dfetch.build_project_clause(" , ") == ("", [])
+
+
+class TestResolveDeadlineField:
+    """There is no `due date:` attribute — the real field name must be learned."""
+
+    def _client(self, issues):
+        client = MagicMock()
+        client.get = AsyncMock(return_value=issues)
+        return client
+
+    async def test_finds_decorated_field_name(self):
+        client = self._client([
+            {"customFields": [{"name": "State"}, {"name": "Deadline ☠️"}]},
+        ])
+        assert await dfetch.resolve_deadline_field(client, "project: PROJ") == "Deadline ☠️"
+
+    async def test_finds_plain_due_date(self):
+        client = self._client([{"customFields": [{"name": "Due Date"}]}])
+        assert await dfetch.resolve_deadline_field(client, "project: PROJ") == "Due Date"
+
+    async def test_scans_past_issues_without_the_field(self):
+        client = self._client([
+            {"customFields": [{"name": "State"}]},
+            {"customFields": [{"name": "Priority"}]},
+            {"customFields": [{"name": "Deadline"}]},
+        ])
+        assert await dfetch.resolve_deadline_field(client, "project: PROJ") == "Deadline"
+
+    async def test_none_when_no_deadline_field_exists(self):
+        client = self._client([{"customFields": [{"name": "State"}]}])
+        assert await dfetch.resolve_deadline_field(client, "project: PROJ") is None
+
+    async def test_empty_response_is_not_a_crash(self):
+        client = self._client([])
+        assert await dfetch.resolve_deadline_field(client, "project: PROJ") is None
+
+    async def test_unrelated_lookalike_fields_rejected(self):
+        # `deadlines` (plural) and `dueDate2` must not match.
+        client = self._client([{"customFields": [{"name": "deadlines"}, {"name": "dueDate2"}]}])
+        assert await dfetch.resolve_deadline_field(client, "project: PROJ") is None
