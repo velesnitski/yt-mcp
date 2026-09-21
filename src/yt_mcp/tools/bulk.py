@@ -8,6 +8,17 @@ from yt_mcp.resolver import InstanceResolver
 
 MAX_BULK_RESULTS = 100
 
+# How long after a batch started its changes may still be reverted.
+#
+# This was 60s, which a batch cannot finish in: execute applies two
+# sequential commands per issue (tag, then the command) for up to
+# MAX_BULK_RESULTS issues, so 100 issues is ~200 round trips. Every change
+# landing after the first minute fell outside the window and was silently
+# left in place — while the issue was untagged anyway, destroying the only
+# record of what still needed undoing. Generous by design: the window is
+# additionally anchored per issue to when THAT issue was tagged.
+_ROLLBACK_WINDOW_MS = 30 * 60 * 1000
+
 # Only allow safe batch tag format: yt-mcp-{digits} or yt-translate-{digits}
 _BATCH_TAG_RE = re.compile(r"^yt-(mcp|translate)-\d{10,}$")
 
@@ -163,6 +174,7 @@ def register(mcp, resolver: InstanceResolver):
 
         rolled_back = []
         errors = []
+        untouched: list[str] = []
 
         for issue in issues:
             issue_id = issue.get("idReadable", "?")
@@ -178,12 +190,30 @@ def register(mcp, resolver: InstanceResolver):
                     },
                 )
 
-                batch_end_ts = batch_ts + 60000
+                # Anchor the window to when THIS issue was tagged, not to
+                # when the batch started: execute walks issues one at a
+                # time, so the last one may be tagged minutes after the
+                # first. Fall back to the tag's own timestamp.
+                tag_ts = batch_ts
+                for a in activities:
+                    if (a.get("field") or {}).get("name", "").lower() == "tag":
+                        ts = a.get("timestamp", 0)
+                        if batch_ts <= ts and (tag_ts == batch_ts or ts < tag_ts):
+                            tag_ts = ts
+                window_start = min(batch_ts, tag_ts)
+                batch_end_ts = tag_ts + _ROLLBACK_WINDOW_MS
                 batch_changes = [
                     a for a in activities
-                    if batch_ts <= (ts := a.get("timestamp", 0)) <= batch_end_ts
+                    if window_start <= (ts := a.get("timestamp", 0)) <= batch_end_ts
                     and (a.get("field") or {}).get("name", "").lower() != "tag"
                 ]
+
+                if not batch_changes:
+                    # Nothing to revert here. Do NOT untag: the tag is the
+                    # only record that this issue was part of the batch, and
+                    # removing it makes a later retry impossible.
+                    untouched.append(issue_id)
+                    continue
 
                 for change in batch_changes:
                     field_name = (change.get("field") or {}).get("name", "")
@@ -243,6 +273,18 @@ def register(mcp, resolver: InstanceResolver):
         lines.append(f"**Batch tag:** `{batch_tag}`")
         lines.append(f"**Issues processed:** {len(issues)}")
         lines.append(f"**Changes reverted:** {len(rolled_back)}")
+        if untouched:
+            lines.append(
+                f"\n⚠ **{len(untouched)} issue(s) had no revertible change in the "
+                f"window and were left tagged** (so this batch can be retried): "
+                f"{', '.join(untouched[:10])}"
+                + (" …" if len(untouched) > 10 else "")
+            )
+        if not rolled_back and not errors:
+            lines.append(
+                "\n⚠ Nothing was reverted. The batch tag is intact, so nothing "
+                "is lost — but do not read this as a successful undo."
+            )
         if rolled_back:
             lines.append("")
             for r in rolled_back:
