@@ -21,8 +21,8 @@ from yt_mcp.scoring import (
 
 def _format_scored_issue(issue: dict, score: int, breakdown: dict[str, int]) -> str:
     """Format a single scored issue."""
-    issue_id = issue.get("idReadable", "?")
-    summary = issue.get("summary", "?")
+    issue_id = (issue.get("idReadable") or "?")
+    summary = (issue.get("summary") or "?")
     state = _resolve_state(issue)
     assignee = _resolve_assignee(issue)
     priority = _get_priority_name(issue)

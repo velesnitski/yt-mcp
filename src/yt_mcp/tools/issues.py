@@ -249,7 +249,7 @@ def register(mcp, resolver: InstanceResolver):
         # report (compact): one line per issue + a count header.
         lines = [f"## {len(data)} of {len(id_list)} issues fetched"]
         if len(data) < len(id_list):
-            returned_ids = {i.get("idReadable", "") for i in data}
+            returned_ids = {(i.get("idReadable") or "") for i in data}
             missing = [i for i in id_list if i not in returned_ids]
             lines.append(f"_Missing (not found or access denied): {', '.join(missing)}_")
         lines.append("")
@@ -319,7 +319,7 @@ def register(mcp, resolver: InstanceResolver):
             data = await client.post(
                 "/api/issues?fields=idReadable,summary", json=json_body,
             )
-            issue_id = data.get("idReadable", "?")
+            issue_id = (data.get("idReadable") or "?")
             await _apply_commands(issue_id)
         except YouTrackPermissionError as perm:
             # No Create Issue permission (client maps 401/403 to this, clean
@@ -358,7 +358,7 @@ def register(mcp, resolver: InstanceResolver):
                     f"/api/issues?draftId={draft_id}&fields=idReadable,summary",
                     json={},
                 )
-                issue_id = data.get("idReadable", "?")
+                issue_id = (data.get("idReadable") or "?")
             except (httpx.HTTPStatusError, ValueError) as pub_err:
                 # Publish failed — discard the draft (best-effort) so failed
                 # attempts don't accumulate orphans in the user's drafts
@@ -433,25 +433,25 @@ def register(mcp, resolver: InstanceResolver):
             },
         )
 
-        old_summary = before.get("summary", "?")
+        old_summary = (before.get("summary") or "?")
         old_description = before.get("description") or ""
         old_state = _resolve_state(before)
         old_assignee = _resolve_assignee(before)
-        old_tags = [t.get("name", "") for t in before.get("tags", [])]
+        old_tags = [(t.get("name") or "") for t in before.get("tags", [])]
 
         # Collect old custom field values for rollback info
         old_fields: dict[str, str] = {}
         for cf in before.get("customFields", []):
-            cf_name = cf.get("name", "")
+            cf_name = (cf.get("name") or "")
             cf_value = cf.get("value")
             if cf_value is None:
                 old_fields[cf_name] = "(empty)"
             elif isinstance(cf_value, list):
                 old_fields[cf_name] = ", ".join(
-                    v.get("name", v.get("login", "?")) for v in cf_value
+                    v.get("name", (v.get("login") or "?")) for v in cf_value
                 )
             elif isinstance(cf_value, dict):
-                old_fields[cf_name] = cf_value.get("name", cf_value.get("login", "?"))
+                old_fields[cf_name] = cf_value.get("name", (cf_value.get("login") or "?"))
             else:
                 old_fields[cf_name] = str(cf_value)
 
@@ -521,7 +521,7 @@ def register(mcp, resolver: InstanceResolver):
         )
         new_state = _resolve_state(after)
         new_assignee = _resolve_assignee(after)
-        new_tags = [t.get("name", "") for t in after.get("tags", [])]
+        new_tags = [(t.get("name") or "") for t in after.get("tags", [])]
 
         # Build response with changes + rollback info
         parts = [
@@ -548,16 +548,16 @@ def register(mcp, resolver: InstanceResolver):
 
         # Check custom fields for changes
         for cf in after.get("customFields", []):
-            cf_name = cf.get("name", "")
+            cf_name = (cf.get("name") or "")
             cf_value = cf.get("value")
             if cf_value is None:
                 new_val = "(empty)"
             elif isinstance(cf_value, list):
                 new_val = ", ".join(
-                    v.get("name", v.get("login", "?")) for v in cf_value
+                    v.get("name", (v.get("login") or "?")) for v in cf_value
                 )
             elif isinstance(cf_value, dict):
-                new_val = cf_value.get("name", cf_value.get("login", "?"))
+                new_val = cf_value.get("name", (cf_value.get("login") or "?"))
             else:
                 new_val = str(cf_value)
             old_val = old_fields.get(cf_name, "(empty)")
@@ -726,7 +726,7 @@ def register(mcp, resolver: InstanceResolver):
                 "customFields(name,value(name))",
             },
         )
-        summary = data.get("summary", "")
+        summary = (data.get("summary") or "")
         old_state = _resolve_state(data)
 
         if permanent:
@@ -910,8 +910,8 @@ def register(mcp, resolver: InstanceResolver):
         ]
 
         for issue in data:
-            issue_id = issue.get("idReadable", "?")
-            summary = issue.get("summary", "?")
+            issue_id = (issue.get("idReadable") or "?")
+            summary = (issue.get("summary") or "?")
             state = _resolve_state(issue)
             assignee = _resolve_assignee(issue)
             updated_ms = issue.get("updated")

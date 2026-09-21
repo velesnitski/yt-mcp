@@ -255,8 +255,8 @@ def register(mcp, resolver: InstanceResolver):
             for days_idle, issue in items_with_age:
                 if shown >= 15:
                     break
-                iid = issue.get("idReadable", "?")
-                summary = (issue.get("summary", "") or "?")[:80]
+                iid = (issue.get("idReadable") or "?")
+                summary = ((issue.get("summary") or "") or "?")[:80]
                 assignee = (issue.get("assignee") or {}).get("name") or "Unassigned"
                 proj = (issue.get("project") or {}).get("shortName", "?")
                 stale_marker = " 🔴" if days_idle >= stale_days else ""
@@ -321,7 +321,7 @@ def register(mcp, resolver: InstanceResolver):
         all_issues: dict[str, dict] = {}
         parent_to_subs: dict[str, list[str]] = {}
         for p in parents:
-            pid = p.get("idReadable", "")
+            pid = (p.get("idReadable") or "")
             if not pid:
                 continue
             all_issues[pid] = p
@@ -335,7 +335,7 @@ def register(mcp, resolver: InstanceResolver):
                         and "subtask" in (link.get("linkType") or {}).get("name", "").lower()
                     ):
                         for sub in link.get("issues", []):
-                            sid = sub.get("idReadable", "")
+                            sid = (sub.get("idReadable") or "")
                             if sid and sid not in all_issues:
                                 all_issues[sid] = sub
 
@@ -384,7 +384,7 @@ def register(mcp, resolver: InstanceResolver):
 
         # 2. Department load (currently holding) — count parents only
         dept_load: dict[str, list[tuple[float, str]]] = {}
-        for pid in [x.get("idReadable", "") for x in parents]:
+        for pid in [(x.get("idReadable") or "") for x in parents]:
             if not pid:
                 continue
             p = all_issues.get(pid, {})
@@ -401,7 +401,7 @@ def register(mcp, resolver: InstanceResolver):
         # 3. Avg transit times — from chains (parent journeys) where any hop happened
         #    in the rolling window. Compute per-hop deltas.
         hop_durations: dict[tuple[str, str], list[float]] = {}
-        for pid in [x.get("idReadable", "") for x in parents]:
+        for pid in [(x.get("idReadable") or "") for x in parents]:
             chain = merged.get(pid) or journeys.get(pid) or []
             for i in range(len(chain) - 1):
                 ev = chain[i]

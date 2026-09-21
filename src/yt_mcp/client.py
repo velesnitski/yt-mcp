@@ -173,6 +173,6 @@ class YouTrackClient:
         except (httpx.HTTPStatusError, ValueError):
             return None
         for p in projects:
-            if p.get("shortName", "").lower() == short_name.lower():
+            if (p.get("shortName") or "").lower() == short_name.lower():
                 return p["id"]
         return None

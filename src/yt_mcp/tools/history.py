@@ -93,7 +93,7 @@ def register(mcp, resolver: InstanceResolver):
             removed = format_value(a.get("removed"))
             author = (a.get("author") or {}).get("name", "?")
             ts = datetime.fromtimestamp(
-                a["timestamp"] / 1000, tz=timezone.utc
+                (a.get("timestamp") or 0) / 1000, tz=timezone.utc
             ).strftime("%Y-%m-%d %H:%M UTC")
             activity_id = a.get("id", "?")
             lines.append(
@@ -252,7 +252,7 @@ def register(mcp, resolver: InstanceResolver):
             total_minutes += minutes
 
             author = (item.get("author") or {}).get("name", "?")
-            text = item.get("text", "") or ""
+            text = (item.get("text") or "") or ""
             if text and not include_text and len(text) > 200:
                 text = text[:200].rstrip() + f"… (+{len(text) - 200} chars, include_text=True for full)"
             text_str = f" — {text}" if text else ""
@@ -388,7 +388,7 @@ def register(mcp, resolver: InstanceResolver):
             old_date_str = datetime.fromtimestamp(
                 old_date_ms / 1000, tz=timezone.utc
             ).strftime("%Y-%m-%d")
-        old_text = old.get("text", "")
+        old_text = (old.get("text") or "")
 
         await client.post(
             f"/api/issues/{issue_id}/timeTracking/workItems/{work_item_id}",
@@ -443,10 +443,10 @@ def register(mcp, resolver: InstanceResolver):
             old_date_str = datetime.fromtimestamp(
                 old_date_ms / 1000, tz=timezone.utc
             ).strftime("%Y-%m-%d")
-        old_text = old.get("text", "")
+        old_text = (old.get("text") or "")
         old_author = (old.get("author") or {}).get("name", "?") if old else "?"
         old_type = old.get("type", {})
-        old_type_str = old_type.get("name", "") if old_type else ""
+        old_type_str = (old_type.get("name") or "") if old_type else ""
 
         await client.delete(
             f"/api/issues/{issue_id}/timeTracking/workItems/{work_item_id}"
@@ -533,7 +533,7 @@ def register(mcp, resolver: InstanceResolver):
                 if isinstance(added, list) and added:
                     new_state = added[0].get("name", "?")
                 elif isinstance(added, dict):
-                    new_state = added.get("name", "?")
+                    new_state = (added.get("name") or "?")
                 else:
                     continue
                 date_str = datetime.fromtimestamp(
@@ -588,7 +588,7 @@ def register(mcp, resolver: InstanceResolver):
                 created_ms / 1000, tz=timezone.utc
             ).strftime("%Y-%m-%d")
         reporter = issue_data.get("reporter", {})
-        reporter_name = reporter.get("name", "?") if reporter else "?"
+        reporter_name = (reporter.get("name") or "?") if reporter else "?"
 
         from yt_mcp.formatters import _resolve_state
         current_state = _resolve_state(issue_data)

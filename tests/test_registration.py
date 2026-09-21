@@ -237,9 +237,19 @@ class TestToolAnnotations:
                 assert tool.annotations.idempotentHint is True, name
 
     def test_deletes_are_flagged_destructive(self):
+        """Exhaustive, not a spot check.
+
+        Naming four tools here left the rest unverified: a destructive tool
+        could be annotated safe and no test would notice.
+        """
         tools = self._tools()
-        for name in ("delete_issue", "delete_comment", "rollback_issue", "bulk_rollback"):
+        for name in sorted(DESTRUCTIVE_TOOLS):
             assert tools[name].annotations.destructiveHint is True, name
+
+    def test_every_non_idempotent_tool_is_flagged(self):
+        tools = self._tools()
+        for name in sorted(NON_IDEMPOTENT_TOOLS):
+            assert tools[name].annotations.idempotentHint is False, name
 
     def test_creates_are_not_idempotent(self):
         tools = self._tools()

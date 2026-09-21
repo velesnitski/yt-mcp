@@ -97,11 +97,11 @@ def register(mcp, resolver: InstanceResolver):
             return f"## Deadline scorecard — {q}\nNo issues in scope. Query: `{query}`"
 
         if exclude_standups:
-            issues = [i for i in issues if not _is_standup(i.get("summary", ""), standup_patterns)]
+            issues = [i for i in issues if not _is_standup((i.get("summary") or ""), standup_patterns)]
 
-        ids = [i.get("idReadable", "") for i in issues if i.get("idReadable")]
+        ids = [(i.get("idReadable") or "") for i in issues if i.get("idReadable")]
         results = await fetcher.fetch_issue_activities_and_comments_bounded(client, ids)
-        issue_by_id = {i.get("idReadable", ""): i for i in issues}
+        issue_by_id = {(i.get("idReadable") or ""): i for i in issues}
 
         per_user: dict[str, Counter] = defaultdict(Counter)
         per_user_details: dict[str, list[str]] = defaultdict(list)

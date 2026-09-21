@@ -78,7 +78,7 @@ def custom_field(issue: dict, name: str) -> str | None:
             if isinstance(val, dict):
                 return val.get("name")
             if isinstance(val, list):
-                names = [v.get("name", "") for v in val if isinstance(v, dict) and v.get("name")]
+                names = [(v.get("name") or "") for v in val if isinstance(v, dict) and v.get("name")]
                 return ", ".join(names) if names else None
             if isinstance(val, str):
                 return val

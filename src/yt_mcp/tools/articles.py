@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from mcp.types import ToolAnnotations
+from yt_mcp import contract
 from yt_mcp.resolver import InstanceResolver
 
 
@@ -12,6 +13,10 @@ def _safe_date(ms: int | None, fmt: str = "%Y-%m-%d %H:%M") -> str:
         return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).strftime(fmt)
     except (OSError, ValueError):
         return ""
+
+
+# How much of a deleted article's body the delete message carries.
+_RESTORE_CONTENT_LIMIT = 4000
 
 
 def register(mcp, resolver: InstanceResolver):
@@ -44,7 +49,7 @@ def register(mcp, resolver: InstanceResolver):
         lines = [f"**Found: {len(articles)} articles**", ""]
         for a in articles:
             project = a.get("project", {})
-            proj_name = project.get("shortName", "?") if project else "?"
+            proj_name = (project.get("shortName") or "?") if project else "?"
             updated_ms = a.get("updated")
             updated_str = ""
             if updated_ms:
@@ -87,7 +92,7 @@ def register(mcp, resolver: InstanceResolver):
             if project else "?"
         )
         reporter = data.get("reporter", {})
-        reporter_name = reporter.get("fullName", "?") if reporter else "?"
+        reporter_name = (reporter.get("fullName") or "?") if reporter else "?"
 
         parts = [
             f"# {data.get('idReadable', '?')} — {data.get('summary', 'No title')}",
@@ -124,7 +129,7 @@ def register(mcp, resolver: InstanceResolver):
                 parts.append(f"\n---\n## Comments ({len(comments)})\n")
                 for c in comments:
                     c_author = c.get("author", {})
-                    c_author_name = c_author.get("fullName", "?") if c_author else "?"
+                    c_author_name = (c_author.get("fullName") or "?") if c_author else "?"
                     c_created = c.get("created")
                     c_date = ""
                     if c_created:
@@ -172,7 +177,7 @@ def register(mcp, resolver: InstanceResolver):
             payload["parentArticle"] = {"id": parent_article_id}
 
         data = await client.post(
-            "/api/articles",
+            contract.with_fields("/api/articles", "idReadable,summary"),
             json=payload,
         )
         article_id = data.get("idReadable", data.get("id", "?"))
@@ -239,17 +244,33 @@ def register(mcp, resolver: InstanceResolver):
                 "fields": "idReadable,summary,content,project(shortName)",
             },
         )
-        old_summary = old.get("summary", "?")
+        old_summary = (old.get("summary") or "?")
         old_project = old.get("project", {})
-        old_proj_name = old_project.get("shortName", "?") if old_project else "?"
-        old_content = (old.get("content", "") or "")[:500]
+        old_proj_name = (old_project.get("shortName") or "?") if old_project else "?"
+        full_content = old.get("content", "") or ""
 
         await client.delete(f"/api/articles/{article_id}")
+
+        # The deleted body is only recoverable from this message, so say
+        # plainly when it is not all here. Previously it was cut at 500
+        # characters under a heading promising it was enough to restore.
+        if len(full_content) <= _RESTORE_CONTENT_LIMIT:
+            body = f"**Content:** {full_content}"
+            restore_note = "To restore, call `create_article` with the details above."
+        else:
+            omitted = len(full_content) - _RESTORE_CONTENT_LIMIT
+            body = (
+                f"**Content (truncated):** {full_content[:_RESTORE_CONTENT_LIMIT]}\n"
+                f"⚠ **{omitted} more character(s) are NOT shown and are not "
+                f"recoverable from this output** — it is a summary, not a backup."
+            )
+            restore_note = (
+                "Restoring from this message recreates only the shown portion."
+            )
         return (
             f"Deleted article **{old.get('idReadable', article_id)}** — {old_summary}\n"
             f"**Project:** {old_proj_name}\n"
-            f"**Content preview:** {old_content}\n\n"
-            f"To restore, call `create_article` with the details above."
+            f"{body}\n\n{restore_note}"
         )
 
     @mcp.tool(annotations=ToolAnnotations(
@@ -294,7 +315,7 @@ def register(mcp, resolver: InstanceResolver):
             f"/api/articles/{article_id}/comments/{comment_id}",
             params={"fields": "text"},
         )
-        old_text = old.get("text", "") if old else ""
+        old_text = (old.get("text") or "") if old else ""
 
         await client.post(
             f"/api/articles/{article_id}/comments/{comment_id}",
@@ -323,7 +344,7 @@ def register(mcp, resolver: InstanceResolver):
             f"/api/articles/{article_id}/comments/{comment_id}",
             params={"fields": "text,author(fullName)"},
         )
-        old_text = old.get("text", "") if old else ""
+        old_text = (old.get("text") or "") if old else ""
         old_author = (old.get("author") or {}).get("fullName", "?") if old else "?"
 
         await client.delete(f"/api/articles/{article_id}/comments/{comment_id}")

@@ -29,7 +29,7 @@ def register(mcp, resolver: InstanceResolver):
 
         lines = []
         for t in tags:
-            name = t.get("name", "?")
+            name = (t.get("name") or "?")
             count = len(t.get("issues", []))
             lines.append(f"- **{name}** ({count} issues)")
         return "\n".join(lines)
@@ -74,7 +74,7 @@ def register(mcp, resolver: InstanceResolver):
         )
 
         name_lower = name.lower()
-        matches = [q for q in queries if name_lower in q.get("name", "").lower()]
+        matches = [q for q in queries if name_lower in (q.get("name") or "").lower()]
         if not matches:
             return f"No saved search found matching '{name}'."
         if len(matches) > 1:
@@ -134,7 +134,7 @@ def register(mcp, resolver: InstanceResolver):
         except ValueError:
             data_list = []
 
-        by_id = {issue.get("idReadable", ""): issue for issue in data_list if issue.get("idReadable")}
+        by_id = {(issue.get("idReadable") or ""): issue for issue in data_list if issue.get("idReadable")}
 
         from datetime import datetime, timezone
         now = datetime.now(tz=timezone.utc)
@@ -205,7 +205,7 @@ def register(mcp, resolver: InstanceResolver):
             },
         )
 
-        actual = {issue.get("idReadable", ""): issue for issue in data if issue.get("idReadable")}
+        actual = {(issue.get("idReadable") or ""): issue for issue in data if issue.get("idReadable")}
         actual_ids = set(actual.keys())
 
         matched = known & actual_ids
@@ -269,7 +269,7 @@ def register(mcp, resolver: InstanceResolver):
             all_projects = await client.get(
                 "/api/projects", params={"fields": "shortName", "$top": "100"}
             )
-            project_list = [p.get("shortName", "") for p in all_projects if p.get("shortName")]
+            project_list = [(p.get("shortName") or "") for p in all_projects if p.get("shortName")]
 
         type_list = [t.strip() for t in types.split(",") if t.strip()]
         state_list = [s.strip() for s in states.split(",") if s.strip()]
@@ -322,7 +322,7 @@ def register(mcp, resolver: InstanceResolver):
                 continue
             lines.append(f"## {proj} ({len(issues)})")
             for issue in issues:
-                iid = issue.get("idReadable", "?")
+                iid = (issue.get("idReadable") or "?")
                 state = _resolve_state(issue)
                 assignee = _resolve_assignee(issue)
                 product = _get_custom_field(issue, "Product") or ""

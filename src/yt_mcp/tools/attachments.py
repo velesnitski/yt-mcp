@@ -103,7 +103,7 @@ def register(mcp, resolver: InstanceResolver):
         for a in attachments:
             size_kb = (a.get("size", 0) or 0) / 1024
             author = a.get("author", {})
-            author_name = author.get("name", "?") if author else "?"
+            author_name = (author.get("name") or "?") if author else "?"
             created = a.get("created")
             date_str = ""
             if created:
@@ -144,7 +144,7 @@ def register(mcp, resolver: InstanceResolver):
             return f"No attachments on **{data.get('idReadable', issue_id)}**."
 
         name_lower = attachment_name.lower()
-        matches = [a for a in attachments if name_lower in a.get("name", "").lower()]
+        matches = [a for a in attachments if name_lower in (a.get("name") or "").lower()]
 
         if not matches:
             names = ", ".join(f"'{a.get('name', '?')}'" for a in attachments)

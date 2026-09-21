@@ -100,7 +100,7 @@ def register(mcp, resolver: InstanceResolver):
         skipped_english = 0
         skipped_bilingual = 0
         for issue in issues:
-            summary = issue.get("summary", "")
+            summary = (issue.get("summary") or "")
             desc = issue.get("description", "") or ""
             summary_needs = _has_non_ascii(summary)
             desc_needs = _has_non_ascii(desc)
@@ -146,8 +146,8 @@ def register(mcp, resolver: InstanceResolver):
         ]
 
         for issue in to_translate:
-            issue_id = issue.get("idReadable", "?")
-            summary = issue.get("summary", "")
+            issue_id = (issue.get("idReadable") or "?")
+            summary = (issue.get("summary") or "")
             desc = issue.get("description", "") or ""
 
             lines.append(f"### {issue_id}")
@@ -159,7 +159,7 @@ def register(mcp, resolver: InstanceResolver):
                 comments = issue.get("comments", [])
                 for c in comments:
                     c_id = c.get("id", "?")
-                    c_text = c.get("text", "")
+                    c_text = (c.get("text") or "")
                     c_author = (c.get("author") or {}).get("name", "?")
                     if c_text and _has_non_ascii(c_text):
                         lines.append(f"COMMENT {c_id} (by {c_author}):\n{c_text}")
@@ -288,7 +288,7 @@ def register(mcp, resolver: InstanceResolver):
                     )
                     originals["description"] = cur.get("description", "") or ""
                     originals["comments"] = {
-                        c.get("id"): c.get("text", "")
+                        c.get("id"): (c.get("text") or "")
                         for c in (cur.get("comments") or [])
                     }
 

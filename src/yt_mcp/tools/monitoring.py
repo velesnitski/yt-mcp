@@ -208,7 +208,7 @@ def _extract_deadline_ts(val) -> int | None:
     if isinstance(val, (int, float)):
         return int(val)
     if isinstance(val, dict):
-        pres = val.get("presentation", "")
+        pres = (val.get("presentation") or "")
         if pres:
             try:
                 return int(
@@ -267,7 +267,7 @@ def _passed_qa_state(activities: list[dict]) -> bool:
             continue
         for side in ("added", "removed"):
             for s in act.get(side) or []:
-                if isinstance(s, dict) and classify_handoff_role(s.get("name", "")) == "qa":
+                if isinstance(s, dict) and classify_handoff_role((s.get("name") or "")) == "qa":
                     return True
     return False
 
@@ -376,7 +376,7 @@ def register(mcp, resolver: InstanceResolver):
                 return []
 
         all_activities = await asyncio.gather(
-            *[_fetch_activities(i.get("idReadable", "?")) for i in issues]
+            *[_fetch_activities((i.get("idReadable") or "?")) for i in issues]
         )
 
         lines = [
@@ -389,8 +389,8 @@ def register(mcp, resolver: InstanceResolver):
         has_any_changes = False
 
         for issue, activities in zip(issues, all_activities):
-            issue_id = issue.get("idReadable", "?")
-            summary = issue.get("summary", "?")
+            issue_id = (issue.get("idReadable") or "?")
+            summary = (issue.get("summary") or "?")
             state = _resolve_state(issue)
             assignee = _resolve_assignee(issue)
 
@@ -573,8 +573,8 @@ def register(mcp, resolver: InstanceResolver):
         qa_candidates: list[tuple[int, str, dict]] = []  # (days_idle, issue_id, record)
 
         for issue in all_issues:
-            issue_id = issue.get("idReadable", "?")
-            summary = issue.get("summary", "?")
+            issue_id = (issue.get("idReadable") or "?")
+            summary = (issue.get("summary") or "?")
             state = _resolve_state(issue)
             state_lower = state.lower()
             assignee = _resolve_assignee(issue)
@@ -608,7 +608,7 @@ def register(mcp, resolver: InstanceResolver):
             qa_required_yes = False
 
             for cf in custom_fields:
-                cf_name = cf.get("name", "")
+                cf_name = (cf.get("name") or "")
                 val = cf.get("value")
                 if val is None:
                     continue
@@ -841,8 +841,8 @@ def register(mcp, resolver: InstanceResolver):
                 "",
             ]
             for issue in older:
-                issue_id = issue.get("idReadable", "?")
-                summary = issue.get("summary", "?")
+                issue_id = (issue.get("idReadable") or "?")
+                summary = (issue.get("summary") or "?")
                 created_ms = issue.get("created", 0)
                 created_str = datetime.fromtimestamp(
                     created_ms / 1000, tz=timezone.utc
@@ -857,14 +857,14 @@ def register(mcp, resolver: InstanceResolver):
         ]
 
         for issue in matches:
-            issue_id = issue.get("idReadable", "?")
-            summary = issue.get("summary", "?")
+            issue_id = (issue.get("idReadable") or "?")
+            summary = (issue.get("summary") or "?")
             state = _resolve_state(issue)
             assignee = _resolve_assignee(issue)
             priority = _get_priority_name(issue)
             description = issue.get("description", "") or ""
             reporter = issue.get("reporter", {})
-            reporter_name = reporter.get("name", "?") if reporter else "?"
+            reporter_name = (reporter.get("name") or "?") if reporter else "?"
             created_ms = issue.get("created", 0)
             created_str = datetime.fromtimestamp(
                 created_ms / 1000, tz=timezone.utc
@@ -1022,14 +1022,14 @@ def register(mcp, resolver: InstanceResolver):
         lines = [l for l in lines if l is not None]
 
         for issue in recent:
-            issue_id = issue.get("idReadable", "?")
-            summary = issue.get("summary", "?")
+            issue_id = (issue.get("idReadable") or "?")
+            summary = (issue.get("summary") or "?")
             state = _resolve_state(issue)
             assignee = _resolve_assignee(issue)
             priority = _get_priority_name(issue)
             description = issue.get("description", "") or ""
             reporter = issue.get("reporter", {})
-            reporter_name = reporter.get("name", "?") if reporter else "?"
+            reporter_name = (reporter.get("name") or "?") if reporter else "?"
             created_ms = issue.get("created", 0)
             created_str = datetime.fromtimestamp(
                 created_ms / 1000, tz=timezone.utc
@@ -1104,7 +1104,7 @@ def register(mcp, resolver: InstanceResolver):
 
         recently_resolved = [
             i for i in all_resolved
-            if i.get("resolved", 0) >= since_ts
+            if (i.get("resolved") or 0) >= since_ts
         ]
 
         total = len(all_unresolved) or 1
@@ -1162,7 +1162,7 @@ def register(mcp, resolver: InstanceResolver):
 
             has_estimate = False
             for cf in issue.get("customFields", []):
-                if cf.get("name", "").lower() in ("estimation", "estimate", "dev estimate", "dev estimation"):
+                if (cf.get("name") or "").lower() in ("estimation", "estimate", "dev estimate", "dev estimation"):
                     if cf.get("value") is not None:
                         has_estimate = True
                     break
@@ -1237,8 +1237,8 @@ def register(mcp, resolver: InstanceResolver):
         if recently_resolved:
             lines.append(f"## Recently resolved ({len(recently_resolved)}) — since {since}")
             for issue in recently_resolved:
-                issue_id = issue.get("idReadable", "?")
-                summary = issue.get("summary", "?")
+                issue_id = (issue.get("idReadable") or "?")
+                summary = (issue.get("summary") or "?")
                 state = _resolve_state(issue)
                 assignee = _resolve_assignee(issue)
                 lines.append(f"- **{issue_id}** [{state}] {summary} → {assignee}")

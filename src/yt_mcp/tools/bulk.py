@@ -67,9 +67,9 @@ def register(mcp, resolver: InstanceResolver):
         ]
         for issue in issues:
             assignee = issue.get("assignee", {})
-            assignee_name = assignee.get("name", "Unassigned") if assignee else "Unassigned"
+            assignee_name = (assignee.get("name") or "Unassigned") if assignee else "Unassigned"
             state = issue.get("state", {})
-            state_name = state.get("name", "Unknown") if state else "Unknown"
+            state_name = (state.get("name") or "Unknown") if state else "Unknown"
             lines.append(
                 f"- **{issue.get('idReadable', '?')}** [{state_name}] "
                 f"{issue.get('summary', 'No summary')} → {assignee_name}"
@@ -112,7 +112,7 @@ def register(mcp, resolver: InstanceResolver):
         errors = []
 
         for issue in issues:
-            issue_id = issue.get("idReadable", "?")
+            issue_id = (issue.get("idReadable") or "?")
             try:
                 await client.execute_command(issue_id, f"tag {batch_tag}")
                 tagged.append(issue_id)
@@ -177,7 +177,7 @@ def register(mcp, resolver: InstanceResolver):
         untouched: list[str] = []
 
         for issue in issues:
-            issue_id = issue.get("idReadable", "?")
+            issue_id = (issue.get("idReadable") or "?")
             try:
                 activities = await client.get(
                     f"/api/issues/{issue_id}/activities",
@@ -238,7 +238,7 @@ def register(mcp, resolver: InstanceResolver):
                         if isinstance(removed, list):
                             for old_comment in removed:
                                 c_id = old_comment.get("id", "")
-                                c_text = old_comment.get("text", "")
+                                c_text = (old_comment.get("text") or "")
                                 if c_id and c_text:
                                     await client.update_comment(issue_id, c_id, c_text)
                                     rolled_back.append(f"{issue_id}: comment {c_id} restored")
@@ -247,7 +247,7 @@ def register(mcp, resolver: InstanceResolver):
                         if isinstance(added, list):
                             for new_comment in added:
                                 c_id = new_comment.get("id", "")
-                                c_text = new_comment.get("text", "")
+                                c_text = (new_comment.get("text") or "")
                                 if c_id and c_text and "[yt-mcp]" in c_text:
                                     await client.delete(
                                         f"/api/issues/{issue_id}/comments/{c_id}"

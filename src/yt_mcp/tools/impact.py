@@ -51,7 +51,7 @@ def register(mcp, resolver: InstanceResolver):
                 link_type = (link.get("linkType") or {}).get("name", "?")
                 direction = link.get("direction", "?")
                 for linked in link.get("issues", []):
-                    linked_id = linked.get("idReadable", "")
+                    linked_id = (linked.get("idReadable") or "")
                     if linked_id and linked_id not in visited:
                         rel = f"{link_type} ({direction})"
                         queue.append((linked_id, current_depth + 1, rel, issue_id))
@@ -97,7 +97,7 @@ def register(mcp, resolver: InstanceResolver):
         )
 
         for m in mentions:
-            m_id = m.get("idReadable", "")
+            m_id = (m.get("idReadable") or "")
             if m_id and m_id not in visited and m_id != root_id:
                 visited[m_id] = {
                     "data": m,
@@ -107,7 +107,7 @@ def register(mcp, resolver: InstanceResolver):
                 }
 
         for sp in same_product:
-            sp_id = sp.get("idReadable", "")
+            sp_id = (sp.get("idReadable") or "")
             if sp_id and sp_id not in visited and sp_id != root_id:
                 visited[sp_id] = {
                     "data": sp,
@@ -151,7 +151,7 @@ def register(mcp, resolver: InstanceResolver):
                 continue
             data = info["data"]
             state = _resolve_state(data)
-            summary = data.get("summary", "?")
+            summary = (data.get("summary") or "?")
             relation = info["relation"]
             project = iid.split("-")[0] if "-" in iid else "?"
 
@@ -236,7 +236,7 @@ def register(mcp, resolver: InstanceResolver):
 
             data = info["data"]
             state = _resolve_state(data)
-            summary = data.get("summary", "?")
+            summary = (data.get("summary") or "?")
             relation = info["relation"]
             state_lower = state.lower()
 

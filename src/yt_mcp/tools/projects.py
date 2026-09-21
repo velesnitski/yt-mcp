@@ -35,7 +35,7 @@ def register(mcp, resolver: InstanceResolver):
         for p in projects:
             status = " (archived)" if p.get("archived") else ""
             leader = p.get("leader", {})
-            leader_name = leader.get("name", "?") if leader else "?"
+            leader_name = (leader.get("name") or "?") if leader else "?"
             lines.append(
                 f"- **{p.get('shortName', '?')}** — {p.get('name', '?')}{status} (lead: {leader_name})"
             )
@@ -57,9 +57,9 @@ def register(mcp, resolver: InstanceResolver):
         )
         lines = []
         for b in boards:
-            proj_names = ", ".join(p.get("shortName", "?") for p in b.get("projects", []))
+            proj_names = ", ".join((p.get("shortName") or "?") for p in b.get("projects", []))
             owner = b.get("owner", {})
-            owner_name = owner.get("name", "?") if owner else "?"
+            owner_name = (owner.get("name") or "?") if owner else "?"
             lines.append(
                 f"- **{b.get('name', '?')}** (projects: {proj_names}, owner: {owner_name})"
             )
@@ -105,7 +105,7 @@ def register(mcp, resolver: InstanceResolver):
                 params={"fields": fields},
             )
             query_lower = name.lower()
-            matches = [b for b in boards if query_lower in b.get("name", "").lower()]
+            matches = [b for b in boards if query_lower in (b.get("name") or "").lower()]
 
         if not matches:
             return f"No agile board found matching '{name}'."
@@ -117,10 +117,10 @@ def register(mcp, resolver: InstanceResolver):
                 for p in b.get("projects", [])
             )
             owner = b.get("owner", {})
-            owner_name = owner.get("name", "?") if owner else "?"
+            owner_name = (owner.get("name") or "?") if owner else "?"
             col_field = ((b.get("columnSettings") or {}).get("field") or {}).get("name", "?")
             current_sprint = b.get("currentSprint", {})
-            sprint_name = current_sprint.get("name", "None") if current_sprint else "None"
+            sprint_name = (current_sprint.get("name") or "None") if current_sprint else "None"
 
             lines.append(f"# {b.get('name', '?')}")
             lines.append(f"**ID:** {b.get('id', '?')}")
@@ -187,7 +187,7 @@ def register(mcp, resolver: InstanceResolver):
                 seen: dict[str, set[str]] = {}
                 for issue in issues:
                     for cf in issue.get("customFields", []):
-                        n = cf.get("name", "")
+                        n = (cf.get("name") or "")
                         if not n:
                             continue
                         if n not in seen:
@@ -196,12 +196,12 @@ def register(mcp, resolver: InstanceResolver):
                         if v is None:
                             continue
                         if isinstance(v, dict):
-                            val = v.get("name", "")
+                            val = (v.get("name") or "")
                             if val:
                                 seen[n].add(val)
                         elif isinstance(v, list):
                             for item in v:
-                                val = item.get("name", "") if isinstance(item, dict) else ""
+                                val = (item.get("name") or "") if isinstance(item, dict) else ""
                                 if val:
                                     seen[n].add(val)
                 if seen:
@@ -217,15 +217,15 @@ def register(mcp, resolver: InstanceResolver):
 
         lines = [f"## Custom fields for {project}"]
         for f in fields_data:
-            field_info = f.get("field", {})
-            name = field_info.get("name", "?")
+            field_info = f.get("field") or {}
+            name = (field_info.get("name") or "?")
             required = not f.get("canBeEmpty", True)
             marker = " **(required)**" if required else ""
 
             bundle = f.get("bundle")
             if bundle and bundle.get("values"):
                 values = [
-                    v.get("name", "?")
+                    (v.get("name") or "?")
                     for v in bundle["values"]
                     if not v.get("archived")
                 ]
@@ -297,7 +297,7 @@ def register(mcp, resolver: InstanceResolver):
         )
 
         query_lower = board_name.lower()
-        matches = [b for b in boards if query_lower in b.get("name", "").lower()]
+        matches = [b for b in boards if query_lower in (b.get("name") or "").lower()]
 
         if not matches:
             return f"No agile board found matching '{board_name}'."
@@ -310,7 +310,7 @@ def register(mcp, resolver: InstanceResolver):
         board_id = board["id"]
         board_display_name = board.get("name", board_name)
         proj_names = ", ".join(
-            p.get("shortName", "?") for p in board.get("projects", [])
+            (p.get("shortName") or "?") for p in board.get("projects", [])
         )
 
         await client.delete(f"/api/agiles/{board_id}")
@@ -355,7 +355,7 @@ def register(mcp, resolver: InstanceResolver):
                 params={"fields": fields},
             )
             query_lower = board_name.lower()
-            matches = [b for b in boards if query_lower in b.get("name", "").lower()]
+            matches = [b for b in boards if query_lower in (b.get("name") or "").lower()]
             if not matches:
                 return f"No agile board found matching '{board_name}'."
             board = matches[0]
@@ -370,7 +370,7 @@ def register(mcp, resolver: InstanceResolver):
             cs = board.get("currentSprint")
             if cs:
                 sprint_id = cs.get("id")
-                sprint_name = cs.get("name", "Current Sprint")
+                sprint_name = (cs.get("name") or "Current Sprint")
             else:
                 active = [s for s in board.get("sprints", []) if not s.get("archived")]
                 if active:
@@ -381,7 +381,7 @@ def register(mcp, resolver: InstanceResolver):
         else:
             sprint_lower = sprint.lower()
             for s in board.get("sprints", []):
-                if sprint_lower in s.get("name", "").lower():
+                if sprint_lower in (s.get("name") or "").lower():
                     sprint_id = s.get("id")
                     sprint_name = s.get("name", sprint)
                     break
@@ -424,7 +424,7 @@ def register(mcp, resolver: InstanceResolver):
         # Group by State into the board's column order; states the board
         # doesn't render as a column go to an explicit bucket — never
         # silently dropped.
-        col_names = [c.get("presentation", "?") for c in columns]
+        col_names = [(c.get("presentation") or "?") for c in columns]
         buckets: dict[str, list] = {name: [] for name in col_names}
         other: list = []
         for issue in all_issues:

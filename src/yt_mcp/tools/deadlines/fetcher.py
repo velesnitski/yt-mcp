@@ -130,7 +130,7 @@ async def fetch_activities_only(client: Any, issue_id: str) -> list[dict]:
 async def get_operator_login(client: Any) -> str:
     try:
         me = await client.get("/api/users/me", params={"fields": "login"})
-        return me.get("login", "?")
+        return (me.get("login") or "?")
     except (ValueError, KeyError):
         return "?"
 
@@ -155,7 +155,7 @@ def extract_assignee_login(issue: dict) -> str:
 def extract_current_deadline(issue: dict) -> int | None:
     from yt_mcp.tools.deadlines.parser import _is_deadline_field, _extract_deadline_ts
     for cf in issue.get("customFields", []):
-        if _is_deadline_field(cf.get("name", "")):
+        if _is_deadline_field((cf.get("name") or "")):
             return _extract_deadline_ts(cf.get("value"))
     return None
 
@@ -168,7 +168,7 @@ def extract_current_state(issue: dict) -> str:
         if cf.get("name") == "State":
             v = cf.get("value")
             if isinstance(v, dict):
-                return v.get("name", "")
+                return (v.get("name") or "")
     return ""
 
 

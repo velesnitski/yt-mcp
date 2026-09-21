@@ -104,8 +104,8 @@ def register(mcp, resolver: InstanceResolver):
             status = ""
             if u.get("banned"):
                 status = " [BANNED]"
-            name = u.get("fullName", "?")
-            login = u.get("login", "?")
+            name = (u.get("fullName") or "?")
+            login = (u.get("login") or "?")
             email = u.get("email", "")
             email_str = f" ({email})" if email else ""
             lines.append(f"- **{name}** @{login}{email_str}{status}")

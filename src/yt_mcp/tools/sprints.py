@@ -2,7 +2,11 @@ import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
+import httpx
+
 from mcp.types import ToolAnnotations
+from yt_mcp import contract
+from yt_mcp.errors import UserInputError
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import compact_lines, _resolve_state
 
@@ -14,7 +18,7 @@ async def _resolve_board(client: Any, board_name: str) -> tuple[dict | None, str
         params={"fields": "id,name,sprints(id,name,start,finish,archived)"},
     )
     query_lower = board_name.lower()
-    matches = [b for b in boards if query_lower in b.get("name", "").lower()]
+    matches = [b for b in boards if query_lower in (b.get("name") or "").lower()]
     if not matches:
         return None, f"No agile board found matching '{board_name}'."
     if len(matches) > 1:
@@ -23,13 +27,50 @@ async def _resolve_board(client: Any, board_name: str) -> tuple[dict | None, str
     return matches[0], ""
 
 
+def _parse_iso_day(value: str, field: str) -> int:
+    """ISO day -> epoch ms, rejecting junk as caller input rather than a crash.
+
+    A bare `fromisoformat` raises ValueError, which is not a UserInputError
+    and so is NOT filtered out of error reporting — a caller typo would page
+    as a production fault (ADR-036).
+    """
+    try:
+        return int(
+            datetime.fromisoformat(value).replace(tzinfo=timezone.utc).timestamp() * 1000
+        )
+    except ValueError:
+        raise UserInputError(
+            f"{field} must be an ISO date like 2026-01-31, got {value!r}"
+        ) from None
+
+
 def _find_sprint(board: dict, sprint_name: str) -> tuple[dict | None, str]:
-    """Find a sprint by name in a board. Returns (sprint, error_msg)."""
-    sprint_lower = sprint_name.lower()
-    for s in board.get("sprints", []):
-        if sprint_lower in s.get("name", "").lower():
-            return s, ""
-    return None, f"Sprint '{sprint_name}' not found on board '{board.get('name', '?')}'."
+    """Find a sprint by name. Returns (sprint, error_msg).
+
+    Exact name wins, then a unique substring. An ambiguous substring is an
+    error, never a silent pick: "Sprint 1" also matches "Sprint 10", and
+    the first hit depends on board order — which would aim a write at a
+    sprint the caller never named. `_resolve_board` above already refuses
+    ambiguity; this did not.
+    """
+    wanted = sprint_name.strip().lower()
+    sprints = board.get("sprints", []) or []
+    board_name = board.get("name") or "?"
+
+    exact = [s for s in sprints if (s.get("name") or "").strip().lower() == wanted]
+    if exact:
+        return exact[0], ""
+
+    matches = [s for s in sprints if wanted in (s.get("name") or "").lower()]
+    if not matches:
+        return None, f"Sprint '{sprint_name}' not found on board '{board_name}'."
+    if len(matches) > 1:
+        names = ", ".join(f"'{s.get('name') or '?'}'" for s in matches)
+        return None, (
+            f"Multiple sprints match '{sprint_name}' on '{board_name}': {names}. "
+            "Be more specific, or use the exact name."
+        )
+    return matches[0], ""
 
 
 def register(mcp, resolver: InstanceResolver):
@@ -60,11 +101,14 @@ def register(mcp, resolver: InstanceResolver):
 
         body: dict = {"name": sprint_name}
         if start:
-            body["start"] = int(datetime.fromisoformat(start).replace(tzinfo=timezone.utc).timestamp() * 1000)
+            body["start"] = _parse_iso_day(start, "start")
         if finish:
-            body["finish"] = int(datetime.fromisoformat(finish).replace(tzinfo=timezone.utc).timestamp() * 1000)
+            body["finish"] = _parse_iso_day(finish, "finish")
 
-        data = await client.post(f"/api/agiles/{board['id']}/sprints", json=body)
+        data = await client.post(
+            contract.with_fields(f"/api/agiles/{board['id']}/sprints", "id,name"),
+            json=body,
+        )
         return (
             f"Created sprint: **{data.get('name', sprint_name)}**\n"
             f"**Board:** {board.get('name', '?')}\n"
@@ -107,9 +151,9 @@ def register(mcp, resolver: InstanceResolver):
         if new_name:
             body["name"] = new_name
         if start:
-            body["start"] = int(datetime.fromisoformat(start).replace(tzinfo=timezone.utc).timestamp() * 1000)
+            body["start"] = _parse_iso_day(start, "start")
         if finish:
-            body["finish"] = int(datetime.fromisoformat(finish).replace(tzinfo=timezone.utc).timestamp() * 1000)
+            body["finish"] = _parse_iso_day(finish, "finish")
         if archived is not None:
             body["archived"] = archived
 
@@ -163,7 +207,7 @@ def register(mcp, resolver: InstanceResolver):
             try:
                 await client.execute_command(iid, command)
                 succeeded.append(iid)
-            except ValueError as e:
+            except (httpx.HTTPStatusError, ValueError) as e:
                 failed.append(f"{iid}: {e}")
 
         parts = [f"**Board:** {board_display} — **Sprint:** {sprint_display}"]
@@ -211,7 +255,7 @@ def register(mcp, resolver: InstanceResolver):
             name_filters = [b.strip().lower() for b in boards.split(",") if b.strip()]
             selected = [
                 b for b in all_boards
-                if any(f in b.get("name", "").lower() for f in name_filters)
+                if any(f in (b.get("name") or "").lower() for f in name_filters)
             ]
         else:
             selected = all_boards
@@ -228,7 +272,7 @@ def register(mcp, resolver: InstanceResolver):
             if active_sprints:
                 to_fetch.append((b, active_sprints[-1]))
             else:
-                boards_no_sprint.append(b.get("name", "?"))
+                boards_no_sprint.append((b.get("name") or "?"))
 
         if not to_fetch:
             return f"No boards with active sprints. (Searched {len(selected)} boards.)"
@@ -248,9 +292,9 @@ def register(mcp, resolver: InstanceResolver):
                 for col in (data.get("board") or {}).get("columns", []):
                     for issue in col.get("issues", []):
                         issues.append(issue)
-                return board.get("name", "?"), sprint.get("name", "?"), issues
+                return (board.get("name") or "?"), (sprint.get("name") or "?"), issues
             except (ValueError, KeyError):
-                return board.get("name", "?"), sprint.get("name", "?"), []
+                return (board.get("name") or "?"), (sprint.get("name") or "?"), []
 
         results = await asyncio.gather(*(_fetch_sprint_issues(b, s) for b, s in to_fetch))
 
@@ -261,7 +305,7 @@ def register(mcp, resolver: InstanceResolver):
         for board_name, sprint_name, issues in results:
             unique = []
             for issue in issues:
-                iid = issue.get("idReadable", "")
+                iid = (issue.get("idReadable") or "")
                 if not iid or iid in seen_ids:
                     continue
                 state = _resolve_state(issue).lower()
@@ -287,10 +331,10 @@ def register(mcp, resolver: InstanceResolver):
                 continue
             lines.append(f"### {board_name} — {sprint_name} ({len(issues)})")
             for issue in issues:
-                iid = issue.get("idReadable", "?")
+                iid = (issue.get("idReadable") or "?")
                 state = _resolve_state(issue)
                 assignee = (issue.get("assignee") or {}).get("name") or "Unassigned"
-                summary = (issue.get("summary", "") or "?")[:80]
+                summary = ((issue.get("summary") or "") or "?")[:80]
                 lines.append(f"- **{iid}** [{state}] → {assignee} | {summary}")
             lines.append("")
 

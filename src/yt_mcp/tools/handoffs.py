@@ -136,8 +136,8 @@ def _issue_to_stuck_dict(
     if dl_ms:
         dl_days = int((dl_ms - now_ms) / _DAY_MS)
     return {
-        "id": issue.get("idReadable", "?"),
-        "summary": issue.get("summary", "") or "",
+        "id": (issue.get("idReadable") or "?"),
+        "summary": (issue.get("summary") or "") or "",
         "current_state": _resolve_state(issue),
         "current_role": to_role,
         "previous_state": change["from_state"],
@@ -171,8 +171,8 @@ async def _build_stuck_payload(
 ) -> dict | str:
     """Resolve the board's receiving states, fetch in-flight issues, walk
     activities, return a JSON-friendly payload of stuck items."""
-    board_display = board.get("name", "?")
-    projects = [p.get("shortName", "") for p in board.get("projects", []) if p.get("shortName")]
+    board_display = (board.get("name") or "?")
+    projects = [(p.get("shortName") or "") for p in board.get("projects", []) if p.get("shortName")]
     if not projects:
         return f"Board '{board_display}' has no projects bound."
 
@@ -223,7 +223,7 @@ async def _build_stuck_payload(
             "candidates_examined": 0,
         }
 
-    issue_ids = [i.get("idReadable", "") for i in issues if i.get("idReadable")]
+    issue_ids = [(i.get("idReadable") or "") for i in issues if i.get("idReadable")]
     # Bounded fetch — already proven against HTTP/2 stream exhaustion.
     activities_per = await fetch_activities_only_bounded(client, issue_ids)
 

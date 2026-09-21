@@ -46,7 +46,7 @@ def register(mcp, resolver: InstanceResolver):
             f"/api/issues/{issue_id}/comments/{comment_id}",
             params={"fields": "text"},
         )
-        old_text = old.get("text", "") if old else ""
+        old_text = (old.get("text") or "") if old else ""
 
         await client.update_comment(issue_id, comment_id, text)
         return (
@@ -73,7 +73,7 @@ def register(mcp, resolver: InstanceResolver):
             f"/api/issues/{issue_id}/comments/{comment_id}",
             params={"fields": "text,author(name)"},
         )
-        old_text = old.get("text", "") if old else ""
+        old_text = (old.get("text") or "") if old else ""
         old_author = (old.get("author") or {}).get("name", "?") if old else "?"
 
         await client.delete(f"/api/issues/{issue_id}/comments/{comment_id}")
@@ -151,7 +151,7 @@ def register(mcp, resolver: InstanceResolver):
                 end = min(len(norm), (idx if idx >= 0 else 0) + len(phrase) + 160)
                 snippet = ("…" if start > 0 else "") + norm[start:end] + ("…" if end < len(norm) else "")
                 matches.append({
-                    "issue": issue.get("idReadable", "?"),
+                    "issue": (issue.get("idReadable") or "?"),
                     "summary": issue.get("summary") or "",
                     "author": (c.get("author") or {}).get("name") or login or "?",
                     "created": c.get("created") or 0,
@@ -233,7 +233,7 @@ def register(mcp, resolver: InstanceResolver):
                 "/api/issues",
                 params={"query": q, "fields": fields, "$top": "50"},
             ) or []:
-                merged.setdefault(issue.get("idReadable", "?"), issue)
+                merged.setdefault((issue.get("idReadable") or "?"), issue)
 
         cutoff_ms = start.timestamp() * 1000
         mentions: list[dict] = []

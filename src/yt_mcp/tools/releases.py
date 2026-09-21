@@ -39,7 +39,7 @@ def _cf(issue: dict, name: str):
             if isinstance(v, dict):
                 return v.get("name")
             if isinstance(v, list):
-                return ", ".join(x.get("name", "") for x in v if isinstance(x, dict))
+                return ", ".join((x.get("name") or "") for x in v if isinstance(x, dict))
             return v
     return None
 
@@ -106,8 +106,8 @@ def register(mcp, resolver: InstanceResolver):
         seen: set = set()
         tickets: list[dict] = []
         for i in raw:
-            iid = i.get("idReadable", "")
-            if iid in seen or not _is_release_ticket(i.get("summary", "")):
+            iid = (i.get("idReadable") or "")
+            if iid in seen or not _is_release_ticket((i.get("summary") or "")):
                 continue
             seen.add(iid)
             proj = iid.rsplit("-", 1)[0] if "-" in iid else "?"

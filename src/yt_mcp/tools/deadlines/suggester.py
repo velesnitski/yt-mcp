@@ -63,7 +63,7 @@ def register(mcp, resolver: InstanceResolver):
         if not issues:
             return f"## Manager suggester\nNo issues in lookback. Query: `{query}`"
 
-        ids = [i.get("idReadable", "") for i in issues if i.get("idReadable")]
+        ids = [(i.get("idReadable") or "") for i in issues if i.get("idReadable")]
         results = await fetcher.fetch_activities_only_bounded(client, ids)
 
         # PM detection: top decile of reporter fanout, with a hard floor.
@@ -87,7 +87,7 @@ def register(mcp, resolver: InstanceResolver):
         # Per-(target, editor) signals.
         field_edits: dict[tuple[str, str], int] = defaultdict(int)
         resolvers: dict[tuple[str, str], int] = defaultdict(int)
-        issue_by_id = {i.get("idReadable", ""): i for i in issues}
+        issue_by_id = {(i.get("idReadable") or ""): i for i in issues}
         for iid, activities in zip(ids, results):
             issue = issue_by_id.get(iid, {})
             target = fetcher.extract_assignee_login(issue)

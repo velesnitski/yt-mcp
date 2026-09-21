@@ -116,11 +116,11 @@ def normalize_issue(data: dict, include_comments: bool = True) -> dict:
         else:
             custom_fields[name] = val
 
-    tags = [t.get("name", "") for t in (data.get("tags") or []) if t.get("name")]
+    tags = [(t.get("name") or "") for t in (data.get("tags") or []) if t.get("name")]
 
     out: dict = {
-        "id": data.get("idReadable", ""),
-        "summary": data.get("summary", "") or "",
+        "id": (data.get("idReadable") or ""),
+        "summary": (data.get("summary") or "") or "",
         "description": data.get("description") or "",
         "state": _resolve_state(data),
         "priority": _resolve_priority(data),
@@ -139,8 +139,8 @@ def normalize_issue(data: dict, include_comments: bool = True) -> dict:
         direction = link.get("direction", "")
         for linked in link.get("issues", []) or []:
             links.append({
-                "id": linked.get("idReadable", ""),
-                "summary": linked.get("summary", "") or "",
+                "id": (linked.get("idReadable") or ""),
+                "summary": (linked.get("summary") or "") or "",
                 "state": _linked_state(linked),
                 "assignee": _get_custom_field(linked, "Assignee") or "",
                 "link_type": link_type,
@@ -152,7 +152,7 @@ def normalize_issue(data: dict, include_comments: bool = True) -> dict:
         out["comments"] = [
             {
                 "id": c.get("id", ""),
-                "text": c.get("text", "") or "",
+                "text": (c.get("text") or "") or "",
                 "author": (c.get("author") or {}).get("name", ""),
                 "author_login": (c.get("author") or {}).get("login"),
                 "created": c.get("created"),
@@ -249,7 +249,7 @@ def _get_custom_field(issue: dict, field_name: str) -> str | None:
             if isinstance(val, dict):
                 return val.get("name")
             if isinstance(val, list):
-                names = [v.get("name", "") for v in val if isinstance(v, dict) and v.get("name")]
+                names = [(v.get("name") or "") for v in val if isinstance(v, dict) and v.get("name")]
                 return ", ".join(names) if names else None
             if isinstance(val, str):
                 return val
@@ -377,7 +377,7 @@ def format_issue_detail(data: dict, comment_chars: int = 200) -> str:
     links = data.get("links") or []
 
     if COMPACT:
-        iid = data.get("idReadable", "?")
+        iid = (data.get("idReadable") or "?")
         parts = [f"{iid}|{state_name}|{priority_name}|{assignee_name}"]
         if product:
             parts[0] += f"|{product}"
@@ -485,7 +485,7 @@ def compile_exclude_patterns(exclude_patterns: str) -> list[re.Pattern]:
 
 def should_exclude(issue: dict, patterns: list[re.Pattern]) -> bool:
     """Check if issue summary matches any exclusion pattern."""
-    summary = issue.get("summary", "")
+    summary = (issue.get("summary") or "")
     return any(p.search(summary) for p in patterns)
 
 
@@ -493,7 +493,7 @@ def format_value(val) -> str:
     if val is None:
         return "(empty)"
     if isinstance(val, list):
-        names = [v.get("name", "") or v.get("text", "") for v in val]
+        names = [(v.get("name") or "") or (v.get("text") or "") for v in val]
         return ", ".join(names) if names else "(empty)"
     if isinstance(val, str):
         return val[:200] if len(val) > 200 else val

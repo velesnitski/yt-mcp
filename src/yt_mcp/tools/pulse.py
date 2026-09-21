@@ -112,7 +112,7 @@ def _extract_deadline_ms(issue: dict) -> int | None:
     """Pull the Deadline ☠️ / Due Date value as a millis timestamp."""
     from yt_mcp.tools.deadlines.parser import _is_deadline_field, _extract_deadline_ts
     for cf in issue.get("customFields", []):
-        if _is_deadline_field(cf.get("name", "")):
+        if _is_deadline_field((cf.get("name") or "")):
             return _extract_deadline_ts(cf.get("value"))
     return None
 
@@ -173,7 +173,7 @@ def _filter_issues(issues: list[dict], standup_patterns) -> list[dict]:
     """Drop standup/report meta-tasks and blocked-by-unresolved items."""
     keep = []
     for it in issues:
-        summary = it.get("summary", "") or ""
+        summary = (it.get("summary") or "") or ""
         if _is_standup(summary, standup_patterns):
             continue
         if _is_blocked_by_unresolved(it):
@@ -293,8 +293,8 @@ def _issue_to_dict(issue: dict, score: float | None = None,
     dl_ms = _extract_deadline_ms(issue)
     dl_days = int(_days_between_ms(dl_ms, now_ms)) if (dl_ms and now_ms) else None
     out: dict = {
-        "id": issue.get("idReadable", "?"),
-        "summary": issue.get("summary", "") or "",
+        "id": (issue.get("idReadable") or "?"),
+        "summary": (issue.get("summary") or "") or "",
         "state": _resolve_state(issue),
         "assignee": _resolve_assignee(issue),
         # YouTrack `Assignee:` query filter needs the login, not display name —
@@ -446,8 +446,8 @@ def _format_issue_line_from_dict(d: dict) -> str:
 
 
 def _format_issue_line(issue: dict, score: float | None = None, now_ms: int = 0) -> str:
-    iid = issue.get("idReadable", "?")
-    summary = (issue.get("summary", "") or "?")[:90]
+    iid = (issue.get("idReadable") or "?")
+    summary = ((issue.get("summary") or "") or "?")[:90]
     state = _resolve_state(issue)
     sev = _get_custom_field(issue, "Severity") or "-"
     typ = _get_custom_field(issue, "Type") or "-"
@@ -736,7 +736,7 @@ async def _resolve_board_for_pulse(client, board_name: str) -> tuple[dict | None
     Multi-match returns (None, err_msg)."""
     boards = await client.get("/api/agiles", params={"fields": BOARD_FIELDS})
     query_lower = board_name.lower()
-    matches = [b for b in boards if query_lower in b.get("name", "").lower()]
+    matches = [b for b in boards if query_lower in (b.get("name") or "").lower()]
     if not matches:
         return None, f"No agile board matching '{board_name}'."
     if len(matches) > 1:
@@ -805,8 +805,8 @@ async def _build_pulse_payload(
 ) -> dict | str:
     """Full per-board pulse pipeline. Returns the JSON-friendly payload dict,
     or an error message string if the board can't be processed."""
-    board_display = board.get("name", "?")
-    projects = [p.get("shortName", "") for p in board.get("projects", []) if p.get("shortName")]
+    board_display = (board.get("name") or "?")
+    projects = [(p.get("shortName") or "") for p in board.get("projects", []) if p.get("shortName")]
     if not projects:
         return f"Board '{board_display}' has no projects bound."
 

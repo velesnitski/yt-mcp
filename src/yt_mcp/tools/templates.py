@@ -59,7 +59,7 @@ def register(mcp, resolver: InstanceResolver):
                 "description": description,
             },
         )
-        issue_id = data.get("idReadable", "?")
+        issue_id = (data.get("idReadable") or "?")
 
         product_str = ""
         if product:

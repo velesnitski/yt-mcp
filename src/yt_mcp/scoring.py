@@ -143,7 +143,7 @@ def compute_active_score(issue: dict) -> tuple[int, dict[str, int]]:
     # Tags
     tag_bonus = 0
     for tag in issue.get("tags", []):
-        tag_name = tag.get("name", "").lower()
+        tag_name = (tag.get("name") or "").lower()
         tag_bonus += TAG_BONUSES.get(tag_name, 0)
     breakdown["tags"] = tag_bonus
 
@@ -191,7 +191,7 @@ def compute_blocked_score(issue: dict) -> tuple[int, dict[str, int]]:
     # Tags
     tag_bonus = 0
     for tag in issue.get("tags", []):
-        tag_name = tag.get("name", "").lower()
+        tag_name = (tag.get("name") or "").lower()
         tag_bonus += TAG_BONUSES.get(tag_name, 0)
     breakdown["tags"] = tag_bonus
 
