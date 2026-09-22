@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yt-mcp"
-version = "1.33.0"
+version = "1.33.1"
 description = "YouTrack MCP server for Claude Code, GitHub Copilot, Cursor, JetBrains, n8n, and any MCP-compatible client"
 readme = "README.md"
 license = "MIT"
@@ -29,6 +29,9 @@ dependencies = [
     "sentry-sdk>=2.0",
     "PyJWT>=2.13.0",
     "cryptography>=50.0.0",
+    # Transitive via mcp/httpx, pinned explicitly for CVE-2026-63374
+    # (TLSStream IDNA 2003 host-name encoding) and CVE-2026-64847.
+    "anyio>=4.14.2",
 ]
 
 [project.optional-dependencies]
