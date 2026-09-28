@@ -54,6 +54,47 @@ async def _get_required_fields_info(client, project_id: str, project_short: str)
     return "\n".join(lines) if len(lines) > 1 else ""
 
 
+async def _assignee_login(client, value: str) -> str:
+    """Turn a display name into the login the command grammar requires.
+
+    `Assignee Firstname Lastname` is rejected with "Assignee expected:
+    Firstname Lastname" — the server echoes back exactly what it was given,
+    because the command wants a login. A caller (usually a model) naturally
+    has the display name, so resolve it against the user directory.
+
+    Conservative by design: only an exact, unique, case-insensitive match on
+    the full name is substituted. Anything else — a login already, `me`, no
+    match, several matches, or a directory the token cannot read — passes
+    through unchanged, so behaviour is never worse than before.
+    """
+    value = value.strip()
+    if not value or " " not in value:
+        return value  # a login, `me`, or empty
+    try:
+        users = await client.get(
+            "/api/users",
+            params={"query": value, "fields": "login,fullName,name", "$top": "10"},
+        )
+    except (ValueError, httpx.HTTPStatusError):
+        return value
+    if not isinstance(users, list):
+        return value
+    wanted = value.lower()
+    hits = [
+        u for u in users
+        if isinstance(u, dict) and u.get("login")
+        and wanted in {(u.get("fullName") or "").strip().lower(),
+                       (u.get("name") or "").strip().lower()}
+    ]
+    return hits[0]["login"] if len(hits) == 1 else value
+
+
+# A query with no `field:` operator, `#tag` or `{named period}` is free text.
+_HAS_OPERATOR = re.compile(r"\w\s*:|#|\{")
+# Results at which a free-text match is more likely a missed operator than an answer.
+_BROAD_TEXT_MATCH = 20
+
+
 def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool(annotations=ToolAnnotations(
@@ -61,6 +102,12 @@ def register(mcp, resolver: InstanceResolver):
         idempotentHint=True, openWorldHint=True))
     async def search_issues(query: str, max_results: int = 50, instance: str = "") -> str:
         """Search YouTrack issues using query syntax. Use named periods in curly braces for relative dates.
+
+        Bare words are a FREE-TEXT match across summaries, descriptions and
+        comments, so a multi-word phrase matches any issue containing any of
+        its words. To scope by field, use operators: `project: KEY`,
+        `State: {In Progress}`, `Assignee: login`, `#tag`, `created: {Last week}`,
+        `resolved date: 2026-01-01 .. 2026-01-31`. Combine them with spaces.
 
         Args:
             query: YouTrack search query
@@ -85,7 +132,17 @@ def register(mcp, resolver: InstanceResolver):
         header = f"**Found: {count} issues**"
         if count >= max_results:
             header += f" (showing first {max_results}, more may exist)"
-        return f"{header}\n\n{result}"
+        hint = ""
+        if count >= min(_BROAD_TEXT_MATCH, max_results) and not _HAS_OPERATOR.search(query):
+            # A bare phrase is a free-text match, and a large result set from
+            # one is usually a query that meant a field. Without this line the
+            # answer is indistinguishable from a correct one.
+            hint = (
+                f"\n\n_{count} results from a free-text match. To scope by field, "
+                "use operators such as `project: KEY`, `State: {…}`, "
+                "`Assignee: login` or `#tag`._"
+            )
+        return f"{header}\n\n{result}{hint}"
 
     @mcp.tool(annotations=ToolAnnotations(
         readOnlyHint=True, destructiveHint=False,
@@ -470,7 +527,7 @@ def register(mcp, resolver: InstanceResolver):
         if state:
             commands.append(f"State {state}")
         if assignee:
-            commands.append(f"Assignee {assignee}")
+            commands.append(f"Assignee {await _assignee_login(client, assignee)}")
         if product:
             commands.append(f"Product {product}")
         if add_tag:
@@ -574,17 +631,21 @@ def register(mcp, resolver: InstanceResolver):
             parts.append("")
             parts.append(f"**Could not apply:** {'; '.join(failed_cmds)}")
 
-        # Rollback instructions
+        # Rollback instructions — only for fields that actually changed.
+        # Gating on the *parameter* instead printed a restore hint for a write
+        # that was rejected (e.g. an unresolvable assignee), next to "No field
+        # changes detected": the hint then named the current value and read as
+        # if the tool were about to write something.
         rollback_parts = []
-        if summary:
+        if summary and (after.get("summary") or "") != old_summary:
             rollback_parts.append(f"summary=\"{old_summary}\"")
-        if state:
+        if state and new_state != old_state:
             rollback_parts.append(f"state=\"{old_state}\"")
-        if assignee:
+        if assignee and new_assignee != old_assignee:
             rollback_parts.append(f"assignee=\"{old_assignee}\"")
-        if description:
+        if description and description != old_description:
             rollback_parts.append("(previous description: restore via `rollback_issue` with the activity ID)")
-        if command:
+        if command and changes:
             rollback_parts.append(f"(use `rollback_issue` with activity ID for command fields)")
 
         if rollback_parts:
