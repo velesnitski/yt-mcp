@@ -1,0 +1,36 @@
+{
+  "_comment": "Risk levels for scripts/classify_pr.py (ADR-060). Rules may only RAISE a level: a path takes the highest level any rule gives it, and an unmatched path takes `default` (fail-closed). Levels are review guidance, not permissions — nothing here approves or merges. `block` is not configured here: it comes from the private sweep patterns in the SWEEP_PATTERNS_B64 secret.",
+  "default": "medium",
+  "high": [
+    ".github/**",
+    "scripts/release.sh",
+    "scripts/sweep.sh",
+    "scripts/classify_pr.py",
+    "scripts/sync-mcp-label.py",
+    "pyproject.toml",
+    "uv.lock",
+    "Dockerfile",
+    "docker-compose.yml",
+    "src/yt_mcp/auth.py",
+    "src/yt_mcp/client.py",
+    "src/yt_mcp/config.py",
+    "src/yt_mcp/server.py",
+    "src/yt_mcp/logging.py",
+    "src/yt_mcp/tools/__init__.py",
+    "README.md",
+    "CLAUDE.md",
+    "SECURITY.md",
+    ".gitignore",
+    ".sweep-patterns.example"
+  ],
+  "medium": [
+    "src/**",
+    "tests/**",
+    "scripts/**"
+  ],
+  "low": [
+    "docs/**",
+    "**/*.md",
+    "LICENSE"
+  ]
+}

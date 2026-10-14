@@ -1,0 +1,83 @@
+name: Semantic gate
+
+# Labels each pull request by risk and fails it only when it adds a banned
+# string. Review guidance, not a merge bypass: native required review still
+# decides every merge. See docs/adr/060-semantic-approval-gate.md.
+#
+# SECURITY — this runs on `pull_request_target`, which executes the workflow
+# from the BASE branch with a write token and repository secrets. That is
+# what stops a pull request from rewriting the gate that judges it, and it is
+# only safe because NOTHING from the pull request is ever checked out or
+# executed. The changed files and patches are fetched from the API and read
+# as data by a script that also comes from the base branch.
+# Never add a step that checks out the PR head, runs its code, or
+# interpolates a PR-controlled string (title, branch, body) into `run:`.
+# Owner pushes are unaffected: this has no `push` trigger and changes no
+# branch protection.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: semantic-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    name: semantic-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GH_TOKEN: ${{ github.token }}
+      PR: ${{ github.event.pull_request.number }}
+      AUTHOR: ${{ github.event.pull_request.user.login }}
+    steps:
+      # Base branch only — the classifier and policy the PR cannot change.
+      # Pinned by commit: this job holds a secret.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - name: Classify
+        id: classify
+        env:
+          SWEEP_PATTERNS_B64: ${{ secrets.SWEEP_PATTERNS_B64 }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --paginate --slurp > "$RUNNER_TEMP/files.json"
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" --jq '{title, body}' > "$RUNNER_TEMP/meta.json"
+          python3 scripts/classify_pr.py \
+            --policy .github/risk-policy.json \
+            --files "$RUNNER_TEMP/files.json" \
+            --meta "$RUNNER_TEMP/meta.json" \
+            --author "$AUTHOR" \
+            --out "$GITHUB_OUTPUT" \
+            --summary "$GITHUB_STEP_SUMMARY"
+
+      # Labels are guidance. Bot PRs run with a read-only token, so a failed
+      # label must not fail the check.
+      - name: Label
+        env:
+          RISK: ${{ steps.classify.outputs.risk }}
+        run: |
+          for l in low medium high block; do
+            [ "$l" = "$RISK" ] || gh pr edit "$PR" --remove-label "risk:$l" >/dev/null 2>&1 || true
+          done
+          gh pr edit "$PR" --add-label "risk:$RISK" >/dev/null 2>&1 \
+            || echo "::notice::could not set label risk:$RISK (read-only token or label missing)"
+
+      - name: Decide
+        env:
+          RISK: ${{ steps.classify.outputs.risk }}
+        run: |
+          if [ "$RISK" = block ]; then
+            echo "::error::risk:block — the diff or PR text matches banned patterns; remove them before merging"
+            exit 1
+          fi
+          echo "risk:$RISK — see the job summary for which paths drove it"
