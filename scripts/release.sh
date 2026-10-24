@@ -18,6 +18,14 @@ prepare)
     ver="${2:?usage: release.sh prepare <version>}"
     [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "bad version: $ver" >&2; exit 1; }
     cur="$(sed -n 's/^__version__ = "\(.*\)"$/\1/p' src/yt_mcp/__init__.py)"
+    py="$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml)"
+    # Refuse BEFORE editing anything. A hand-cut release that bumped only one
+    # file used to leave pyproject unmatched here: its sed no-op'd, the next
+    # line still rewrote __init__.py, and the tree was left half-bumped.
+    if [ "$cur" != "$py" ]; then
+        echo "version skew: __init__.py=$cur pyproject.toml=$py — align them first (ADR-063)" >&2
+        exit 1
+    fi
     echo "bump: $cur -> $ver"
     sed -i '' "s/^version = \"$cur\"/version = \"$ver\"/" pyproject.toml
     sed -i '' "s/^__version__ = \"$cur\"/__version__ = \"$ver\"/" src/yt_mcp/__init__.py
