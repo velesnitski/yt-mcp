@@ -71,8 +71,13 @@ ship)
     else
         echo "WARN: gh not found — GitHub Release not created for $tag" >&2
     fi
-    "$HOME/.local/bin/uvx" --from "git+https://github.com/velesnitski/yt-mcp@$tag" yt-mcp --version | tail -1
-    python3 scripts/sync-mcp-label.py --pin "$tag"
+    # Pin the commit the tag points at, not the tag (ADR-064): uv
+    # re-resolves a tag against GitHub on every spawn (~1.7 s, every session
+    # start), a full SHA is immutable and served from cache (~0.3 s). This
+    # --version run also warms that cache for the first real spawn.
+    sha="$(git rev-parse "$tag^{commit}")"
+    "$HOME/.local/bin/uvx" --from "git+https://github.com/velesnitski/yt-mcp@$sha" yt-mcp --version | tail -1
+    python3 scripts/sync-mcp-label.py --pin "$sha"
     # Kill stale yt-mcp server processes (known cross-session leak) so the
     # next /mcp reconnect MUST spawn the pinned build instead of reattaching
     # to a weeks-old process. Patterns live in this file, not the pkill
@@ -81,7 +86,7 @@ ship)
     pkill -f "archive-v0/.*/bin/yt-mcp" 2>/dev/null && killed=1
     pkill -f "uvx --from git\+https://github.com/velesnitski/yt-mcp" 2>/dev/null && killed=1
     [[ "$killed" == 1 ]] && echo "stale yt-mcp server processes killed"
-    echo "ship OK ($tag pinned) — RESTART Claude Code to load it (a /mcp"
+    echo "ship OK ($tag pinned as ${sha:0:7}) — RESTART Claude Code to load it (a /mcp"
     echo "reconnect re-spawns the spec the session read at startup, so it"
     echo "keeps running the old pin no matter how often you reconnect)"
     ;;

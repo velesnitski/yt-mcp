@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import time
 
 import httpx
 from yt_mcp.config import YouTrackConfig
@@ -8,6 +10,28 @@ from yt_mcp.formatters import rewrite_or_clauses
 _logger = logging.getLogger("yt_mcp")
 
 _JSON_HEADERS = {"Content-Type": "application/json"}
+
+# Statuses that mean "not processed, try again later" (ADR-064). 429 is
+# YouTrack's rate limit; 503 is a gateway or maintenance refusal. Neither
+# applied the request, so a retry is safe even for a non-idempotent POST.
+# Other 5xx may have run server-side and are never retried.
+_RETRY_STATUSES = (429, 503)
+_RETRY_BACKOFF = (0.5, 1.5)  # seconds before attempts 2 and 3
+_RETRY_AFTER_CAP = 10.0      # never sleep longer than this on a server hint
+
+# The project list changes rarely and every create/command path needs it.
+_PROJECTS_TTL = 300.0
+
+
+def _retry_delay(resp: httpx.Response, attempt: int) -> float:
+    """Seconds to wait before the next attempt: the server's Retry-After
+    (delta-seconds form) when given, else the fixed backoff — capped."""
+    hint = resp.headers.get("Retry-After", "")
+    try:
+        delay = float(hint)
+    except ValueError:
+        delay = _RETRY_BACKOFF[attempt]
+    return max(0.0, min(delay, _RETRY_AFTER_CAP))
 
 
 def _preprocess_query_params(params: dict | None) -> dict | None:
@@ -56,6 +80,22 @@ class YouTrackClient:
             },
             base_url=config.url,
         )
+        self._projects: list[dict] | None = None
+        self._projects_at = 0.0
+
+    async def _send(self, method: str, path: str, **kwargs) -> httpx.Response:
+        """One request, retried on 429/503 only (see _RETRY_STATUSES)."""
+        for attempt in range(len(_RETRY_BACKOFF) + 1):
+            resp = await self._client.request(method, path, **kwargs)
+            if resp.status_code not in _RETRY_STATUSES or attempt == len(_RETRY_BACKOFF):
+                return resp
+            delay = _retry_delay(resp, attempt)
+            _logger.info(
+                "YouTrack %s, retrying in %.1fs", resp.status_code, delay,
+                extra={"error_type": "youtrack_retry", "tool": path},
+            )
+            await asyncio.sleep(delay)
+        return resp  # unreachable; keeps type checkers content
 
     @property
     def base_url(self) -> str:
@@ -105,7 +145,7 @@ class YouTrackClient:
 
     async def get(self, path: str, params: dict | None = None):
         params = _preprocess_query_params(params)
-        resp = await self._client.get(path, params=params)
+        resp = await self._send("GET", path, params=params)
         await self._handle_error(resp)
         return resp.json()
 
@@ -113,9 +153,7 @@ class YouTrackClient:
         # POST bodies don't typically use the YT search-query string the same
         # way GET params do (commands use `query` as a command, not a search
         # filter), so we don't rewrite POSTs.
-        resp = await self._client.post(
-            path, json=json, headers=_JSON_HEADERS
-        )
+        resp = await self._send("POST", path, json=json, headers=_JSON_HEADERS)
         await self._handle_error(resp)
         return resp.json() if resp.content else {}
 
@@ -126,12 +164,12 @@ class YouTrackClient:
         multipart boundary from `files=`, which the JSON `post()` can't do.
         `files` is httpx-shaped: {"file": (filename, bytes, mime_type)}.
         """
-        resp = await self._client.post(path, files=files, params=params)
+        resp = await self._send("POST", path, files=files, params=params)
         await self._handle_error(resp)
         return resp.json() if resp.content else {}
 
     async def delete(self, path: str) -> None:
-        resp = await self._client.delete(path)
+        resp = await self._send("DELETE", path)
         await self._handle_error(resp)
 
     async def execute_command(self, issue_id: str, command: str) -> None:
@@ -156,7 +194,13 @@ class YouTrackClient:
             json={"text": text},
         )
 
-    async def resolve_project_id(self, short_name: str) -> str | None:
+    def _cached_projects(self) -> list[dict] | None:
+        """The cached project list, or None when absent or older than the TTL."""
+        if self._projects is None or time.monotonic() - self._projects_at >= _PROJECTS_TTL:
+            return None
+        return self._projects
+
+    async def _fetch_projects(self) -> list[dict]:
         # /api/admin/projects is YouTrack's ONLY projects resource. Despite the
         # "admin" path segment, GET is permission-FILTERED, not admin-gated: it
         # returns just the projects the current user can read, so a
@@ -164,15 +208,37 @@ class YouTrackClient:
         # (verified against a live instance + JetBrains REST docs). There is no
         # /api/projects endpoint — it 404s — so there is nothing to fall back
         # to. Catch defensively so a genuinely access-less token degrades to
-        # "not found" instead of propagating an uncaught error.
+        # "not found" instead of propagating an uncaught error. A failure is
+        # not cached, so the next call tries again.
         try:
             projects = await self.get(
                 "/api/admin/projects",
                 params={"fields": "id,shortName", "$top": "500"},
             )
         except (httpx.HTTPStatusError, ValueError):
+            return []
+        self._projects, self._projects_at = (projects or []), time.monotonic()
+        return self._projects
+
+    async def list_projects_cached(self) -> list[dict]:
+        """`[{id, shortName}]` for the projects this token can read, cached
+        for _PROJECTS_TTL seconds. Every create/command path resolved the
+        project by downloading the whole list again (ADR-064)."""
+        cached = self._cached_projects()
+        return cached if cached is not None else await self._fetch_projects()
+
+    async def resolve_project_id(self, short_name: str) -> str | None:
+        want = short_name.lower()
+
+        def find(projects: list[dict]) -> str | None:
+            for p in projects:
+                if (p.get("shortName") or "").lower() == want:
+                    return p["id"]
             return None
-        for p in projects:
-            if (p.get("shortName") or "").lower() == short_name.lower():
-                return p["id"]
-        return None
+
+        # A miss against the cache refetches once, so a project created a
+        # minute ago still resolves; a miss against a fresh list is final.
+        cached = self._cached_projects()
+        if cached is not None and (hit := find(cached)) is not None:
+            return hit
+        return find(await self._fetch_projects())

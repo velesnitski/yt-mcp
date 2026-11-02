@@ -60,6 +60,10 @@ class InstanceResolver:
     def instance_names(self) -> list[str]:
         return list(self._clients.keys())
 
+    def named_clients(self) -> list[tuple[str, YouTrackClient]]:
+        """(name, client) for every configured instance, default first."""
+        return list(self._clients.items())
+
     @property
     def is_multi(self) -> bool:
         return len(self._clients) > 1

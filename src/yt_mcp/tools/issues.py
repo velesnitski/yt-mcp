@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from mcp.types import ToolAnnotations
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.errors import YouTrackPermissionError
-from yt_mcp.formatters import format_issue_list, format_issue_detail, _resolve_state, _resolve_assignee, _get_custom_field, parse_issue_id, compact_lines, normalize_issue, split_service_comments
+from yt_mcp.formatters import format_issue_list, format_issue_detail, _resolve_state, _resolve_assignee, _get_custom_field, parse_issue_id, compact_lines, normalize_issue, split_service_comments, clip_text
 from yt_mcp.commands import (
     CMD_FIELD_RE, CMD_KEYWORDS,
     apply_field_commands, cmd_error_text, get_project_field_names,
@@ -236,6 +236,7 @@ def register(mcp, resolver: InstanceResolver):
         format: str = "report",
         include_comments: bool = False,
         instance: str = "",
+        description_chars: int = 2000,
     ) -> str:
         """Batch-fetch multiple issues in one round-trip.
 
@@ -259,6 +260,11 @@ def register(mcp, resolver: InstanceResolver):
             include_comments: Include comments in the response
                 (default False — batch mode rarely needs them).
             instance: YouTrack instance (optional).
+            description_chars: In `format="json"`, cap each description and
+                comment text at this many characters, with a marker giving
+                the dropped length (default 2000; 0 = full text). A batch of
+                long specs otherwise returns tens of thousands of tokens;
+                use `get_issue` for one issue's full text.
         """
         client = resolver.resolve(instance)
         # Parse IDs, stripping URLs and whitespace.
@@ -301,6 +307,11 @@ def register(mcp, resolver: InstanceResolver):
                 # Power override: return raw response array, no normalization.
                 return json.dumps(data, indent=2, ensure_ascii=False)
             normalized = [normalize_issue(i, include_comments=include_comments) for i in data]
+            more = "get_issue for the full text"
+            for n in normalized:
+                n["description"] = clip_text(n.get("description") or "", description_chars, more)
+                for c in n.get("comments") or []:
+                    c["text"] = clip_text(c.get("text") or "", description_chars, more)
             return json.dumps(normalized, indent=2, ensure_ascii=False)
 
         # report (compact): one line per issue + a count header.

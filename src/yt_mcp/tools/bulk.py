@@ -4,6 +4,7 @@ import time
 import httpx
 
 from mcp.types import ToolAnnotations
+from yt_mcp.fanout import bounded_map
 from yt_mcp.resolver import InstanceResolver
 
 MAX_BULK_RESULTS = 100
@@ -107,24 +108,30 @@ def register(mcp, resolver: InstanceResolver):
         if not issues:
             return f"No issues match query: `{query}`"
 
-        tagged = []
-        updated = []
-        errors = []
-
-        for issue in issues:
+        # Tag EVERY issue before changing any: the tag is what rollback
+        # finds. Within each phase the issues are independent, so they run
+        # in parallel (bounded) and report in query order (ADR-064).
+        async def _tag(issue: dict) -> tuple[str, str]:
             issue_id = (issue.get("idReadable") or "?")
             try:
                 await client.execute_command(issue_id, f"tag {batch_tag}")
-                tagged.append(issue_id)
+                return issue_id, ""
             except (httpx.HTTPStatusError, ValueError) as e:
-                errors.append(f"{issue_id}: tag failed ({e})")
+                return issue_id, f"{issue_id}: tag failed ({e})"
 
-        for issue_id in tagged:
+        async def _apply(issue_id: str) -> str:
             try:
                 await client.execute_command(issue_id, command)
-                updated.append(issue_id)
+                return ""
             except (httpx.HTTPStatusError, ValueError) as e:
-                errors.append(f"{issue_id}: command failed ({e})")
+                return f"{issue_id}: command failed ({e})"
+
+        tag_results = await bounded_map(_tag, issues)
+        tagged = [iid for iid, err in tag_results if not err]
+        errors = [err for _, err in tag_results if err]
+        cmd_errors = await bounded_map(_apply, tagged)
+        updated = [iid for iid, err in zip(tagged, cmd_errors) if not err]
+        errors += [err for err in cmd_errors if err]
 
         lines = [f"## Bulk update complete"]
         lines.append(f"**Batch tag:** `{batch_tag}`")
@@ -172,12 +179,11 @@ def register(mcp, resolver: InstanceResolver):
         except (ValueError, IndexError):
             return f"Invalid batch tag format: `{batch_tag}`"
 
-        rolled_back = []
-        errors = []
-        untouched: list[str] = []
-
-        for issue in issues:
+        # Issues revert independently: in parallel (bounded), each returning
+        # (reverted, errors, untouched), merged in query order (ADR-064).
+        async def _revert(issue: dict) -> tuple[list[str], list[str], list[str]]:
             issue_id = (issue.get("idReadable") or "?")
+            done: list[str] = []
             try:
                 activities = await client.get(
                     f"/api/issues/{issue_id}/activities",
@@ -191,9 +197,9 @@ def register(mcp, resolver: InstanceResolver):
                 )
 
                 # Anchor the window to when THIS issue was tagged, not to
-                # when the batch started: execute walks issues one at a
-                # time, so the last one may be tagged minutes after the
-                # first. Fall back to the tag's own timestamp.
+                # when the batch started: on a large batch the last issue
+                # may be tagged well after the first. Fall back to the
+                # tag's own timestamp.
                 tag_ts = batch_ts
                 for a in activities:
                     if (a.get("field") or {}).get("name", "").lower() == "tag":
@@ -212,8 +218,7 @@ def register(mcp, resolver: InstanceResolver):
                     # Nothing to revert here. Do NOT untag: the tag is the
                     # only record that this issue was part of the batch, and
                     # removing it makes a later retry impossible.
-                    untouched.append(issue_id)
-                    continue
+                    return [], [], [issue_id]
 
                 for change in batch_changes:
                     field_name = (change.get("field") or {}).get("name", "")
@@ -225,14 +230,14 @@ def register(mcp, resolver: InstanceResolver):
                                 f"/api/issues/{issue_id}",
                                 json={"summary": removed},
                             )
-                            rolled_back.append(f"{issue_id}: summary restored")
+                            done.append(f"{issue_id}: summary restored")
                     elif field_name.lower() == "description":
                         old_desc = removed if isinstance(removed, str) else ""
                         await client.post(
                             f"/api/issues/{issue_id}",
                             json={"description": old_desc},
                         )
-                        rolled_back.append(f"{issue_id}: description restored")
+                        done.append(f"{issue_id}: description restored")
                     elif field_name.lower() == "comments":
                         # Comment was edited — restore old text
                         if isinstance(removed, list):
@@ -241,7 +246,7 @@ def register(mcp, resolver: InstanceResolver):
                                 c_text = (old_comment.get("text") or "")
                                 if c_id and c_text:
                                     await client.update_comment(issue_id, c_id, c_text)
-                                    rolled_back.append(f"{issue_id}: comment {c_id} restored")
+                                    done.append(f"{issue_id}: comment {c_id} restored")
                         # Comment was added — check if it's an audit comment to delete
                         added = change.get("added")
                         if isinstance(added, list):
@@ -252,7 +257,7 @@ def register(mcp, resolver: InstanceResolver):
                                     await client.delete(
                                         f"/api/issues/{issue_id}/comments/{c_id}"
                                     )
-                                    rolled_back.append(f"{issue_id}: audit comment removed")
+                                    done.append(f"{issue_id}: audit comment removed")
                     else:
                         if isinstance(removed, list) and removed:
                             old_value = removed[0].get("name", "")
@@ -262,12 +267,18 @@ def register(mcp, resolver: InstanceResolver):
                             await client.execute_command(
                                 issue_id, f"{field_name} {old_value}"
                             )
-                            rolled_back.append(f"{issue_id}: {field_name} → {old_value}")
+                            done.append(f"{issue_id}: {field_name} → {old_value}")
 
                 await client.execute_command(issue_id, f"untag {batch_tag}")
 
             except (httpx.HTTPStatusError, ValueError) as e:
-                errors.append(f"{issue_id}: {e}")
+                return done, [f"{issue_id}: {e}"], []
+            return done, [], []
+
+        outcomes = await bounded_map(_revert, issues)
+        rolled_back = [r for done, _, _ in outcomes for r in done]
+        errors = [e for _, errs, _ in outcomes for e in errs]
+        untouched = [u for _, _, unt in outcomes for u in unt]
 
         lines = [f"## Bulk rollback complete"]
         lines.append(f"**Batch tag:** `{batch_tag}`")

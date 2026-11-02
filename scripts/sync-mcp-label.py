@@ -47,7 +47,9 @@ def pin_args(args, ref):
     Why pin (ADR-025): an unpinned git URL makes the spawned version depend
     on uv's cached ref resolution at spawn time — observed drift of TWO
     releases between the label and what a reconnect actually ran. Pinning
-    the released tag makes every spawn deterministic and instant-from-cache.
+    makes every spawn deterministic. Pin the release's full COMMIT SHA, not
+    its tag (ADR-064): uv re-resolves a tag against GitHub on every spawn
+    (~1.7 s), while a SHA is immutable and served from cache (~0.3 s).
     Returns (new_args, changed).
     """
     out, changed = [], False

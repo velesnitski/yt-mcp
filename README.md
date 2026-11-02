@@ -353,6 +353,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `YOUTRACK_LOG_FILE` | No | Error log path (default: `~/.yt-mcp/yt-mcp.log`) |
 | `YOUTRACK_ANALYTICS_FILE` | No | Analytics log path (default: `~/.yt-mcp/analytics.log`) |
 | `YOUTRACK_COMPACT` | No | Set to `1` to strip markdown from tool responses (~60% token savings) |
+| `YOUTRACK_MAX_RESPONSE_CHARS` | No | Cut any text reply longer than this at a line break, with a marker saying how to narrow the request (default: `60000`; `0` disables). JSON replies are never cut |
 
 ## Verify the server works
 

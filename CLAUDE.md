@@ -21,7 +21,10 @@ YOUTRACK_URL=... YOUTRACK_TOKEN=... uv run python scripts/verify_contract.py
 ```
 src/yt_mcp/
   server.py          # entry point, FastMCP setup, OAuth lazy loading
-  client.py          # YouTrackClient (httpx async, HTTP/2); maps 401/403 → YouTrackPermissionError
+  client.py          # YouTrackClient (httpx async, HTTP/2); maps 401/403 → YouTrackPermissionError; retries 429/503 only; caches the project list (ADR-064)
+  fanout.py          # bounded_map: per-issue write loops, ≤4 in flight, input order (ADR-064)
+  query_hints.py     # wraps every tool: query-parse 400 → which instance has the project + syntax tips
+  response_cap.py    # wraps every tool: last-resort text-reply cap (never JSON, never translation input)
   errors.py          # UserInputError(ValueError) + YouTrackPermissionError — caller-input types, dropped from Sentry by isinstance (ADR-036)
   contract.py        # API-contract quirk encodings (queries + response shapes); stdlib-only, importable
   commands.py        # COMMAND grammar owner: bare values (no braces!), field-aware split, apply_field_commands

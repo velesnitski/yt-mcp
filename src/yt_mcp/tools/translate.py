@@ -4,6 +4,7 @@ import time
 import httpx
 
 from mcp.types import ToolAnnotations
+from yt_mcp.fanout import WRITE_CONCURRENCY, bounded_map
 from yt_mcp.resolver import InstanceResolver
 
 
@@ -265,13 +266,13 @@ def register(mcp, resolver: InstanceResolver):
         if not parsed:
             return "No translations found in input. Check the format."
 
-        # Apply translations
-        updated_issues = []
-        updated_comments = 0
-        errors = []
-
-        for entry in parsed:
+        # Apply translations — issues are independent, so they run in
+        # parallel (bounded); each returns its own outcome and the report is
+        # assembled in input order (ADR-064).
+        async def _apply(entry: dict) -> tuple[str | None, int, list[str]]:
             issue_id = entry["issue"]
+            errs: list[str] = []
+            n_comments = 0
             try:
                 # Tag for rollback
                 await client.execute_command(issue_id, f"tag {batch_tag}")
@@ -325,20 +326,30 @@ def register(mcp, resolver: InstanceResolver):
                             c_text = f"{c_text}\n\n{delimiter}\n\n{orig_text}"
                     try:
                         await client.update_comment(issue_id, c_id, c_text)
-                        updated_comments += 1
+                        n_comments += 1
                     except (httpx.HTTPStatusError, ValueError) as e:
-                        errors.append(f"{issue_id} comment {c_id}: {e}")
+                        errs.append(f"{issue_id} comment {c_id}: {e}")
 
                 # Add audit comment
                 await client.post(
                     f"/api/issues/{issue_id}/comments",
                     json={"text": f"[yt-mcp] Translated. Batch: {batch_tag}"},
                 )
-
-                updated_issues.append(issue_id)
+                return issue_id, n_comments, errs
 
             except (httpx.HTTPStatusError, ValueError) as e:
-                errors.append(f"{issue_id}: {e}")
+                errs.append(f"{issue_id}: {e}")
+                return None, n_comments, errs
+
+        # The same issue listed twice reads its original and writes it back
+        # in each entry; in parallel those two would race. Keep that rare
+        # input sequential, where the later entry wins as it always has.
+        ids = [e["issue"] for e in parsed]
+        limit = WRITE_CONCURRENCY if len(set(ids)) == len(ids) else 1
+        outcomes = await bounded_map(_apply, parsed, limit)
+        updated_issues = [iid for iid, _, _ in outcomes if iid]
+        updated_comments = sum(n for _, n, _ in outcomes)
+        errors = [e for _, _, errs in outcomes for e in errs]
 
         lines = ["## Translation applied"]
         lines.append(f"**Batch tag:** `{batch_tag}`")

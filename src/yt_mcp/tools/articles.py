@@ -19,6 +19,22 @@ def _safe_date(ms: int | None, fmt: str = "%Y-%m-%d %H:%M") -> str:
 _RESTORE_CONTENT_LIMIT = 4000
 
 
+def _content_part(content: str, offset: int, max_chars: int) -> tuple[str, int | None]:
+    """(slice of content, offset of the next part or None if this is the last).
+
+    Cuts at a line break when one falls in the second half of the window, so
+    a part rarely ends mid-sentence; otherwise at exactly `max_chars`.
+    """
+    start = min(max(0, offset), len(content))
+    if max_chars <= 0 or len(content) - start <= max_chars:
+        return content[start:], None
+    end = start + max_chars
+    nl = content.rfind("\n", start + max_chars // 2, end)
+    if nl != -1:
+        end = nl + 1
+    return content[start:end], end
+
+
 def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool(annotations=ToolAnnotations(
@@ -63,13 +79,22 @@ def register(mcp, resolver: InstanceResolver):
     @mcp.tool(annotations=ToolAnnotations(
         readOnlyHint=True, destructiveHint=False,
         idempotentHint=True, openWorldHint=True))
-    async def get_article(article_id: str, include_comments: bool = True, instance: str = "") -> str:
+    async def get_article(
+        article_id: str, include_comments: bool = True, instance: str = "",
+        offset: int = 0, max_chars: int = 30000,
+    ) -> str:
         """Get a Knowledge Base article with full content.
+
+        Long articles come in parts: the reply says which characters it
+        holds and the `offset` that continues it. Comments follow the last
+        part.
 
         Args:
             article_id: Article ID or database ID
             include_comments: Include comments (default: True)
             instance: YouTrack instance (optional)
+            offset: Character position in the content to start from (default 0)
+            max_chars: Content characters per part (default 30000; 0 = all)
         """
         client = resolver.resolve(instance)
         comment_fields = (
@@ -120,10 +145,21 @@ def register(mcp, resolver: InstanceResolver):
         if tags:
             parts.append(f"**Tags:** {', '.join(t.get('name', '') for t in tags)}")
 
-        content = data.get("content", "")
-        parts.append(f"\n---\n{content or '(empty)'}")
+        content = data.get("content", "") or ""
+        body, next_offset = _content_part(content, offset, max_chars)
+        if content and offset >= len(content):
+            body = f"(offset {offset} is past the end: the content has {len(content)} characters)"
+        parts.append(f"\n---\n{body or '(empty)'}")
+        if next_offset is not None:
+            # ADR-064: a 78K-char article was returned whole, which costs
+            # more model time than the API call. Say exactly how to continue.
+            parts.append(
+                f"\n_[Part: characters {max(0, offset)}–{next_offset} of {len(content)}. "
+                f'Continue with get_article(article_id="{article_id}", '
+                f"offset={next_offset}).]_"
+            )
 
-        if include_comments:
+        if include_comments and next_offset is None:
             comments = data.get("comments", [])
             if comments:
                 parts.append(f"\n---\n## Comments ({len(comments)})\n")

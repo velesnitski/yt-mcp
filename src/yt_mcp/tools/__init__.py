@@ -1,6 +1,8 @@
 from yt_mcp.config import YouTrackConfig
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.logging import logged
+from yt_mcp.query_hints import with_query_hints
+from yt_mcp.response_cap import capped
 from yt_mcp.tools import issues, comments, attachments, templates, history, bulk, projects, sprints, discovery, translate, impact, users, articles, dashboard, monitoring, journey, deadlines, pulse, handoffs, time_report, releases
 
 # Tools that modify data — blocked in read-only mode
@@ -132,10 +134,12 @@ def register_all(mcp, resolver: InstanceResolver, config: YouTrackConfig | None 
     tools = _registered_tools(mcp)
     _annotate_tools(tools)
 
-    # Wrap all tool functions with analytics logging
+    # Wrap all tool functions with analytics logging; inside it, cap
+    # over-long text replies and add instance/syntax hints to query-parse
+    # errors (ADR-064) — so the analytics line records what the caller saw.
     for tool in tools.values():
         if hasattr(tool, "fn"):
-            tool.fn = logged(tool.fn)
+            tool.fn = logged(capped(with_query_hints(tool.fn, resolver)))
 
     if config is None:
         return

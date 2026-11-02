@@ -77,6 +77,18 @@ def build_state_clause(states: list[str]) -> str:
     return "State: " + ", ".join(f"{{{s}}}" for s in states)
 
 
+def clip_text(text: str, limit: int, how_to_get_rest: str = "") -> str:
+    """`text` cut to `limit` chars with a visible marker; 0/negative = no cap.
+
+    The marker states how much was dropped, so a clipped field is never
+    mistaken for the whole one (ADR-064).
+    """
+    if not text or limit <= 0 or len(text) <= limit:
+        return text
+    rest = f" — {how_to_get_rest}" if how_to_get_rest else ""
+    return f"{text[:limit]}… [+{len(text) - limit} chars{rest}]"
+
+
 def normalize_issue(data: dict, include_comments: bool = True) -> dict:
     """Flatten a YT issue response into a JSON-friendly dict.
 

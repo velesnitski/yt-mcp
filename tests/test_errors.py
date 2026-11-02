@@ -40,7 +40,9 @@ class TestPermissionErrorMapping:
         assert f"({status})" in str(exc.value)
 
     @pytest.mark.asyncio
-    async def test_5xx_still_raises_httpx_error(self):
+    async def test_5xx_still_raises_httpx_error(self, monkeypatch):
+        # 503 is retried before it surfaces (ADR-064); don't wait for real.
+        monkeypatch.setattr("yt_mcp.client._RETRY_BACKOFF", (0.0, 0.0))
         with pytest.raises(httpx.HTTPStatusError):
             await _client(503).get("/api/issues")
 
