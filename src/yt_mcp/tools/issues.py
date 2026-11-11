@@ -99,6 +99,37 @@ _BROAD_TEXT_MATCH = 20
 
 _ISSUE_ID_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]*-\d+")
 
+
+def _default_name(resolver) -> str:
+    name = getattr(resolver, "default_name", "")
+    return name if isinstance(name, str) else ""
+
+
+async def _owners_by_key(resolver, client, ids: list[str]) -> dict[str, list]:
+    """For each ID, the (instance, client) pairs to try, best first.
+
+    Single-instance setups (and test doubles without a real resolver) get
+    the resolved client only. Otherwise the instances whose project list
+    holds the ID's key come first, the resolved client leading among them,
+    then the resolved client as a last resort for keys no list mentions.
+    """
+    named = resolver.named_clients() if hasattr(resolver, "named_clients") else None
+    if not isinstance(named, list) or len(named) < 2:
+        name = next((n for n, c in named or [] if c is client), "") if isinstance(named, list) else ""
+        return {i: [(name, client)] for i in ids}
+    lists = await bounded_map(lambda nc: nc[1].list_projects_cached(), named)
+    keys_of = {n: {(p.get("shortName") or "").upper() for p in ps} for (n, _), ps in zip(named, lists)}
+    first = next((n for n, c in named if c is client), named[0][0])
+    order = sorted(named, key=lambda nc: nc[0] != first)
+    out = {}
+    for iid in ids:
+        key = iid.rsplit("-", 1)[0].upper()
+        opts = [(n, c) for n, c in order if key in keys_of[n]]
+        if not any(c is client for _, c in opts):
+            opts.append((first, client))
+        out[iid] = opts
+    return out
+
 def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool(annotations=ToolAnnotations(
@@ -305,13 +336,12 @@ def register(mcp, resolver: InstanceResolver):
             if include_comments:
                 field_set += ",comments(id,text,author(login,name),created)"
 
-        data: list = []
-        if valid:
+        async def _fetch_batch(c, ids: list[str]) -> list:
             try:
-                data = await client.get(
+                return await c.get(
                     "/api/issues",
-                    params={"query": " or ".join(f"#{iid}" for iid in valid),
-                            "fields": field_set, "$top": str(len(valid))},
+                    params={"query": " or ".join(f"#{iid}" for iid in ids),
+                            "fields": field_set, "$top": str(len(ids))},
                 ) or []
             except UserInputError as e:
                 if isinstance(e, YouTrackPermissionError):
@@ -321,15 +351,48 @@ def register(mcp, resolver: InstanceResolver):
                 # parallel, so the rest still come back.
                 async def _one(iid):
                     try:
-                        return await client.get(f"/api/issues/{iid}", params={"fields": field_set})
+                        return await c.get(f"/api/issues/{iid}", params={"fields": field_set})
                     except UserInputError:
                         return None
-                data = [d for d in await bounded_map(_one, valid, limit=READ_CONCURRENCY)
+                return [d for d in await bounded_map(_one, ids, limit=READ_CONCURRENCY)
                         if isinstance(d, dict)]
 
-        by_id = {(i.get("idReadable") or "").upper(): i for i in data if isinstance(i, dict)}
+        # Each ID goes to the instance that has its project (ADR-070): a key
+        # from another instance used to come back "missing". A key present
+        # on several instances is tried on each in turn, the asked-for (or
+        # default) instance first.
+        owners = await _owners_by_key(resolver, client, valid)
+        by_id: dict[str, dict] = {}
+        where: dict[str, tuple[str, str]] = {}
+        pending = list(valid)
+        for round_ in range(max((len(o) for o in owners.values()), default=0)):
+            groups: dict[int, tuple[str, object, list[str]]] = {}
+            for iid in pending:
+                opts = owners[iid]
+                if round_ < len(opts):
+                    name, c = opts[round_]
+                    groups.setdefault(id(c), (name, c, []))[2].append(iid)
+            results = await bounded_map(lambda g: _fetch_batch(g[1], g[2]), list(groups.values()))
+            for (name, c, _), items in zip(groups.values(), results):
+                for item in items:
+                    if isinstance(item, dict) and item.get("idReadable"):
+                        key = item["idReadable"].upper()
+                        by_id.setdefault(key, item)
+                        where.setdefault(key, (name, c.base_url.rstrip("/")))
+            pending = [i for i in pending if i.upper() not in by_id]
+            if not pending:
+                break
+
         data = [by_id[i.upper()] for i in id_list if i.upper() in by_id]  # input order
-        base = client.base_url.rstrip("/")
+        multi = len({n for n, _ in where.values()}) > 1 or any(
+            n and n != _default_name(resolver) for n, _ in where.values())
+
+        def _locate(item: dict) -> dict:
+            name, base = where.get((item.get("idReadable") or "").upper(), ("", client.base_url.rstrip("/")))
+            out = {"url": f"{base}/issue/{item.get('idReadable')}"}
+            if multi and name:
+                out["instance"] = name
+            return out
 
         def _missing_item(iid: str) -> dict:
             return {"id": iid, "error": "not found or no access"
@@ -344,7 +407,7 @@ def register(mcp, resolver: InstanceResolver):
                     if item is None:
                         out.append(_missing_item(iid))
                     else:
-                        out.append({**item, "url": f"{base}/issue/{item.get('idReadable')}"})
+                        out.append({**item, **_locate(item)})
                 return json.dumps(out, indent=2, ensure_ascii=False)
             more = "get_issue for the full text"
             out = []
@@ -354,7 +417,7 @@ def register(mcp, resolver: InstanceResolver):
                     out.append(_missing_item(iid))
                     continue
                 n = normalize_issue(item, include_comments=include_comments)
-                n["url"] = f"{base}/issue/{n.get('id') or item.get('idReadable')}"
+                n.update(_locate(item))
                 n["description"] = clip_text(n.get("description") or "", description_chars, more)
                 for c in n.get("comments") or []:
                     c["text"] = clip_text(c.get("text") or "", description_chars, more)

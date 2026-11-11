@@ -357,6 +357,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `YOUTRACK_ANALYTICS_FILE` | No | Analytics log path (default: `~/.yt-mcp/analytics.log`) |
 | `YOUTRACK_COMPACT` | No | Set to `1` to strip markdown from tool responses (~60% token savings) |
 | `YOUTRACK_REF_ROUTES` | No | Where bare ticket numbers most likely live, for `resolve_ticket_refs`: `word:instance:KEY,…` (e.g. `ops:main:OPS,web:second:WEB`). A route is tried first when its word is said near the number |
+| `YOUTRACK_GENERIC_WORDS` | No | Extra words, comma-separated, that say little about which ticket is meant (product or protocol names, for example). They weigh less in `find_issues_for_text` / `resolve_ticket_refs` and are never the only evidence of a match |
 | `YOUTRACK_LOG_LEVEL` | No | Headless mode only: stderr log level (default: `WARNING`) |
 | `YOUTRACK_MAX_RESPONSE_CHARS` | No | Cut any text reply longer than this at a line break, with a marker saying how to narrow the request (default: `60000`; `0` disables). JSON replies are never cut |
 

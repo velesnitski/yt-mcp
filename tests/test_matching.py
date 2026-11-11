@@ -49,6 +49,10 @@ def _client(name, search=None):
                 return _issue(iid, ISSUES[name][iid])
             raise UserInputError("YouTrack not found error (404): HTTP 404 Not Found")
         if path == "/api/issues":
+            q = (params or {}).get("query", "")
+            if q.startswith("#"):  # get_issues batch: "#A or #B"
+                ids = [t.strip()[1:] for t in q.split(" or ")]
+                return [_issue(i, ISSUES[name][i]) for i in ids if i in ISSUES[name]]
             return search(params) if search else []
         return {}
 
@@ -144,11 +148,27 @@ class TestResolveRefs:
 
     @pytest.mark.asyncio
     async def test_routes_narrow_the_search(self, monkeypatch):
-        monkeypatch.setenv("YOUTRACK_REF_ROUTES", "ops:main:OPS,core:second:CORE")
+        monkeypatch.setenv("YOUTRACK_REF_ROUTES", "ops:main:OPS,proxies:second:CORE")
         _, tools = _setup()
-        [r] = _json(await tools["resolve_ticket_refs"](refs=["core 1947 proxy restart"], format="json"))
+        [r] = _json(await tools["resolve_ticket_refs"](refs=["proxies 1947 restart"], format="json"))
         assert r["checked"] == ["CORE-1947", "OPS-1947"]  # route named in the words first, WEB never tried
         assert r["candidates"][0]["id"] == "CORE-1947"
+
+    @pytest.mark.asyncio
+    async def test_a_key_said_aloud_is_tried_first_and_alone(self):
+        clients, tools = _setup()
+        [r] = _json(await tools["resolve_ticket_refs"](
+            refs=["1947 restart"], context="CORE team, proxy", format="json"))
+        assert r["confidence"] == "confident" and r["checked"] == ["CORE-1947"]
+        assert not any(p.startswith("/api/issues/") for p, _ in clients["main"].calls)
+
+    @pytest.mark.asyncio
+    async def test_named_route_widens_when_it_does_not_confirm(self):
+        _, tools = _setup()
+        [r] = _json(await tools["resolve_ticket_refs"](
+            refs=["1947 database copy"], context="CORE", format="json"))
+        assert r["checked"][0] == "CORE-1947" and "OPS-1947" in r["checked"]
+        assert r["candidates"][0]["id"] == "OPS-1947"
 
     @pytest.mark.asyncio
     async def test_instance_hint_limits_instances(self):
@@ -207,7 +227,7 @@ class TestFindForText:
         _, tools = _setup(_search_returning(("second", "CORE-77"), ("main", "OPS-2317")))
         [r] = _json(await tools["find_issues_for_text"](
             texts=["девопсы занимаются перезапуском контейнеров прокси"], format="json"))
-        assert r["match"] == "words" and r["candidates"][0]["id"] == "CORE-77"
+        assert r["match"] == "confident" and r["candidates"][0]["id"] == "CORE-77"
         assert set(r["candidates"][0]) >= {"id", "url", "summary", "state", "assignee", "score", "why"}
         assert "OPS-2317" not in [c["id"] for c in r["candidates"]]  # below threshold
 
@@ -222,7 +242,7 @@ class TestFindForText:
     async def test_explicit_key_bypasses_search(self):
         clients, tools = _setup(_search_returning(("main", "WEB-2317")))
         [r] = _json(await tools["find_issues_for_text"](texts=["see OPS-1947 today"], format="json"))
-        assert r["match"] == "reference" and r["candidates"][0]["id"] == "OPS-1947"
+        assert r["match"] == "exact" and r["candidates"][0]["id"] == "OPS-1947"
         assert not any(p == "/api/issues" for p, _ in clients["main"].calls)
 
     @pytest.mark.asyncio
@@ -312,3 +332,111 @@ class TestGetIssuesBatch:
         out = _json(await fn(ids="OPS-1", fields="idReadable,summary", format="json"))
         assert out == [{"idReadable": "OPS-1", "summary": "first",
                         "url": "https://main.example.youtrack.cloud/issue/OPS-1"}]
+
+
+# ---------------------------------------------------------------- R (live findings, invented data)
+
+
+class TestRouting:
+    """get_issues sends each ID to the instance that has its project."""
+
+    @staticmethod
+    def _tool():
+        # A key present on both instances: tried on each until found.
+        PROJECTS["second"] = ["CORE", "OPS"]
+        clients = {"main": _client("main"), "second": _client("second")}
+        resolver = InstanceResolver(clients)
+        mcp = FastMCP("test")
+        issues.register(mcp, resolver)
+        return clients, mcp._tool_manager._tools["get_issues"].fn
+
+    @pytest.fixture(autouse=True)
+    def _restore(self):
+        before = {k: list(v) for k, v in PROJECTS.items()}
+        yield
+        PROJECTS.clear(); PROJECTS.update(before)
+
+    @pytest.mark.asyncio
+    async def test_key_from_the_other_instance_is_found_there(self):
+        clients, fn = self._tool()
+        out = _json(await fn(ids="CORE-1947,OPS-2317", fields="idReadable,summary", format="json"))
+        assert [o.get("idReadable") for o in out] == ["CORE-1947", "OPS-2317"]
+        assert out[0]["instance"] == "second" and out[0]["url"].startswith("https://second.")
+        assert out[1]["instance"] == "main"
+
+    @pytest.mark.asyncio
+    async def test_shared_key_is_tried_on_each_instance(self):
+        ISSUES["second"]["OPS-9"] = {"summary": "Only the second instance has this one"}
+        try:
+            _, fn = self._tool()
+            [o] = _json(await fn(ids="OPS-9", fields="idReadable", format="json"))
+            assert o["idReadable"] == "OPS-9" and o["instance"] == "second"
+        finally:
+            del ISSUES["second"]["OPS-9"]
+
+
+class TestLiveFindings:
+    @pytest.mark.asyncio
+    async def test_russian_speech_matches_english_summary(self):
+        _, tools = _setup()
+        [r] = _json(await tools["resolve_ticket_refs"](refs=["задача 1947 (перезапуск прокси)"], format="json"))
+        assert r["confidence"] == "confident" and r["candidates"][0]["id"] == "CORE-1947"
+
+    def test_bridge_is_exact_for_short_stems(self):
+        assert tm.score(tm.content_words("продажи за месяц"), "Prod deploy checklist").score == 0
+        assert tm.score(tm.content_words("логин не работает"), "Collect server logs").score == 0
+        assert tm.score(tm.content_words("логи сервера"), "Collect server logs").score == 1.0
+
+    def test_clear_lead_is_confident_and_says_why(self):
+        ranked = [{"score": 0.417, "distinctive": True, "why": "summary: x"},
+                  {"score": 0.167, "distinctive": True, "why": ""}]
+        assert matching._verdict(ranked, True) == "confident"
+        assert "clear lead (0.417 vs 0.167)" in ranked[0]["why"]
+        close = [{"score": 0.417, "distinctive": True, "why": ""},
+                 {"score": 0.3, "distinctive": True, "why": ""}]
+        assert matching._verdict(close, True) == "weak"
+
+    def test_generic_only_evidence_is_never_confident(self):
+        ranked = [{"score": 0.9, "distinctive": False, "why": ""}]
+        assert matching._verdict(ranked, True) == "weak"
+
+    @pytest.mark.asyncio
+    async def test_generic_words_make_no_match(self):
+        ISSUES["main"]["WEB-5"] = {"summary": "Remove desktop client from the client-api on dev"}
+        try:
+            _, tools = _setup(_search_returning(("main", "WEB-5")))
+            [r] = _json(await tools["find_issues_for_text"](texts=["CORS client-api dev"], format="json"))
+            assert r["match"] == "none" and r["candidates"] == []
+        finally:
+            del ISSUES["main"]["WEB-5"]
+
+    @pytest.mark.asyncio
+    async def test_local_generic_words_extend_the_list(self, monkeypatch):
+        monkeypatch.setenv("YOUTRACK_GENERIC_WORDS", "tunnelx")
+        ISSUES["main"]["WEB-6"] = {"summary": "Tunnelx switch fails on connect"}
+        try:
+            _, tools = _setup(_search_returning(("main", "WEB-6")))
+            [r] = _json(await tools["find_issues_for_text"](
+                texts=["Riverton tunnelx нет подключения"], format="json"))
+            assert r["match"] == "none"  # the distinctive word (a place) matched nothing
+        finally:
+            del ISSUES["main"]["WEB-6"]
+
+    def test_generic_words_weigh_less(self):
+        # "dev" alone matching is a weak signal next to the distinctive word.
+        assert tm.score(["deploy", "dev"], "Notes for the dev environment").score < 0.3
+        assert tm.score(["deploy", "dev"], "Deploy checklist").score > 0.7
+
+    def test_idf_downweights_words_every_candidate_shares(self):
+        w = tm.idf_weights(["cache", "warmup"], ["cache proxy", "cache warmup job", "cache size"])
+        assert w["warmup"] > w["cache"]
+
+    @pytest.mark.asyncio
+    async def test_duplicate_checks_name_the_instance(self):
+        PROJECTS["second"] = ["CORE", "OPS"]
+        try:
+            _, tools = _setup()
+            [r] = _json(await tools["resolve_ticket_refs"](refs=["1947"], format="json"))
+            assert "OPS-1947 (main)" in r["checked"] and "OPS-1947 (second)" in r["checked"]
+        finally:
+            PROJECTS["second"] = ["CORE"]

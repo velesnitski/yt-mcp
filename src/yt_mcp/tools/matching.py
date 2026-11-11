@@ -27,6 +27,7 @@ from yt_mcp.resolver import InstanceResolver
 CONFIDENT = 0.5      # share of context words that must show up, summary-weighted
 WEAK = 0.2
 MARGIN = 0.2         # best must beat the runner-up by this much to be confident
+LEAD_FLOOR = 0.34    # ...or clear this floor and double the runner-up (ADR-070)
 TEXT_THRESHOLD = 0.34
 MAX_KEYS_PER_NUMBER = 60
 ISSUE_FIELDS = ("idReadable,summary,description,resolved,updated,project(shortName),"
@@ -95,29 +96,43 @@ async def _projects_by_instance(resolver: InstanceResolver, only: str = "") -> d
 
 
 def _rank(cands: list[tuple[str, object, dict]], words: list[str], owner: str) -> list[dict]:
+    docs = [f"{i.get('summary') or ''} {(i.get('description') or '')[:4000]}" for _, _, i in cands]
+    idf = tm.idf_weights(words, docs) if len(cands) > 2 else None
     ranked = []
     for name, client, issue in cands:
-        m = tm.score(words, issue.get("summary") or "", (issue.get("description") or "")[:4000])
+        m = tm.score(words, issue.get("summary") or "", (issue.get("description") or "")[:4000], idf)
         s = m.score
         why = m.why()
         if _owner_hit(owner, issue):
             s = min(1.0, s + 0.25)
             why += "; assignee matches owner"
         b = _brief(name, client, issue)
-        b.update(score=round(s, 3), why=why)
+        b.update(score=round(s, 3), why=why, distinctive=m.distinctive)
         ranked.append(b)
     ranked.sort(key=lambda b: (-b["score"], b["resolved"], -b["updated"]))
     return ranked
 
 
 def _verdict(ranked: list[dict], have_context: bool) -> str:
+    """confident / weak / none (or `candidates` with nothing to verify by).
+
+    Confident needs a distinctive word in the winner's summary — generic
+    words (environments, platforms) are never the only evidence — and a
+    lead: either a strong score with a margin, or a clear floor at least
+    twice the runner-up (ADR-070).
+    """
     if not ranked:
         return "none"
     if not have_context:
         return "candidates"
-    best = ranked[0]["score"]
+    top = ranked[0]
+    best = top["score"]
     second = ranked[1]["score"] if len(ranked) > 1 else 0.0
-    if best >= CONFIDENT and best - second >= MARGIN:
+    strong = best >= CONFIDENT and best - second >= MARGIN
+    lead = best >= LEAD_FLOOR and best >= 2 * second
+    if top.get("distinctive") and (strong or lead):
+        if lead and not strong:
+            top["why"] += f"; clear lead ({best} vs {second})"
         return "confident"
     return "weak" if best >= WEAK else "none"
 
@@ -167,16 +182,32 @@ async def resolve_ref(resolver: InstanceResolver, ref: str, context: str = "",
                 tries += [(inst, k) for k in ks]
     tries = list(dict.fromkeys(tries))[:MAX_KEYS_PER_NUMBER]
 
-    ids = [(inst, f"{key}-{n}") for inst, key in tries]
-    found = await bounded_map(lambda t: _fetch(clients[t[0]], t[1]), ids, limit=READ_CONCURRENCY)
-    cands = [(inst, clients[inst], i) for (inst, _), i in zip(ids, found) if i]
-    ranked = _rank(cands, words, owner)
+    # A project key or instance name said aloud ("the PRJB team", "on
+    # second") is the strongest route there is: try those first and stop
+    # there when they already give a confident answer (ADR-070).
+    said = {w.upper() for w in re.findall(r"[A-Za-z][A-Za-z0-9_]*", f"{ref} {context}")}
+    named = [t for t in tries if t[1].upper() in said or t[0].upper() in said]
+    phases = [named, [t for t in tries if t not in named]] if named else [tries]
+
+    ids: list[tuple[str, str]] = []
+    cands: list = []
+    ranked: list[dict] = []
+    for phase in phases:
+        batch = [(inst, f"{key}-{n}") for inst, key in phase]
+        ids += batch
+        found = await bounded_map(lambda t: _fetch(clients[t[0]], t[1]), batch, limit=READ_CONCURRENCY)
+        cands += [(inst, clients[inst], i) for (inst, _), i in zip(batch, found) if i]
+        ranked = _rank(cands, words, owner)
+        if _verdict([dict(b) for b in ranked], have_context) == "confident":
+            break
     if not have_context:
         # No words to verify against: keep the routing order, rank nothing.
         order = {iid: k for k, (_, iid) in enumerate(ids)}
         ranked.sort(key=lambda b: order.get(b["id"], 0))
+    dup = {iid for _, iid in ids if sum(1 for _, x in ids if x == iid) > 1}
     out = {"ref": ref, "confidence": _verdict(ranked, have_context),
-           "candidates": ranked, "checked": [iid for _, iid in ids]}
+           "candidates": ranked,
+           "checked": [f"{iid} ({inst})" if iid in dup else iid for inst, iid in ids]}
     if out["confidence"] in ("confident",):
         out["candidates"] = ranked[:1]
     elif out["confidence"] == "weak":
@@ -226,7 +257,9 @@ async def match_text(resolver, client, name: str, text: str, since: str, project
             lambda r: resolve_ref(resolver, r, context=text, instance_hint=name,
                                   keys=None if tm.ISSUE_KEY.search(r) else keys), refs)
         cands = [c for r in resolved for c in r["candidates"]]
-        return {"text": text, "match": "reference" if cands else "none",
+        levels = [r["confidence"] for r in resolved]
+        verdict = next((v for v in ("exact", "confident", "weak") if v in levels), "none")
+        return {"text": text, "match": verdict if cands else "none",
                 "candidates": cands[:max_per_text]}
 
     words = tm.content_words(text)
@@ -250,8 +283,12 @@ async def match_text(resolver, client, name: str, text: str, since: str, project
         issue = seen.get(b["id"], {})
         b["score"] = round(min(1.0, b["score"] + _bonus(issue, now_ms)) if b["score"] else 0.0, 3)
     ranked.sort(key=lambda b: -b["score"])
-    good = [b for b in ranked if b["score"] >= TEXT_THRESHOLD][:max_per_text]
-    out = {"text": text, "match": "words" if good else "none", "candidates": good}
+    # Generic words alone never make a match (ADR-070).
+    good = [b for b in ranked if b["score"] >= TEXT_THRESHOLD and b.get("distinctive")]
+    verdict = _verdict(good, True) if good else "none"
+    if verdict == "none":
+        good = []
+    out = {"text": text, "match": verdict, "candidates": good[:1] if verdict == "confident" else good[:max_per_text]}
     if not good:
         out["note"] = f"no confident match among {len(ranked)} candidate(s)"
     return out
@@ -265,7 +302,7 @@ def _render_candidate(b: dict) -> str:
 
 
 def _strip_internal(b: dict) -> dict:
-    return {k: v for k, v in b.items() if k not in ("resolved", "updated")}
+    return {k: v for k, v in b.items() if k not in ("resolved", "updated", "distinctive")}
 
 
 def register(mcp, resolver: InstanceResolver):
