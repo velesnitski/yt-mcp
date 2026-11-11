@@ -9,6 +9,64 @@ _AGILE_URL_RE = re.compile(r"/agiles/([\d-]+)")
 _BOARD_ID_RE = re.compile(r"^\d+-\d+$")
 
 
+_FIELDS_SELECTOR = "field(name),canBeEmpty,bundle(values(name,archived))"
+# Conditional fields (ADR-067): a field shown only when another field has
+# one of `values` (or is empty, with showForNullValue).
+_CONDITION_SELECTOR = ",condition(field(field(name)),values(name),showForNullValue)"
+
+
+def _condition(project_field: dict) -> tuple[str, list[str], bool] | None:
+    """(controlling field, values that show this field, shown when empty)."""
+    cond = project_field.get("condition") or {}
+    controller = ((cond.get("field") or {}).get("field") or {}).get("name") or ""
+    if not controller:
+        return None
+    values = [(v.get("name") or "") for v in cond.get("values") or [] if v.get("name")]
+    return controller, values, bool(cond.get("showForNullValue"))
+
+
+def _condition_label(cond: tuple[str, list[str], bool]) -> str:
+    controller, values, show_null = cond
+    alts = [" or ".join(values)] if values else []
+    if show_null:
+        alts.append("empty")
+    return f"{controller} = {' or '.join(alts) or '?'}"
+
+
+def _marker(required: bool, cond) -> str:
+    if cond:
+        kind = "required" if required else "only"
+        return f" **({kind} when {_condition_label(cond)})**"
+    return " **(required)**" if required else ""
+
+
+def _parse_when(when: str) -> dict[str, str]:
+    """`"Type=Bug; Product=Alpha"` → {"type": "bug", "product": "alpha"}."""
+    out: dict[str, str] = {}
+    for part in (when or "").split(";"):
+        if not part.strip():
+            continue
+        key, eq, value = part.partition("=")
+        if not eq or not key.strip():
+            raise ValueError(
+                f"`when` takes Field=Value pairs separated by ';' (got {part.strip()!r}).")
+        out[key.strip().lower()] = value.strip().lower()
+    return out
+
+
+def _condition_met(cond, given: dict[str, str]) -> bool:
+    """True unless `given` names the controlling field with a value that hides
+    this one. A controlling field the caller did not mention is unknown, so
+    the field is kept."""
+    controller, values, show_null = cond
+    if controller.lower() not in given:
+        return True
+    value = given[controller.lower()]
+    if not value:
+        return show_null
+    return value in (v.lower() for v in values)
+
+
 def register(mcp, resolver: InstanceResolver):
 
     @mcp.tool(annotations=ToolAnnotations(
@@ -142,14 +200,20 @@ def register(mcp, resolver: InstanceResolver):
     @mcp.tool(annotations=ToolAnnotations(
         readOnlyHint=True, destructiveHint=False,
         idempotentHint=True, openWorldHint=True))
-    async def get_project_fields(project: str, instance: str = "") -> str:
+    async def get_project_fields(project: str, instance: str = "", when: str = "") -> str:
         """List custom fields for a project with required status and available values.
 
         Use this before create_issue to discover required fields and valid values.
+        A conditional field (shown only for some values of another field) is
+        labelled with its condition, e.g. `(required when Type = Bug)`: it
+        cannot be set on an issue that does not meet it.
 
         Args:
             project: Project short name
             instance: YouTrack instance (optional)
+            when: Values the new issue will have, e.g. "Type=Tech task" or
+                "Type=Bug; Product=Alpha". Fields whose condition these values
+                do not meet are left out, so the list is exactly what to set.
         """
         client = resolver.resolve(instance)
         project_id = await client.resolve_project_id(project)
@@ -162,13 +226,13 @@ def register(mcp, resolver: InstanceResolver):
             f"/api/projects/{project_id}/customFields",
         ):
             try:
-                fields_data = await client.get(
-                    endpoint,
-                    params={
-                        "fields": "field(name),canBeEmpty,"
-                        "bundle(values(name,archived))",
-                    },
-                )
+                try:
+                    fields_data = await client.get(
+                        endpoint, params={"fields": _FIELDS_SELECTOR + _CONDITION_SELECTOR})
+                except ValueError:
+                    # Servers without conditional fields reject the
+                    # selector; the plain list is still worth having.
+                    fields_data = await client.get(endpoint, params={"fields": _FIELDS_SELECTOR})
                 if fields_data:
                     break
             except (ValueError, KeyError):
@@ -215,12 +279,22 @@ def register(mcp, resolver: InstanceResolver):
                 pass
             return f"Cannot fetch custom fields for project '{project}'."
 
+        try:
+            given = _parse_when(when)
+        except ValueError as e:
+            return str(e)
+
         lines = [f"## Custom fields for {project}"]
+        hidden: list[str] = []
         for f in fields_data:
             field_info = f.get("field") or {}
             name = (field_info.get("name") or "?")
             required = not f.get("canBeEmpty", True)
-            marker = " **(required)**" if required else ""
+            cond = _condition(f)
+            if cond and given and not _condition_met(cond, given):
+                hidden.append(name)
+                continue
+            marker = _marker(required, cond)
 
             bundle = f.get("bundle")
             if bundle and bundle.get("values"):
@@ -234,6 +308,9 @@ def register(mcp, resolver: InstanceResolver):
             else:
                 lines.append(f"- **{name}**{marker}")
 
+        if hidden:
+            lines.append(
+                f"\n_Not applicable when {when.strip()} (cannot be set): {', '.join(hidden)}_")
         return "\n".join(lines)
 
     @mcp.tool(annotations=ToolAnnotations(
