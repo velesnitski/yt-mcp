@@ -353,6 +353,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `YOUTRACK_LOG_FILE` | No | Error log path (default: `~/.yt-mcp/yt-mcp.log`) |
 | `YOUTRACK_ANALYTICS_FILE` | No | Analytics log path (default: `~/.yt-mcp/analytics.log`) |
 | `YOUTRACK_COMPACT` | No | Set to `1` to strip markdown from tool responses (~60% token savings) |
+| `YOUTRACK_LOG_LEVEL` | No | Headless mode only: stderr log level (default: `WARNING`) |
 | `YOUTRACK_MAX_RESPONSE_CHARS` | No | Cut any text reply longer than this at a line break, with a marker saying how to narrow the request (default: `60000`; `0` disables). JSON replies are never cut |
 
 ## Verify the server works
@@ -587,6 +588,36 @@ Put it behind a reverse proxy (Caddy, nginx, Cloudflare Tunnel) for HTTPS.
 Start a conversation in claude.ai and ask about your YouTrack issues. All 84 tools are available.
 
 > Without `YOUTRACK_OAUTH_URL`, OAuth is disabled and the server works in standard mode (stdio/SSE without auth) — no changes to existing setups.
+
+## Headless mode (scripts and schedulers)
+
+The same command runs any tool once from the command line, for cron,
+launchd, CI jobs or another bot. It calls the MCP server in-process, so
+the tools, their output and the `YOUTRACK_READ_ONLY` / `DISABLED_TOOLS` /
+`YOUTRACK_TOOLSET` gating are exactly what an MCP client gets.
+
+```bash
+yt-mcp tools                                   # what is available (--json: full schemas)
+yt-mcp run get_issue issue_id=DEMO-42
+yt-mcp run search_issues query="project: DEMO #Unresolved" max_results=20 --json
+yt-mcp run get_team_pulse board_name="Alpha Board" --timeout 2m
+echo '{"query": "project: DEMO #Unresolved"}' | yt-mcp run count_issues --args -
+```
+
+- Arguments are `key=value`, typed by the tool's schema; unknown keys are
+  refused with the list of valid ones. `--args` takes a JSON object
+  (or `-` for stdin); pairs override it. Flags may go anywhere.
+- `--json` prints one object: `tool`, `args`, `ok`, `text`.
+- Exit codes: `0` success, `1` the tool reported an error or timed out,
+  `2` a usage or configuration error (unknown tool, bad argument, missing
+  URL or token).
+- Logs go to stderr at `WARNING` by default (`YOUTRACK_LOG_LEVEL=INFO`
+  to see more), so stdout carries only the result. `--timeout` (default
+  `5m`) bounds the call.
+- For scheduled reads, set `YOUTRACK_READ_ONLY=1`: write tools then do not
+  exist at all.
+- Installed with `uvx`, prefix the command:
+  `uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp run …`.
 
 ## Using with n8n, Langchain, and other HTTP clients
 

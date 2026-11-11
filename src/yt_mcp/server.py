@@ -5,8 +5,9 @@ build_server(), called from main() AFTER argument parsing — so
 `yt-mcp --version` answers instantly and silently, and tests can import the
 module without environment setup.
 """
+import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from mcp.server.fastmcp import FastMCP
 from yt_mcp import __version__
@@ -27,11 +28,18 @@ class ServerBundle:
     """Everything main() needs from construction, without module globals."""
     mcp: FastMCP
     oauth_provider: object | None
+    clients: dict = field(default_factory=dict)
+
+    async def aclose(self) -> None:
+        """Close every client's HTTP pool — for one-shot runs (headless);
+        a transport keeps them for the life of the process."""
+        for c in self.clients.values():
+            await c.aclose()
 
 
-def build_server() -> ServerBundle:
+def build_server(stderr_level: int = logging.INFO) -> ServerBundle:
     """Construct the fully-wired MCP server (logging, Sentry, clients, tools)."""
-    logger = setup_logging()
+    logger = setup_logging(stderr_level)
     setup_sentry()
     logger.info("Starting yt-mcp", extra={"instance": INSTANCE_ID})
 
@@ -77,11 +85,18 @@ def build_server() -> ServerBundle:
     # (read_only, disabled_tools) — they are replicated across instances.
     server_config = next(iter(configs.values()))
     register_all(mcp, resolver, server_config)
-    return ServerBundle(mcp=mcp, oauth_provider=oauth_provider)
+    return ServerBundle(mcp=mcp, oauth_provider=oauth_provider, clients=clients)
 
 
 def main():
     import argparse
+    import sys
+
+    # Headless mode (ADR-065): `yt-mcp run <tool>` / `yt-mcp tools` call
+    # the server in-process and exit; dispatch before the transport flags.
+    from yt_mcp.headless import is_headless, run_headless
+    if is_headless(sys.argv[1:]):
+        sys.exit(run_headless(sys.argv[1:]))
 
     parser = argparse.ArgumentParser(description="YouTrack MCP server")
     parser.add_argument(

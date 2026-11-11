@@ -97,6 +97,10 @@ class YouTrackClient:
             await asyncio.sleep(delay)
         return resp  # unreachable; keeps type checkers content
 
+    async def aclose(self) -> None:
+        """Close the HTTP pool (one-shot callers; servers keep it open)."""
+        await self._client.aclose()
+
     @property
     def base_url(self) -> str:
         """Configured YouTrack base URL (e.g. https://example.youtrack.cloud).

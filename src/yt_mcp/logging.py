@@ -97,13 +97,18 @@ class AnalyticsFormatter(logging.Formatter):
         return json.dumps(entry, ensure_ascii=False)
 
 
-def setup_logging() -> logging.Logger:
-    """Configure error logging. Call once at startup."""
+def setup_logging(stderr_level: int = logging.INFO) -> logging.Logger:
+    """Configure error logging. Call once at startup.
+
+    `stderr_level` lets headless mode keep stderr to warnings (ADR-065); the
+    log file still records INFO either way.
+    """
     logger = logging.getLogger("yt_mcp")
     logger.setLevel(logging.INFO)
 
     # Stderr handler (always on)
     stderr_handler = logging.StreamHandler(sys.stderr)
+    stderr_handler.setLevel(stderr_level)
     stderr_handler.setFormatter(JSONFormatter())
     logger.addHandler(stderr_handler)
 
