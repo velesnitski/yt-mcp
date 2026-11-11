@@ -231,7 +231,7 @@ different conversation than what pulse provides.
   unfiltered (the existing `stale_triaged` insight surfaces them as a
   flag rather than dropping silently).
 - `max_overdue_days: int = 30` — drop items from all forward sections
-  whose `Deadline ☠️` is past by more than this window.
+  whose `Deadline ⏰` is past by more than this window.
 
 **Safety:** missing `updated` field is treated as active (surface
 ambiguous data rather than silently drop); items without a deadline are

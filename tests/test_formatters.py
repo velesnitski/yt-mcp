@@ -269,8 +269,8 @@ class TestBuildStateClause:
 
     def test_state_with_special_chars_wrapped(self):
         # Emoji / unicode / punctuation must all be inside the braces
-        out = build_state_clause(["Deadline ☠️"])
-        assert out == "State: {Deadline ☠️}"
+        out = build_state_clause(["Deadline ⏰"])
+        assert out == "State: {Deadline ⏰}"
 
 
 # --- build_absolute_date_clause: portable across YT versions ----

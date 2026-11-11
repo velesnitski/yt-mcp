@@ -95,9 +95,9 @@ class TestCustomField:
     """Q9: exact field names, including emoji-decorated ones."""
 
     def test_emoji_name_matched_exactly(self):
-        issue = {"customFields": [{"name": "Evaluation time 🕙",
+        issue = {"customFields": [{"name": "Evaluation time ⏳",
                                    "value": {"name": "3d"}}]}
-        assert contract.custom_field(issue, "Evaluation time 🕙") == "3d"
+        assert contract.custom_field(issue, "Evaluation time ⏳") == "3d"
         assert contract.custom_field(issue, "Evaluation time") is None
 
     def test_multi_value_joined(self):

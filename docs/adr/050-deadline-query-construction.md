@@ -9,7 +9,7 @@ the `due date:` clause, so it had fallen back to `updated:` alone. Pulling
 that thread found two separate defects.
 
 **There is no `due date:` search attribute.** The deadline is a per-project
-custom field whose name varies by project — decorated (`Deadline ☠️`),
+custom field whose name varies by project — decorated (`Deadline ⏰`),
 plain (`Due Date`), or localized. Querying the literal attribute returns a
 parse error, so the range half of the scope was never applied. Anything
 whose deadline fell inside the quarter but which had not been touched

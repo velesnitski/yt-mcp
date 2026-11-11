@@ -8,7 +8,7 @@ from typing import Any
 _DEADLINE_FIELD_PATTERNS = (
     # Permissive separator + permissive trailing: handles "Due Date",
     # "due-date", "due_date", camelCase "dueDate", and trailing decorations
-    # like "Deadline ☠️" or "Due Date (soft)". The trailing group requires a
+    # like "Deadline ⏰" or "Due Date (soft)". The trailing group requires a
     # non-word boundary so `deadlines` (plural) and `dueDate2` don't match.
     re.compile(r"^(deadline|due[\W_]?date|due|completion[\W_]?date)([\W_]|$)", re.IGNORECASE),
     re.compile(r"^(дедлайн|срок|до|дата[\W_]?выполнения)([\W_]|$)", re.IGNORECASE),

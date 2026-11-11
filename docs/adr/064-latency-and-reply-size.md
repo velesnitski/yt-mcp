@@ -13,7 +13,7 @@ percentile 300–500 ms. The waiting came from six other places.
    This made parallel writes unsafe to add.
 3. **Tag-pinned launches.** A `git+…@vX.Y.Z` spec makes uv resolve the tag
    against GitHub on every spawn: 1.7 s on each start, against 0.3 s for a
-   full commit SHA (measured). The server had started over 2,600 times.
+   full commit SHA (measured). Every session start pays it.
 4. **Very large replies.** `get_issues` returned up to 87K characters and
    `get_article` up to 78K. The model reads all of it, which costs more time
    than the call, and clients reject replies over their own output limit.

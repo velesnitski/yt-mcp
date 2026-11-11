@@ -186,10 +186,10 @@ class TestLatestStateChange:
 
 def _make_issue(**kw) -> dict:
     cfs = []
-    for fname in ("Severity", "Type", "Priority", "Deadline ☠️"):
+    for fname in ("Severity", "Type", "Priority", "Deadline ⏰"):
         val = kw.pop(f"cf_{fname.split()[0].lower()}", None)
         if val is not None:
-            if fname == "Deadline ☠️":
+            if fname == "Deadline ⏰":
                 cfs.append({"name": fname, "value": {"presentation": val}})
             else:
                 cfs.append({"name": fname, "value": {"name": val}})

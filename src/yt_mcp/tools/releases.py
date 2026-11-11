@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 from mcp.types import ToolAnnotations
 from yt_mcp.formatters import compact_lines
 from yt_mcp.resolver import InstanceResolver
+from yt_mcp.tools.deadlines.parser import _is_deadline_field
 
 _RELEASE_RE = re.compile(r"^(\[[^\]]*\]\s*)?(rc|release)[\s_.\-]*v?(\d|lite)", re.IGNORECASE)
 _VERSION_RE = re.compile(r"\d+(?:\.\d+)+")
@@ -45,8 +46,11 @@ def _cf(issue: dict, name: str):
 
 
 def _deadline_ms(issue: dict):
+    # The deadline field's name differs per instance and project ("Deadline",
+    # "Due Date", a decorated variant): match it the way every other tool
+    # does (ADR-066), never by one literal name.
     for c in issue.get("customFields", []) or []:
-        if c.get("name") == "Deadline ☠️" and isinstance(c.get("value"), (int, float)):
+        if _is_deadline_field(c.get("name") or "") and isinstance(c.get("value"), (int, float)):
             return c["value"]
     return None
 

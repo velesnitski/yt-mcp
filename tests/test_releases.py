@@ -13,13 +13,14 @@ def _ms(y, m, d):
     return int(datetime(y, m, d, tzinfo=timezone.utc).timestamp() * 1000)
 
 
-def _ticket(iid, summary, state="In Progress", resolved=None, deadline=None, assignee="Alice A"):
+def _ticket(iid, summary, state="In Progress", resolved=None, deadline=None, assignee="Alice A",
+            deadline_field="Deadline ⏰"):
     cfs = [
         {"name": "State", "value": {"name": state}},
         {"name": "Assignee", "value": [{"name": assignee}]},
     ]
     if deadline:
-        cfs.append({"name": "Deadline ☠️", "value": deadline})
+        cfs.append({"name": deadline_field, "value": deadline})
     return {
         "idReadable": iid, "summary": summary, "resolved": resolved,
         "updated": _ms(2026, 7, 27), "customFields": cfs,
@@ -121,3 +122,20 @@ class TestCalendar:
         ])
         out = await fn(projects="PROJ")
         assert "PROJ-1" in out and "OPS-1" not in out
+
+
+class TestDeadlineFieldName:
+    """ADR-066: the deadline is found by the shared field matcher, so an
+    instance whose field is plain `Deadline` or `Due Date` still gets ETAs."""
+
+    def test_any_deadline_style_name_is_read(self):
+        from yt_mcp.tools.releases import _deadline_ms
+        for name in ("Deadline", "Due Date", "Deadline ⏰", "due date (soft)"):
+            assert _deadline_ms(_ticket("A-1", "Release 1.0", deadline=123,
+                                        deadline_field=name)) == 123, name
+
+    def test_other_date_fields_are_not_mistaken_for_the_deadline(self):
+        from yt_mcp.tools.releases import _deadline_ms
+        for name in ("Start date", "Created", "Deadlines missed"):
+            assert _deadline_ms(_ticket("A-1", "Release 1.0", deadline=123,
+                                        deadline_field=name)) is None, name

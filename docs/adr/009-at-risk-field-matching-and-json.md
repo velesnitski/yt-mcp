@@ -18,9 +18,9 @@ elif cf_name in ("spent time", "spent"):
 Exact-match on the lowercased field name. But real projects decorate
 these fields:
 
-- Deadline field is `Deadline ☠️` → lowercases to `deadline ☠️` ≠ `deadline`
-- Estimate is `Evaluation time 🕙`
-- Spent is `Spent time 🚴🏻‍♂️`
+- Deadline field is `Deadline ⏰` → lowercases to `deadline ⏰` ≠ `deadline`
+- Estimate is `Evaluation time ⏳`
+- Spent is `Spent time ⌛`
 
 None matched. Consequences, all from one root cause:
 
@@ -40,7 +40,7 @@ match a trailing emoji/space while rejecting partial words.
 
 ### 1. Match deadline/estimate/spent by pattern, not literal
 
-- Reuse `_is_deadline_field` (handles `Deadline ☠️`, `Due Date`, camelCase,
+- Reuse `_is_deadline_field` (handles `Deadline ⏰`, `Due Date`, camelCase,
   Russian variants).
 - Add sibling matchers `_is_estimate_field` / `_is_spent_field` in
   `monitoring.py` with the same boundary discipline. Estimate covers
@@ -97,12 +97,12 @@ drift.
 `get_at_risk_issues(project=..., category="overdue", format="json")` is now
 exactly the backend a daily deadline bot should call — the very use case
 that surfaced the bug. Previously such a bot would have had to bypass the
-tool and hand-roll a `{Deadline ☠️}: … .. <today>` query per project,
+tool and hand-roll a `{Deadline ⏰}: … .. <today>` query per project,
 guessing the field name (and eating 400s, as observed).
 
 ## Alternatives considered
 
-- **Just add `Deadline ☠️` to the literal list.** Fixes one project, breaks
+- **Just add `Deadline ⏰` to the literal list.** Fixes one project, breaks
   on the next decoration. Pattern matching is the general fix and the
   helper already existed.
 - **Parse `presentation` for period minutes.** Rejected — 1d is 8h or 24h

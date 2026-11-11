@@ -341,7 +341,7 @@ def register(mcp, resolver: InstanceResolver):
             summary: Issue title
             description: Issue description (markdown)
             product: Product custom field (optional)
-            command: YouTrack command for custom fields (e.g. 'Type Task Subsystem {Client Panel}')
+            command: YouTrack command for custom fields (e.g. 'Type Task Subsystem {Admin Console}')
             instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)

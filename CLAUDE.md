@@ -77,7 +77,7 @@ parser rejects `{braces}`; braces are input-only grouping, ADR-019):
 1. Try full command as one call (braces stripped)
 2. On failure: split per-field using the project's REAL field names as
    boundaries (`_split_command_with_field_names`, ADR-021) — handles
-   multi-word/emoji names like `Evaluation time 🕙`; regex split is the
+   multi-word/emoji names like `Evaluation time ⏳`; regex split is the
    fallback when the field list is unavailable
 3. On split failures: rejoin failed parts and retry as single command
 4. Product is always a separate command call

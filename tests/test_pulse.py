@@ -49,10 +49,10 @@ DAY_MS = 86400 * 1000
 def _issue(**kw) -> dict:
     """Build a minimal issue dict from kwargs."""
     cfs = []
-    for fname in ("Severity", "Type", "Priority", "Assignee", "Deadline ☠️"):
+    for fname in ("Severity", "Type", "Priority", "Assignee", "Deadline ⏰"):
         val = kw.pop(f"cf_{fname.split()[0].lower()}", None)
         if val is not None:
-            if fname == "Deadline ☠️":
+            if fname == "Deadline ⏰":
                 cfs.append({"name": fname, "value": {"presentation": val}})
             elif fname == "Assignee":
                 cfs.append({"name": fname, "value": {"login": val.lower().replace(" ", "."), "name": val}})

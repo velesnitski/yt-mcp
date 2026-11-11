@@ -12,11 +12,11 @@ the change a **regression**. YouTrack's *command* parser (`/api/commands`):
 - **Rejects braces in values**, for multi-word *and* single-word, every field
   and project:
   - `Status {New Employee}` → 400 `Status expected: {New Employee}`
-  - `Subsystem {Client Panel}` → 400
+  - `Subsystem {Admin Console}` → 400
   - `Priority {High}` → 400
 - **Accepts bare values and matches enum values greedily**:
   - `Status New Employee` → ✅ sets "New Employee"
-  - `Subsystem Client Panel` → ✅
+  - `Subsystem Admin Console` → ✅
   - `Priority High` → ✅
 
 Braces are **search-query** syntax (`State: {In Progress}` in a *query*), not
@@ -26,7 +26,7 @@ in the split (emitting bare, which works); ADR-016 made it emit braces (which
 string — they never saw YT reject braces — and the created issue "verified" only because
 it already carried that project's default Status.
 
-Discovered while setting a Period estimation (`Evaluation time 🕙 3d`), where
+Discovered while setting a Period estimation (`Evaluation time ⏳ 3d`), where
 every braced form failed.
 
 ## Decision
@@ -40,8 +40,8 @@ every braced form failed.
   guaranteed-400ing on the braces.
 - **Braces stay an INPUT convention.** Callers still wrap a multi-word value in
   `{…}` so `_CMD_FIELD_RE` captures it as one group (otherwise the regex would
-  split `Client Panel` and drop `Panel`); the tool strips them before sending.
-  The docstring example (`Type Task Subsystem {Client Panel}`) is therefore
+  split `Admin Console` and drop `Panel`); the tool strips them before sending.
+  The docstring example (`Type Task Subsystem {Admin Console}`) is therefore
   still correct.
 
 `update_issue`, `add_issue_link`, and bulk already used bare commands; the
@@ -62,7 +62,7 @@ brace-wrapping in pulse/discovery/dashboard/impact is all in *search queries*
 
 ### Still open (not a regression, documented)
 
-The split cannot parse a multi-word/emoji field **name** (`Evaluation time 🕙`
-splits into `Evaluation time` + `🕙 3d`). Such fields only set via the
+The split cannot parse a multi-word/emoji field **name** (`Evaluation time ⏳`
+splits into `Evaluation time` + `⏳ 3d`). Such fields only set via the
 whole-command path; if that path fails and the split runs, they are dropped.
 A boundary-aware split would need the project's field list. Deferred.

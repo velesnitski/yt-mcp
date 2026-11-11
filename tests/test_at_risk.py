@@ -2,8 +2,8 @@
 
 The core bug these cover: deadline/estimate/spent fields were matched by
 exact lowercased literal (`cf_name in ('deadline','due date','due')`), so
-real decorated names like `Deadline ☠️` / `Evaluation time 🕙` /
-`Spent time 🚴🏻‍♂️` were never recognized — Overdue was missed entirely
+real decorated names like `Deadline ⏰` / `Evaluation time ⏳` /
+`Spent time ⌛` were never recognized — Overdue was missed entirely
 and Unestimated was inflated.
 """
 
@@ -38,13 +38,13 @@ def _ms_days_from_now(days: float) -> int:
 class TestEstimateFieldMatcher:
     @pytest.mark.parametrize("name", [
         "Estimate", "Estimation", "Dev Estimate", "Dev Estimation",
-        "Evaluation time 🕙", "Evaluation time", "Total Estimate",
+        "Evaluation time ⏳", "Evaluation time", "Total Estimate",
     ])
     def test_matches(self, name):
         assert _is_estimate_field(name) is True
 
     @pytest.mark.parametrize("name", [
-        "Estimated", "Estimator", "Spent time 🚴🏻‍♂️", "State", "", "Deadline",
+        "Estimated", "Estimator", "Spent time ⌛", "State", "", "Deadline",
     ])
     def test_rejects(self, name):
         assert _is_estimate_field(name) is False
@@ -52,13 +52,13 @@ class TestEstimateFieldMatcher:
 
 class TestSpentFieldMatcher:
     @pytest.mark.parametrize("name", [
-        "Spent time 🚴🏻‍♂️", "Spent time", "Spent", "Time Spent", "Logged time",
+        "Spent time ⌛", "Spent time", "Spent", "Time Spent", "Logged time",
     ])
     def test_matches(self, name):
         assert _is_spent_field(name) is True
 
     @pytest.mark.parametrize("name", [
-        "Spential", "Evaluation time 🕙", "Estimate", "",
+        "Spential", "Evaluation time ⏳", "Estimate", "",
     ])
     def test_rejects(self, name):
         assert _is_spent_field(name) is False
@@ -131,15 +131,15 @@ def _issue(**kw) -> dict:
 
 
 def _deadline_cf(epoch_ms):
-    return {"name": "Deadline ☠️", "value": epoch_ms}
+    return {"name": "Deadline ⏰", "value": epoch_ms}
 
 
 def _est_cf(minutes):
-    return {"name": "Evaluation time 🕙", "value": {"minutes": minutes, "presentation": "x"}}
+    return {"name": "Evaluation time ⏳", "value": {"minutes": minutes, "presentation": "x"}}
 
 
 def _spent_cf(minutes):
-    return {"name": "Spent time 🚴🏻‍♂️", "value": {"minutes": minutes, "presentation": "x"}}
+    return {"name": "Spent time ⌛", "value": {"minutes": minutes, "presentation": "x"}}
 
 
 def _make_mcp(issues: list[dict]):
@@ -159,7 +159,7 @@ def _fn(mcp, name):
 class TestDecoratedDeadlineDetected:
     @pytest.mark.asyncio
     async def test_overdue_with_emoji_field(self):
-        # Deadline 10 days in the past via the decorated `Deadline ☠️` field.
+        # Deadline 10 days in the past via the decorated `Deadline ⏰` field.
         issue = _issue(id="PROJ-1", state="In Progress",
                        custom_fields=[_deadline_cf(_ms_days_from_now(-10))])
         mcp, _ = _make_mcp([issue])

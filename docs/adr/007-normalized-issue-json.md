@@ -39,7 +39,7 @@ returns a normalized dict via a new shared helper:
   "custom_fields": {                    # dict, not the awkward list of {name,value} pairs
     "Severity": "Major",
     "Type": "Bug",
-    "Deadline ☠️": "2026-05-30",
+    "Deadline ⏰": "2026-05-30",
     "Subsystems": ["API", "Auth"],      # list-valued fields collapsed to list-of-strings
   },
   "links": [

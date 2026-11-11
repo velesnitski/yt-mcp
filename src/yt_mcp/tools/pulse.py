@@ -109,7 +109,7 @@ def _deadline_bonus(deadline_ms: int | None, now_ms: int) -> float:
 
 
 def _extract_deadline_ms(issue: dict) -> int | None:
-    """Pull the Deadline ☠️ / Due Date value as a millis timestamp."""
+    """Pull the Deadline ⏰ / Due Date value as a millis timestamp."""
     from yt_mcp.tools.deadlines.parser import _is_deadline_field, _extract_deadline_ts
     for cf in issue.get("customFields", []):
         if _is_deadline_field((cf.get("name") or "")):

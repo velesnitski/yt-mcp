@@ -7,10 +7,10 @@ class TestCommandFieldRegex:
     """Test the regex that splits compound commands into field-value pairs."""
 
     def test_single_braced_value(self):
-        matches = list(_CMD_FIELD_RE.finditer("Subsystem {Client Panel}"))
+        matches = list(_CMD_FIELD_RE.finditer("Subsystem {Admin Console}"))
         assert len(matches) == 1
         assert matches[0].group(1) == "Subsystem"
-        assert matches[0].group(2) == "Client Panel"
+        assert matches[0].group(2) == "Admin Console"
 
     def test_single_word_value(self):
         matches = list(_CMD_FIELD_RE.finditer("Type Bug"))
@@ -19,17 +19,17 @@ class TestCommandFieldRegex:
         assert matches[0].group(4) == "Bug"
 
     def test_multiple_fields(self):
-        matches = list(_CMD_FIELD_RE.finditer("Type Bug Subsystem {Client Panel}"))
+        matches = list(_CMD_FIELD_RE.finditer("Type Bug Subsystem {Admin Console}"))
         assert len(matches) == 2
         # First: Type Bug (simple)
         assert (matches[0].group(3), matches[0].group(4)) == ("Type", "Bug")
-        # Second: Subsystem {Client Panel} (braced)
-        assert (matches[1].group(1), matches[1].group(2)) == ("Subsystem", "Client Panel")
+        # Second: Subsystem {Admin Console} (braced)
+        assert (matches[1].group(1), matches[1].group(2)) == ("Subsystem", "Admin Console")
 
     def test_braced_then_simple(self):
-        matches = list(_CMD_FIELD_RE.finditer("Subsystem {Client Panel} Priority High"))
+        matches = list(_CMD_FIELD_RE.finditer("Subsystem {Admin Console} Priority High"))
         assert len(matches) == 2
-        assert matches[0].group(2) == "Client Panel"
+        assert matches[0].group(2) == "Admin Console"
         assert matches[1].group(4) == "High"
 
     def test_empty_string(self):
@@ -56,14 +56,14 @@ class TestCommandKeywords:
 
     def test_keyword_filtering(self):
         """Simulate the filtering logic used in create_issue."""
-        command = "Type Bug tag urgent Subsystem {Client Panel}"
+        command = "Type Bug tag urgent Subsystem {Admin Console}"
         field_commands = []
         for m in _CMD_FIELD_RE.finditer(command):
             name = m.group(1) or m.group(3)
             value = m.group(2) or m.group(4)
             if name.lower() not in _CMD_KEYWORDS:
                 field_commands.append(f"{name} {value}")
-        assert field_commands == ["Type Bug", "Subsystem Client Panel"]
+        assert field_commands == ["Type Bug", "Subsystem Admin Console"]
 
 
 # --- normalize_issue: JSON-friendly issue shape ---
@@ -91,7 +91,7 @@ def _yt_issue(**kw) -> dict:
         "customFields": kw.get("customFields", [
             {"name": "Severity", "value": {"name": "Major"}},
             {"name": "Type", "value": {"name": "Bug"}},
-            {"name": "Deadline ☠️", "value": {"presentation": "2026-05-30"}},
+            {"name": "Deadline ⏰", "value": {"presentation": "2026-05-30"}},
         ]),
         "links": kw.get("links", []),
     }
@@ -124,7 +124,7 @@ class TestNormalizeIssueBasics:
         assert out["custom_fields"]["Severity"] == "Major"
         assert out["custom_fields"]["Type"] == "Bug"
         # Deadline uses `presentation` not `name` — handler falls through
-        assert out["custom_fields"]["Deadline ☠️"] == "2026-05-30"
+        assert out["custom_fields"]["Deadline ⏰"] == "2026-05-30"
 
     def test_custom_fields_list_value(self):
         issue = _yt_issue(customFields=[
@@ -241,7 +241,7 @@ class TestNormalizeIssueJSONRoundtrip:
     def test_unicode_preserved_in_custom_field_names(self):
         out = normalize_issue(_yt_issue())
         s = json.dumps(out, indent=2, ensure_ascii=False)
-        assert "☠️" in s
+        assert "⏰" in s
 
 
 # --- get_issues batch tool: OR-query composition + ID parsing ---
@@ -458,7 +458,7 @@ class TestCreateIssueBareCommandValues:
         "Status {New Employee}",                       # single multi-word
         "Priority {High}",                             # braced single-word
         "Status {New Employee} Department DevOps",      # multi-word + bare
-        "Type {Product task} Subsystem {Client Panel}", # two multi-word
+        "Type {Product task} Subsystem {Admin Console}", # two multi-word
         "Assignee {Jane Q Public}",                    # multi-word person
     ])
     @pytest.mark.asyncio
@@ -698,22 +698,22 @@ class TestCreateIssueLowPermissionIntegration:
 # --- field-aware command split (multi-word / emoji field NAMES) ---------------
 #
 # The regex split assumes one-token field names; real projects have
-# "Evaluation time 🕙", "Dev Estimation", "Phase detected". The field-aware
+# "Evaluation time ⏳", "Dev Estimation", "Found in phase". The field-aware
 # split uses the project's actual field names as clause boundaries.
 from yt_mcp.tools.issues import _split_command_with_field_names
 
 
 class TestFieldAwareSplit:
     NAMES = ["State", "Type", "Product", "Dev Estimation", "QA Estimation",
-             "Evaluation time 🕙", "Phase detected", "Assignee"]
+             "Evaluation time ⏳", "Found in phase", "Assignee"]
 
     def test_emoji_and_multiword_names_stay_whole(self):
         out = _split_command_with_field_names(
-            "Dev Estimation 2d QA Estimation 1d Evaluation time 🕙 3d",
+            "Dev Estimation 2d QA Estimation 1d Evaluation time ⏳ 3d",
             self.NAMES,
         )
         assert out == ["Dev Estimation 2d", "QA Estimation 1d",
-                       "Evaluation time 🕙 3d"]
+                       "Evaluation time ⏳ 3d"]
 
     def test_braced_value_is_atomic_and_braces_stripped(self):
         out = _split_command_with_field_names(
@@ -764,8 +764,8 @@ class TestCreateIssueFieldAwareSplit:
                 if "Dev Estimation" in q and "Evaluation" in q:
                     raise ValueError("YouTrack query error (400): parse")
                 # a garbled emoji clause (name split off) also fails
-                if q.startswith("🕙"):
-                    raise ValueError("YouTrack query error (400): Unknown command: 🕙")
+                if q.startswith("⏳"):
+                    raise ValueError("YouTrack query error (400): Unknown command: ⏳")
                 return {}
             return {}
 
@@ -784,13 +784,13 @@ class TestCreateIssueFieldAwareSplit:
     @pytest.mark.asyncio
     async def test_emoji_field_name_survives_split(self):
         mcp, seen = self._make(
-            ["Dev Estimation", "QA Estimation", "Evaluation time 🕙", "State"])
+            ["Dev Estimation", "QA Estimation", "Evaluation time ⏳", "State"])
         out = await _get_tool_fn(mcp, "create_issue")(
             project="PROJ", summary="t",
-            command="Dev Estimation 2d Evaluation time 🕙 3d",
+            command="Dev Estimation 2d Evaluation time ⏳ 3d",
         )
-        assert "Evaluation time 🕙 3d" in seen      # intact clause
-        assert not any(q.startswith("🕙") for q in seen)  # never garbled
+        assert "Evaluation time ⏳ 3d" in seen      # intact clause
+        assert not any(q.startswith("⏳") for q in seen)  # never garbled
         assert "Could not set" not in out
 
     @pytest.mark.asyncio
@@ -798,7 +798,7 @@ class TestCreateIssueFieldAwareSplit:
         mcp, seen = self._make([])  # customFields returns nothing
         out = await _get_tool_fn(mcp, "create_issue")(
             project="PROJ", summary="t",
-            command="Dev Estimation 2d Evaluation time 🕙 3d",
+            command="Dev Estimation 2d Evaluation time ⏳ 3d",
         )
         assert "Created" in out  # still creates; split is best-effort
 

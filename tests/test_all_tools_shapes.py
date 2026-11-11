@@ -258,7 +258,7 @@ class TestPopulatedPayloads:
             {"name": "State", "value": {"name": "In Progress"}},
             {"name": "Priority", "value": {"name": "High"}},
             {"name": "Assignee", "value": {"name": "Alice A", "login": "alice_a"}},
-            {"name": "Deadline ☠️", "value": 1767830400000},
+            {"name": "Deadline ⏰", "value": 1767830400000},
             {"name": "Type", "value": {"name": "Bug"}},
         ],
         "comments": [

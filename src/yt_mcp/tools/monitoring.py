@@ -160,8 +160,8 @@ def _format_at_risk_line(
 
 
 # Estimate / spent-time field matchers. Same decorated-name problem as the
-# deadline field: real projects name these `Evaluation time 🕙` /
-# `Spent time 🚴🏻‍♂️` / `Dev Estimate`, none of which equal a bare
+# deadline field: real projects name these `Evaluation time ⏳` /
+# `Spent time ⌛` / `Dev Estimate`, none of which equal a bare
 # "estimate"/"spent" literal. The `([\W_]|$)` boundary lets a trailing
 # emoji or space match while still rejecting partial words ("Estimated").
 _ESTIMATE_FIELD_PATTERNS = (
@@ -488,8 +488,8 @@ def register(mcp, resolver: InstanceResolver):
         """Find at-risk issues: overdue, qa_skipped, stalled, forgotten, unestimated, over estimate, ancient.
 
         Deadline / estimate / spent-time / QA-required fields are matched by
-        name *pattern*, so decorated field names (`Deadline ☠️`,
-        `Evaluation time 🕙`, `Spent time 🚴🏻‍♂️`, `Dev Estimate`,
+        name *pattern*, so decorated field names (`Deadline ⏰`,
+        `Evaluation time ⏳`, `Spent time ⌛`, `Dev Estimate`,
         `QA Required`) are recognized — not just bare literals.
 
         QA-skip: when a project has a QA-gating field (e.g. `QA Required: Yes`),
@@ -599,8 +599,8 @@ def register(mcp, resolver: InstanceResolver):
 
             # Scan custom fields once for deadline and estimate data.
             # Field names are matched by PATTERN (not exact literal) so
-            # decorated names like `Deadline ☠️` / `Evaluation time 🕙` /
-            # `Spent time 🚴🏻‍♂️` are recognized. First non-zero estimate/
+            # decorated names like `Deadline ⏰` / `Evaluation time ⏳` /
+            # `Spent time ⌛` are recognized. First non-zero estimate/
             # spent field wins (deterministic when several exist).
             custom_fields = issue.get("customFields", [])
             estimate_minutes = 0

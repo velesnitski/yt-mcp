@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - `get_project_fields` — list custom fields with required status and valid values (use before `create_issue` to discover correct field names)
 - **Draft-based issue creation** — projects with required custom fields (Subsystem, Type, Product, etc.) now work via automatic draft → command → publish flow
-- **3-level command strategy** — full command as-is → split into individual fields → rejoin failed splits (handles emoji field names like `Evaluation time 🕙`)
+- **3-level command strategy** — full command as-is → split into individual fields → rejoin failed splits (handles emoji field names like `Evaluation time ⏳`)
 - **Graceful command failures** — unsettable fields reported with "Could not set" guidance instead of aborting
 - **Required fields info on publish failure** — fetches and displays all required fields with valid values
 - **GitHub Copilot** setup instructions (`.vscode/mcp.json`)

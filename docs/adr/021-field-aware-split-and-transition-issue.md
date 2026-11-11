@@ -6,8 +6,8 @@ Two gaps left open by ADR-019, both hit live:
 
 1. **The split fallback garbles multi-word / emoji field NAMES.**
    `_CMD_FIELD_RE` assumes a field name is one token. Real projects have
-   "Dev Estimation", "Phase detected", "Evaluation time 🕙" — the split
-   turned `Evaluation time 🕙 3d` into `Evaluation time` + `🕙 3d`
+   "Dev Estimation", "Found in phase", "Evaluation time ⏳" — the split
+   turned `Evaluation time ⏳ 3d` into `Evaluation time` + `⏳ 3d`
    (→ `400 Unknown command`), silently dropping the estimation whenever the
    whole-command attempt failed. This also made creates with many required
    fields fragile: the combined command doesn't parse (verified live), so
@@ -60,7 +60,7 @@ attempt fails) and caches it across the direct and draft paths.
 ## Live validation (ephemeral PROJ draft, deleted after)
 
 - Split with real PROJ field names: `Dev Estimation 2h · QA Estimation 1h ·
-  Evaluation time 🕙 3h · Type Product task` — all four clauses intact.
+  Evaluation time ⏳ 3h · Type Product task` — all four clauses intact.
 - Blocked path: the gate's own message surfaced verbatim (a rule naming the
   required field, e.g. "set <Field> before To Do"), current state and hint
   included.

@@ -17,7 +17,7 @@ YouTrack projects can have required custom fields (Type, Subsystem, Product, Pha
 ## Decision
 Use the draft-based approach with a 3-level command strategy:
 
-1. **Full command** — send the user's original command as-is (handles multi-word and emoji field names like `Evaluation time 🕙 1h`)
+1. **Full command** — send the user's original command as-is (handles multi-word and emoji field names like `Evaluation time ⏳ 1h`)
 2. **Split** — regex-split into individual field-value pairs (handles parser ambiguity like `Subsystem Frontend Type Task`)
 3. **Rejoin failed splits** — recombine failed split parts and retry (recovers incorrectly split multi-word fields)
 

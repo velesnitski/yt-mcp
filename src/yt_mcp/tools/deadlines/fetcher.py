@@ -192,7 +192,7 @@ async def resolve_deadline_field(client: Any, proj_clause: str) -> str | None:
     """Name of the deadline custom field in scope, or None if absent.
 
     There is no `due date:` search attribute — the deadline lives in a
-    per-project custom field whose name varies by project ("Deadline ☠️",
+    per-project custom field whose name varies by project ("Deadline ⏰",
     "Due Date", localized variants). Querying the literal `due date:`
     returns a parse error, so the caller has to learn the real name first.
 

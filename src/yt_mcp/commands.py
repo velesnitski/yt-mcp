@@ -15,7 +15,7 @@ value can be captured as one token); they never survive into anything sent
 to `/api/commands`.
 
 Field NAMES can themselves be multi-word and emoji-decorated ("Dev
-Estimation", "Evaluation time 🕙"), which no context-free regex can split
+Estimation", "Evaluation time ⏳"), which no context-free regex can split
 correctly — `split_command` uses the project's real field names as clause
 boundaries instead (ADR-021).
 """
@@ -86,8 +86,8 @@ def split_command(command: str, field_names: list[str]) -> list[str]:
     REAL field names as boundaries.
 
     Handles what the regex split cannot: multi-word and emoji field names
-    ("Evaluation time 🕙 3d" stays one clause instead of splitting into
-    "Evaluation time" + "🕙 3d"). A {braced} token is always a value, never a
+    ("Evaluation time ⏳ 3d" stays one clause instead of splitting into
+    "Evaluation time" + "⏳ 3d"). A {braced} token is always a value, never a
     field boundary, and braces never survive into the output.
 
     A field-name match only opens a NEW clause if the current clause already

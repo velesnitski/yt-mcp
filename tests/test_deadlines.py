@@ -60,9 +60,9 @@ class TestDeadlineFieldDetection:
 
     def test_trailing_decoration(self):
         """REGRESSION: real YouTrack field names sometimes carry trailing
-        decorations like emoji ('Deadline ☠️') or qualifiers ('Due Date (soft)').
+        decorations like emoji ('Deadline ⏰') or qualifiers ('Due Date (soft)').
         Previously the `$` anchor required nothing after the keyword."""
-        assert deadlines._is_deadline_field("Deadline ☠️")
+        assert deadlines._is_deadline_field("Deadline ⏰")
         assert deadlines._is_deadline_field("Due Date (soft)")
         assert deadlines._is_deadline_field("deadline_v2")
 
@@ -828,9 +828,9 @@ class TestResolveDeadlineField:
 
     async def test_finds_decorated_field_name(self):
         client = self._client([
-            {"customFields": [{"name": "State"}, {"name": "Deadline ☠️"}]},
+            {"customFields": [{"name": "State"}, {"name": "Deadline ⏰"}]},
         ])
-        assert await dfetch.resolve_deadline_field(client, "project: PROJ") == "Deadline ☠️"
+        assert await dfetch.resolve_deadline_field(client, "project: PROJ") == "Deadline ⏰"
 
     async def test_finds_plain_due_date(self):
         client = self._client([{"customFields": [{"name": "Due Date"}]}])
