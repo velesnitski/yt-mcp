@@ -5,8 +5,9 @@ import httpx
 from datetime import datetime, timezone
 
 from mcp.types import ToolAnnotations
+from yt_mcp import lookups
 from yt_mcp.resolver import InstanceResolver
-from yt_mcp.errors import YouTrackPermissionError
+from yt_mcp.errors import UserInputError, YouTrackPermissionError
 from yt_mcp.formatters import format_issue_list, format_issue_detail, _resolve_state, _resolve_assignee, _get_custom_field, parse_issue_id, compact_lines, normalize_issue, split_service_comments, clip_text
 from yt_mcp.commands import (
     CMD_FIELD_RE, CMD_KEYWORDS,
@@ -1013,6 +1014,21 @@ def register(mcp, resolver: InstanceResolver):
             instance: YouTrack instance (optional)
         """
         client = resolver.resolve(instance)
+        # The count endpoint returns the exact number without downloading
+        # the issues (ADR-068). It may still be counting, or be missing on
+        # an old server: then fall back to listing, capped at 500.
+        try:
+            exact = await lookups.count_issues(client, query)
+        except UserInputError as e:
+            # A bad query or a permission error is the caller's to fix; a
+            # 404 means a server without the endpoint, so list instead.
+            if "not found error (404)" not in str(e):
+                raise
+            exact = None
+        except (httpx.HTTPError, ValueError):
+            exact = None
+        if exact is not None:
+            return f"**{exact}** issues match query: `{query}`"
         data = await client.get(
             "/api/issues",
             params={

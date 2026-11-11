@@ -2,6 +2,7 @@ import asyncio
 
 from mcp.types import ToolAnnotations
 from yt_mcp.client import YouTrackClient
+from yt_mcp.fanout import READ_CONCURRENCY, bounded_map
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import _resolve_state, get_product, parse_issue_id, escape_query_value
 
@@ -16,45 +17,44 @@ def register(mcp, resolver: InstanceResolver):
         Returns {issue_id: {data, relation, source}} for all impacted issues.
         """
         visited: dict[str, dict] = {}
-        queue: list[tuple[str, int, str, str]] = [(root_id, 0, "root", "")]
-
-        while queue:
-            issue_id, current_depth, relation, source = queue.pop(0)
-
-            if issue_id in visited:
-                continue
-
-            # Fetch issue with links and product
-            data = await client.get(
-                f"/api/issues/{issue_id}",
-                params={
-                    "fields": "idReadable,summary,state(name),"
-                    "customFields(name,value(name)),"
-                    "links(direction,linkType(name),"
-                    "issues(idReadable,summary,state(name),"
-                    "customFields(name,value(name))))",
-                },
-            )
-
-            visited[issue_id] = {
-                "data": data,
-                "relation": relation,
-                "source": source,
-                "depth": current_depth,
-            }
-
-            if current_depth >= depth:
-                continue
-
-            # Follow links
-            for link in data.get("links", []):
-                link_type = (link.get("linkType") or {}).get("name", "?")
-                direction = link.get("direction", "?")
-                for linked in link.get("issues", []):
-                    linked_id = (linked.get("idReadable") or "")
-                    if linked_id and linked_id not in visited:
-                        rel = f"{link_type} ({direction})"
-                        queue.append((linked_id, current_depth + 1, rel, issue_id))
+        fields = ("idReadable,summary,state(name),"
+                  "customFields(name,value(name)),"
+                  "links(direction,linkType(name),"
+                  "issues(idReadable,summary,state(name),"
+                  "customFields(name,value(name))))")
+        # Breadth-first, one level at a time: a level's issues are fetched
+        # in parallel (ADR-068) and recorded in queue order, so `visited`
+        # holds the same issues in the same order as a one-by-one walk.
+        level: list[tuple[str, str, str]] = [(root_id, "root", "")]
+        current_depth = 0
+        while level:
+            batch: list[tuple[str, str, str]] = []
+            for item in level:
+                if item[0] not in visited and item[0] not in {b[0] for b in batch}:
+                    batch.append(item)
+            datas = await bounded_map(
+                lambda it: client.get(f"/api/issues/{it[0]}", params={"fields": fields}),
+                batch, limit=READ_CONCURRENCY)
+            next_level: list[tuple[str, str, str]] = []
+            for (issue_id, relation, source), data in zip(batch, datas):
+                visited[issue_id] = {
+                    "data": data,
+                    "relation": relation,
+                    "source": source,
+                    "depth": current_depth,
+                }
+                if current_depth >= depth:
+                    continue
+                for link in data.get("links", []):
+                    link_type = (link.get("linkType") or {}).get("name", "?")
+                    direction = link.get("direction", "?")
+                    for linked in link.get("issues", []):
+                        linked_id = (linked.get("idReadable") or "")
+                        if linked_id and linked_id not in visited:
+                            next_level.append(
+                                (linked_id, f"{link_type} ({direction})", issue_id))
+            level = next_level
+            current_depth += 1
 
         # Search for mentions and same-product issues in parallel
         root_product = get_product(visited[root_id]["data"])

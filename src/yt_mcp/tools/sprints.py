@@ -7,6 +7,7 @@ import httpx
 from mcp.types import ToolAnnotations
 from yt_mcp import contract
 from yt_mcp.errors import UserInputError
+from yt_mcp.fanout import bounded_map
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import compact_lines, _resolve_state
 
@@ -201,14 +202,17 @@ def register(mcp, resolver: InstanceResolver):
         sprint_display = sprint.get("name", sprint_name)
         command = f"Board {board_display} {sprint_display}"
 
-        succeeded = []
-        failed = []
-        for iid in ids:
+        async def _add(iid: str) -> str:
             try:
                 await client.execute_command(iid, command)
-                succeeded.append(iid)
+                return ""
             except (httpx.HTTPStatusError, ValueError) as e:
-                failed.append(f"{iid}: {e}")
+                return f"{iid}: {e}"
+
+        # Independent writes: bounded parallel, input order (ADR-068).
+        errs = await bounded_map(_add, ids)
+        succeeded = [iid for iid, err in zip(ids, errs) if not err]
+        failed = [err for err in errs if err]
 
         parts = [f"**Board:** {board_display} — **Sprint:** {sprint_display}"]
         if succeeded:

@@ -1,3 +1,4 @@
+import asyncio
 """deadline_scorecard tool — quarterly per-assignee compliance rollup."""
 
 from collections import Counter, defaultdict
@@ -59,7 +60,6 @@ def register(mcp, resolver: InstanceResolver):
             return str(e)
         start_ms = int(start_dt.timestamp() * 1000)
         end_ms = int(end_dt.timestamp() * 1000)
-        operator = await fetcher.get_operator_login(client)
 
         proj_clause, proj_list = fetcher.build_project_clause(projects)
         win = (f"{start_dt.strftime('%Y-%m-%d')} .. {end_dt.strftime('%Y-%m-%d')}")
@@ -78,9 +78,12 @@ def register(mcp, resolver: InstanceResolver):
             ) or []
 
         query = (proj_clause + f" updated: {win}").strip()
-        issues = await _search(query)
-
-        deadline_field = await fetcher.resolve_deadline_field(client, proj_clause)
+        # Independent lookups — run together (ADR-068).
+        operator, issues, deadline_field = await asyncio.gather(
+            fetcher.get_operator_login(client),
+            _search(query),
+            fetcher.resolve_deadline_field(client, proj_clause),
+        )
         deadline_scanned = bool(deadline_field)
         if deadline_field:
             dl_query = (proj_clause + f" {{{deadline_field}}}: {win}").strip()

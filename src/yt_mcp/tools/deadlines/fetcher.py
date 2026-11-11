@@ -6,6 +6,7 @@ import os
 from typing import Any
 
 import httpx
+from yt_mcp import lookups
 
 _logger = logging.getLogger("yt_mcp")
 
@@ -22,7 +23,7 @@ _FETCH_RETRY_BACKOFF_SEC = 0.2
 # with max_connections=5 (client.py); without a semaphore, a 500-issue audit
 # fans out to ~1000 simultaneous requests and saturates the HTTP/2 stream
 # pool — observed in production as ConnectionTerminated last_stream_id:1999.
-_CONCURRENCY_LIMIT = int(os.environ.get("YT_MCP_FETCH_CONCURRENCY", "8"))
+_CONCURRENCY_LIMIT = int(os.environ.get("YT_MCP_FETCH_CONCURRENCY", "16"))
 
 
 ISSUE_FIELDS = (
@@ -129,7 +130,7 @@ async def fetch_activities_only(client: Any, issue_id: str) -> list[dict]:
 
 async def get_operator_login(client: Any) -> str:
     try:
-        me = await client.get("/api/users/me", params={"fields": "login"})
+        me = await lookups.current_user(client)
         return (me.get("login") or "?")
     except (ValueError, KeyError):
         return "?"

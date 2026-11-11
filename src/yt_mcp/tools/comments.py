@@ -1,6 +1,8 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 from mcp.types import ToolAnnotations
+from yt_mcp import lookups
 from yt_mcp.errors import UserInputError
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.formatters import compact_lines, escape_query_value, parse_issue_id, split_service_comments
@@ -206,7 +208,7 @@ def register(mcp, resolver: InstanceResolver):
         if days < 1:
             raise UserInputError(f"days must be >= 1, got {days}")
         client = resolver.resolve(instance)
-        me = await client.get("/api/users/me", params={"fields": "login,name"})
+        me = await lookups.current_user(client)
         my_login = (me.get("login") or "").lower()
         my_name = me.get("name") or ""
 
@@ -227,12 +229,15 @@ def register(mcp, resolver: InstanceResolver):
                   "comments(text,author(login,name),created)")
 
         merged: dict[str, dict] = {}
-        for q in (f"mentions: me updated: {window}",
-                  f"commenter: me updated: {window}"):
-            for issue in await client.get(
-                "/api/issues",
-                params={"query": q, "fields": fields, "$top": "50"},
-            ) or []:
+        # Independent searches: run together (ADR-068), merged in the same
+        # order as before so a duplicate keeps its first copy.
+        batches = await asyncio.gather(*(
+            client.get("/api/issues", params={"query": q, "fields": fields, "$top": "50"})
+            for q in (f"mentions: me updated: {window}",
+                      f"commenter: me updated: {window}")
+        ))
+        for batch in batches:
+            for issue in batch or []:
                 merged.setdefault((issue.get("idReadable") or "?"), issue)
 
         cutoff_ms = start.timestamp() * 1000

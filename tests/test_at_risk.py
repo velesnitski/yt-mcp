@@ -478,7 +478,8 @@ class TestCheckTaskCreationNullLinkType:
 # --- security: snapshot project-name traversal (ADR-027) --------------------
 
 import re as _re
-from yt_mcp.tools.monitoring import _snapshot_path, _SNAPSHOTS_DIR, _SAFE_PROJECT_RE
+from yt_mcp.tools import monitoring as _monitoring
+from yt_mcp.tools.monitoring import _snapshot_path, _SAFE_PROJECT_RE
 
 
 class TestSnapshotPathConfinement:
@@ -486,7 +487,7 @@ class TestSnapshotPathConfinement:
         for p in ("ABC", "XyZ", "TEAM_1", "svc-2"):
             path = _snapshot_path(p)
             assert path is not None
-            assert path.parent == _SNAPSHOTS_DIR
+            assert path.parent == _monitoring._SNAPSHOTS_DIR
 
     def test_traversal_names_rejected(self):
         for p in ("../../../tmp/evil", "a/b", "..", "foo.bar", "x/../../y", ""):

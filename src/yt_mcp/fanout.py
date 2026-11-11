@@ -17,6 +17,10 @@ T = TypeVar("T")
 R = TypeVar("R")
 
 WRITE_CONCURRENCY = 4
+# Reads multiplex over one HTTP/2 connection; 16 in flight measured ~10x
+# faster than one at a time against YouTrack Cloud (ADR-068). 429/503 are
+# retried by the client.
+READ_CONCURRENCY = 16
 
 
 async def bounded_map(
