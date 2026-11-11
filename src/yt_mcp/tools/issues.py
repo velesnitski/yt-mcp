@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 
 from mcp.types import ToolAnnotations
 from yt_mcp import lookups
+from yt_mcp.fanout import READ_CONCURRENCY, bounded_map
 from yt_mcp.resolver import InstanceResolver
 from yt_mcp.errors import UserInputError, YouTrackPermissionError
 from yt_mcp.formatters import format_issue_list, format_issue_detail, _resolve_state, _resolve_assignee, _get_custom_field, parse_issue_id, compact_lines, normalize_issue, split_service_comments, clip_text
@@ -95,6 +96,8 @@ _HAS_OPERATOR = re.compile(r"\w\s*:|#|\{")
 # Results at which a free-text match is more likely a missed operator than an answer.
 _BROAD_TEXT_MATCH = 20
 
+
+_ISSUE_ID_RE = re.compile(r"[A-Za-z][A-Za-z0-9_]*-\d+")
 
 def register(mcp, resolver: InstanceResolver):
 
@@ -244,7 +247,9 @@ def register(mcp, resolver: InstanceResolver):
         Composes a single `#A or #B or #C` query so a 20-issue enrichment
         pass takes one HTTP request instead of twenty. Useful when you
         already have a known ID list (active-focus picks, stuck-handoff
-        IDs, daily-summary references).
+        IDs, daily-summary references). One unknown or malformed ID never
+        fails the batch: it is reported per item as not found. JSON items
+        carry `url`, so callers never build links by hand.
 
         Reuses `get_issue`'s default field set + `normalize_issue` for
         consistent JSON shape across tools. Default `include_comments=False`
@@ -282,7 +287,10 @@ def register(mcp, resolver: InstanceResolver):
                 "batch fetches to ~100 per call. Split into smaller batches."
             )
 
-        query = " or ".join(f"#{iid}" for iid in id_list)
+        # Same ID twice is one issue; a token that is not KEY-123 cannot be
+        # an issue and must not reach the query, where it fails the parse.
+        id_list = list(dict.fromkeys(id_list))
+        valid = [i for i in id_list if _ISSUE_ID_RE.fullmatch(i)]
 
         if fields:
             field_set = fields
@@ -297,29 +305,66 @@ def register(mcp, resolver: InstanceResolver):
             if include_comments:
                 field_set += ",comments(id,text,author(login,name),created)"
 
-        data = await client.get(
-            "/api/issues",
-            params={"query": query, "fields": field_set, "$top": str(len(id_list))},
-        )
-        data = data or []
+        data: list = []
+        if valid:
+            try:
+                data = await client.get(
+                    "/api/issues",
+                    params={"query": " or ".join(f"#{iid}" for iid in valid),
+                            "fields": field_set, "$top": str(len(valid))},
+                ) or []
+            except UserInputError as e:
+                if isinstance(e, YouTrackPermissionError):
+                    raise
+                # The composed query was refused as a whole (ADR-069): one
+                # unknown ID can do that. Fetch each ID on its own, in
+                # parallel, so the rest still come back.
+                async def _one(iid):
+                    try:
+                        return await client.get(f"/api/issues/{iid}", params={"fields": field_set})
+                    except UserInputError:
+                        return None
+                data = [d for d in await bounded_map(_one, valid, limit=READ_CONCURRENCY)
+                        if isinstance(d, dict)]
+
+        by_id = {(i.get("idReadable") or "").upper(): i for i in data if isinstance(i, dict)}
+        data = [by_id[i.upper()] for i in id_list if i.upper() in by_id]  # input order
+        base = client.base_url.rstrip("/")
+
+        def _missing_item(iid: str) -> dict:
+            return {"id": iid, "error": "not found or no access"
+                    if _ISSUE_ID_RE.fullmatch(iid) else "not an issue ID"}
 
         if format == "json":
             if fields:
-                # Power override: return raw response array, no normalization.
-                return json.dumps(data, indent=2, ensure_ascii=False)
-            normalized = [normalize_issue(i, include_comments=include_comments) for i in data]
+                # Power override: raw objects, plus url and per-ID misses.
+                out = []
+                for iid in id_list:
+                    item = by_id.get(iid.upper())
+                    if item is None:
+                        out.append(_missing_item(iid))
+                    else:
+                        out.append({**item, "url": f"{base}/issue/{item.get('idReadable')}"})
+                return json.dumps(out, indent=2, ensure_ascii=False)
             more = "get_issue for the full text"
-            for n in normalized:
+            out = []
+            for iid in id_list:
+                item = by_id.get(iid.upper())
+                if item is None:
+                    out.append(_missing_item(iid))
+                    continue
+                n = normalize_issue(item, include_comments=include_comments)
+                n["url"] = f"{base}/issue/{n.get('id') or item.get('idReadable')}"
                 n["description"] = clip_text(n.get("description") or "", description_chars, more)
                 for c in n.get("comments") or []:
                     c["text"] = clip_text(c.get("text") or "", description_chars, more)
-            return json.dumps(normalized, indent=2, ensure_ascii=False)
+                out.append(n)
+            return json.dumps(out, indent=2, ensure_ascii=False)
 
         # report (compact): one line per issue + a count header.
         lines = [f"## {len(data)} of {len(id_list)} issues fetched"]
         if len(data) < len(id_list):
-            returned_ids = {(i.get("idReadable") or "") for i in data}
-            missing = [i for i in id_list if i not in returned_ids]
+            missing = [i for i in id_list if i.upper() not in by_id]
             lines.append(f"_Missing (not found or access denied): {', '.join(missing)}_")
         lines.append("")
         lines.append(format_issue_list(data))

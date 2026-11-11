@@ -1,6 +1,6 @@
 # yt-mcp
 
-YouTrack MCP server. 84 tools across 21 modules.
+YouTrack MCP server. 87 tools across 22 modules.
 
 ## Build & test
 
@@ -25,6 +25,7 @@ src/yt_mcp/
   client.py          # YouTrackClient (httpx async, HTTP/2); maps 401/403 → YouTrackPermissionError; retries 429/503 only; caches the project list (ADR-064)
   fanout.py          # bounded_map: ≤4 writes / ≤16 reads in flight, input order (ADR-064, ADR-068)
   lookups.py         # current_user (cached per client), count_issues via /api/issuesGetter/count (ADR-068)
+  textmatch.py       # RU+EN content words, light stemming, score + why — shared by matching tools (ADR-069)
   query_hints.py     # wraps every tool: query-parse 400 → which instance has the project + syntax tips
   response_cap.py    # wraps every tool: last-resort text-reply cap (never JSON, never translation input)
   errors.py          # UserInputError(ValueError) + YouTrackPermissionError — caller-input types, dropped from Sentry by isinstance (ADR-036)
@@ -51,6 +52,7 @@ src/yt_mcp/
     handoffs.py      # stuck-handoff detection: cross-team transition stalls
     time_report.py   # monthly time reports by user (top-level workItems API)
     releases.py      # release calendar: in-flight + shipped + cadence ETAs
+    matching.py      # list_instances, resolve_ticket_refs (verify by meaning), find_issues_for_text (ADR-069)
     impact.py        # dependency graph, deadline impact analysis
     dashboard.py     # scoring-based dashboards (active, blocked, team, multi-team)
     monitoring.py    # digest, at-risk, task creation checks, project health

@@ -452,7 +452,9 @@ class TestResolvedDateAttribute:
         src = inspect.getsource(pulse_mod)
         # Every query interpolation must use `resolved date:`; a bare
         # `resolved: {` f-string interpolation is the broken alias.
-        assert "resolved: {" not in src.replace("resolved date:", ""), (
+        # Word boundary: `Unresolved: {…}` (e.g. in a log line) is not the
+        # alias — a substring check matched its tail.
+        assert not _re_for_tests.search(r"(?<![A-Za-z])resolved: \{", src.replace("resolved date:", "")), (
             "pulse queries must use `resolved date:` — the bare `resolved:` "
             "alias 400s (spaced) or silently matches nothing (unspaced)"
         )

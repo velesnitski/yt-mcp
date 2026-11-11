@@ -4,7 +4,7 @@
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/velesnitski/yt-mcp)](https://github.com/velesnitski/yt-mcp/releases)
-[![Tools](https://img.shields.io/badge/tools-84-purple.svg)](#available-tools-84)
+[![Tools](https://img.shields.io/badge/tools-87-purple.svg)](#available-tools-87)
 [![Docker](https://img.shields.io/badge/docker-velesnitski%2Fyt--mcp-blue?logo=docker)](https://hub.docker.com/r/velesnitski/yt-mcp)
 [![Stars](https://img.shields.io/github/stars/velesnitski/yt-mcp?style=social)](https://github.com/velesnitski/yt-mcp/stargazers)
 [![M8ven Score](https://m8ven.ai/badge/mcp/velesnitski-yt-mcp-v541q4?v=2bf82a8ce8a539e6d1b8574f35349a29)](https://m8ven.ai/mcp/velesnitski-yt-mcp-v541q4)
@@ -195,7 +195,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 - *"Log 2 hours of development on PROJ-1828"*
 - *"Find articles about deployment"*
 
-### Available tools (84)
+### Available tools (87)
 
 #### Issues (22)
 
@@ -257,7 +257,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `add_issues_to_sprint` | Assign issues to a sprint via YouTrack commands |
 | `get_active_sprint_issues` | Issues in a board's currently active sprint |
 
-#### Projects & users (5)
+#### Projects, users & instances (6)
 
 | Tool | Description |
 |---|---|
@@ -266,8 +266,9 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `get_current_user` | Get the authenticated user's profile |
 | `search_users` | Search users by name, login, or email |
 | `get_instance_url` | The configured instance URL, for building issue links |
+| `list_instances` | Every configured instance with its URL and project keys, for routing ticket numbers |
 
-#### Discovery & cross-issue analysis (7)
+#### Discovery & cross-issue analysis (9)
 
 | Tool | Description |
 |---|---|
@@ -278,6 +279,8 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `compare_issue_lists` | Diff a known list vs a query — find untracked items or stale entries |
 | `get_roadmap` | Cross-project unresolved view filtered by type and state (parallel fetch) |
 | `track_cross_dept_journey` | Follow a request across departments via issue links, with per-stage timings |
+| `find_issues_for_text` | Tickets that status-check or meeting phrases talk about, ranked with `score` and `why`; "no confident match" instead of noise (RU+EN) |
+| `resolve_ticket_refs` | Spoken refs ("task 1947, health check") → the ticket, verified by meaning across instances, not by existence |
 
 #### Knowledge Base (8)
 
@@ -353,6 +356,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `YOUTRACK_LOG_FILE` | No | Error log path (default: `~/.yt-mcp/yt-mcp.log`) |
 | `YOUTRACK_ANALYTICS_FILE` | No | Analytics log path (default: `~/.yt-mcp/analytics.log`) |
 | `YOUTRACK_COMPACT` | No | Set to `1` to strip markdown from tool responses (~60% token savings) |
+| `YOUTRACK_REF_ROUTES` | No | Where bare ticket numbers most likely live, for `resolve_ticket_refs`: `word:instance:KEY,…` (e.g. `ops:main:OPS,web:second:WEB`). A route is tried first when its word is said near the number |
 | `YOUTRACK_LOG_LEVEL` | No | Headless mode only: stderr log level (default: `WARNING`) |
 | `YOUTRACK_MAX_RESPONSE_CHARS` | No | Cut any text reply longer than this at a line break, with a marker saying how to narrow the request (default: `60000`; `0` disables). JSON replies are never cut |
 
@@ -407,7 +411,7 @@ printf '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{
     uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp
 ```
 
-You should see all 84 tools listed.
+You should see all 87 tools listed.
 
 ## Setup for Windows
 
@@ -585,7 +589,7 @@ Put it behind a reverse proxy (Caddy, nginx, Cloudflare Tunnel) for HTTPS.
 
 ### 3. Use it
 
-Start a conversation in claude.ai and ask about your YouTrack issues. All 84 tools are available.
+Start a conversation in claude.ai and ask about your YouTrack issues. All 87 tools are available.
 
 > Without `YOUTRACK_OAUTH_URL`, OAuth is disabled and the server works in standard mode (stdio/SSE without auth) — no changes to existing setups.
 
