@@ -221,3 +221,57 @@ def test_duration(text, seconds):
 def test_bad_duration(text):
     with pytest.raises(UsageError):
         _duration(text)
+
+
+# ---------------------------------------------------------------- eval (ADR-071)
+
+
+class TestEval:
+    def _write(self, tmp_path, cases):
+        p = tmp_path / "cases.json"
+        p.write_text(json.dumps({"cases": cases}))
+        return str(p)
+
+    @pytest.mark.parametrize("args,needle", [
+        (["eval"], "usage: yt-mcp eval"),
+        (["eval", "/nonexistent/cases.json"], "cannot read"),
+        (["eval", "a.json", "b.json"], "unexpected argument"),
+    ])
+    def test_usage_errors(self, args, needle):
+        code, out, err = cli(*args)
+        assert code == EXIT_USAGE and needle in err
+
+    def test_bad_case_file_is_a_usage_error(self, tmp_path):
+        bad = tmp_path / "c.json"
+        bad.write_text('{"cases": [{"name": "x", "tool": "get_issues"}]}')
+        code, _, err = cli("eval", str(bad))
+        assert code == EXIT_USAGE and "missing args, expect" in err
+
+    def test_runs_cases_in_process_and_reports(self, tmp_path, youtrack):
+        def reply(req):
+            if req.url.path == "/api/issues":
+                return httpx.Response(200, json=[{"idReadable": "DEMO-1", "summary": "x"}])
+            return httpx.Response(404, json={"error": "nope"})
+        youtrack["reply"] = reply
+        path = self._write(tmp_path, [
+            {"name": "batch ok", "tool": "get_issues", "args": {"ids": "DEMO-1,DEMO-2"},
+             "expect": {"contains": ["DEMO-1"], "missing": ["DEMO-2"]}},
+            {"name": "batch wrong", "tool": "get_issues", "args": {"ids": "DEMO-1"},
+             "expect": {"contains": ["DEMO-7"]}},
+        ])
+        code, out, _ = cli("eval", path, "--json")
+        doc = json.loads(out)
+        assert code == 1 and (doc["passed"], doc["total"]) == (1, 2)
+        assert doc["cases"][1]["problems"] == ["DEMO-7 not fetched"]
+
+
+class TestJudge:
+    def test_verdict_top_and_trap(self):
+        from yt_mcp.evalcases import judge
+        case = {"tool": "resolve_ticket_refs",
+                "expect": {"id": "A-1", "verdict": ["confident"], "never": "B-1"}}
+        assert judge(case, [{"verdict": "confident", "top": "A-1"}]) == []
+        assert judge(case, [{"verdict": "weak", "top": "B-1"}]) == [
+            "verdict weak not in ['confident']", "top B-1 != A-1", "linked the trap B-1"]
+        assert judge({"tool": "find_issues_for_text", "expect": {"verdict": ["none"]}},
+                     [{"verdict": "none", "top": None}]) == []

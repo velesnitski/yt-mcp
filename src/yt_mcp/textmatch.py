@@ -17,8 +17,8 @@ from dataclasses import dataclass, field
 
 _WORD = re.compile(r"[0-9A-Za-zА-Яа-яЁё]+(?:[-_][0-9A-Za-zА-Яа-яЁё]+)*")
 ISSUE_KEY = re.compile(r"\b([A-Za-z][A-Za-z0-9_]*-\d+)\b")
-# A bare number right after a word that names a ticket: "task 2317",
-# "задача 1947", "тикет №55", "#921".
+# A bare number right after a word that names a ticket: "task 4102",
+# "задача 4101", "тикет №55", "#77".
 BARE_REF = re.compile(
     r"(?:\b(?:задач[аиеуой]*|тикет[аеуом]*|таск[аеуом]*|ишью|issue|ticket|task|bug|баг[аеуом]*)\s*(?:№|#|no\.?)?\s*|#)(\d{1,7})\b",
     re.IGNORECASE,
@@ -78,7 +78,7 @@ _RU_EN = {
     "уведомлени": ("notification",), "отчет": ("report",), "авторизаци": ("auth", "authorization"),
     "регистраци": ("registration", "signup"), "пользовател": ("user",), "приложени": ("app", "application"),
     "админк": ("admin",), "клиент": ("client",), "тест": ("test",), "прод": ("prod", "production"),
-    "восстановлени": ("recovery", "restore"), "проверк": ("check", "healthcheck"), "доступ": ("access",),
+    "восстановлени": ("recovery", "restore"), "проверк": ("check",), "доступ": ("access",),
     "кеш": ("cache",), "кэш": ("cache",), "очеред": ("queue",), "релиз": ("release",),
 }
 

@@ -280,7 +280,7 @@ Gives MCP clients live access to your YouTrack instance. Instead of opening the 
 | `get_roadmap` | Cross-project unresolved view filtered by type and state (parallel fetch) |
 | `track_cross_dept_journey` | Follow a request across departments via issue links, with per-stage timings |
 | `find_issues_for_text` | Tickets that status-check or meeting phrases talk about, ranked with `score` and `why`; "no confident match" instead of noise (RU+EN) |
-| `resolve_ticket_refs` | Spoken refs ("task 1947, health check") → the ticket, verified by meaning across instances, not by existence |
+| `resolve_ticket_refs` | Spoken refs ("task 4101, queue lag") → the ticket, verified by meaning across instances, not by existence |
 
 #### Knowledge Base (8)
 
@@ -621,6 +621,11 @@ echo '{"query": "project: DEMO #Unresolved"}' | yt-mcp run count_issues --args -
   `5m`) bounds the call.
 - For scheduled reads, set `YOUTRACK_READ_ONLY=1`: write tools then do not
   exist at all.
+- `yt-mcp eval cases.json [--json] [--verbose]` runs a local file of
+  ticket-matching cases (expected top ticket, allowed verdicts, traps) in
+  one process and prints PASS/FAIL per case – a quick check before a
+  release. Keep case files with real tickets out of any repository; the
+  format is documented in `src/yt_mcp/evalcases.py`.
 - Installed with `uvx`, prefix the command:
   `uvx --from git+https://github.com/velesnitski/yt-mcp yt-mcp run …`.
 

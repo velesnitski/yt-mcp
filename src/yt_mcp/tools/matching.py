@@ -3,7 +3,7 @@ matching (ADR-069).
 
 - `list_instances` — every configured instance with its URL and project keys,
   so a caller can route without a config file of its own.
-- `resolve_ticket_refs` — "задача 1947 (proxy health check)" → the ticket,
+- `resolve_ticket_refs` — "задача 4101 (queue lag alert)" → the ticket,
   verified by meaning across instances. A number that exists is not a match:
   the same number lives in many projects, and the first existing one is a
   confident wrong link.
@@ -29,6 +29,7 @@ WEAK = 0.2
 MARGIN = 0.2         # best must beat the runner-up by this much to be confident
 LEAD_FLOOR = 0.34    # ...or clear this floor and double the runner-up (ADR-070)
 TEXT_THRESHOLD = 0.34
+RECENT_DAYS = 3      # a status check talks about now (ADR-071)
 MAX_KEYS_PER_NUMBER = 60
 ISSUE_FIELDS = ("idReadable,summary,description,resolved,updated,project(shortName),"
                 "assignee(login,name),customFields(name,value(name,login))")
@@ -95,19 +96,41 @@ async def _projects_by_instance(resolver: InstanceResolver, only: str = "") -> d
             for (n, _), ps in zip(named, lists)}
 
 
-def _rank(cands: list[tuple[str, object, dict]], words: list[str], owner: str) -> list[dict]:
+async def _keys_said(resolver: InstanceResolver, said: set[str]) -> set[str]:
+    """The said words that are project keys on some instance."""
+    if not said:
+        return set()
+    keys = await _projects_by_instance(resolver)
+    return {k.upper() for ks in keys.values() for k in ks} & said
+
+
+def _rank(cands: list[tuple[str, object, dict]], words: list[str], owner: str,
+          vocabulary: bool = False) -> list[dict]:
     docs = [f"{i.get('summary') or ''} {(i.get('description') or '')[:4000]}" for _, _, i in cands]
+    if vocabulary and docs:
+        # A ticket number already narrows the field to a handful of tickets;
+        # what tells them apart is the words that occur in ANY of them.
+        # Filler that matches nothing ("account", "bring to a common form")
+        # must not dilute the score (ADR-071).
+        have = [tm.stems(d) for d in docs]
+        kept = [w for w in words if any(tm._hits([w], h) for h in have)]
+        words = kept or words
     idf = tm.idf_weights(words, docs) if len(cands) > 2 else None
     ranked = []
     for name, client, issue in cands:
         m = tm.score(words, issue.get("summary") or "", (issue.get("description") or "")[:4000], idf)
         s = m.score
         why = m.why()
-        if _owner_hit(owner, issue):
-            s = min(1.0, s + 0.25)
-            why += "; assignee matches owner"
+        if owner:
+            # 80 % words, 20 % owner: the owner still breaks a tie between two
+            # perfect word matches, which a capped bonus could not (ADR-071).
+            hit = _owner_hit(owner, issue)
+            s = 0.8 * s + (0.2 if hit else 0.0)
+            if hit:
+                why += "; assignee matches owner"
         b = _brief(name, client, issue)
-        b.update(score=round(s, 3), why=why, distinctive=m.distinctive)
+        b.update(score=round(s, 3), why=why, distinctive=m.distinctive,
+                 n_distinctive=sum(1 for w in m.in_summary if not tm.is_generic(w)))
         ranked.append(b)
     ranked.sort(key=lambda b: (-b["score"], b["resolved"], -b["updated"]))
     return ranked
@@ -128,8 +151,9 @@ def _verdict(ranked: list[dict], have_context: bool) -> str:
     top = ranked[0]
     best = top["score"]
     second = ranked[1]["score"] if len(ranked) > 1 else 0.0
-    strong = best >= CONFIDENT and best - second >= MARGIN
-    lead = best >= LEAD_FLOOR and best >= 2 * second
+    eps = 1e-9  # scores are rounded floats: 1.0 - 0.8 must count as 0.2
+    strong = best >= CONFIDENT - eps and best - second >= MARGIN - eps
+    lead = best >= LEAD_FLOOR - eps and best >= 2 * second - eps
     if top.get("distinctive") and (strong or lead):
         if lead and not strong:
             top["why"] += f"; clear lead ({best} vs {second})"
@@ -140,7 +164,13 @@ def _verdict(ranked: list[dict], have_context: bool) -> str:
 async def resolve_ref(resolver: InstanceResolver, ref: str, context: str = "",
                       instance_hint: str = "", owner: str = "", keys: list[str] | None = None) -> dict:
     """Resolve one reference to verified candidates. See resolve_ticket_refs."""
-    words = tm.content_words(f"{ref} {context}")
+    clients_ = dict(resolver.named_clients())
+    said = {w.upper() for w in re.findall(r"[A-Za-z][A-Za-z0-9_]*", f"{ref} {context}")}
+    keys_said = await _keys_said(resolver, said)
+    # A project key or instance name routes the search; it is not a word to
+    # find in a summary (ADR-071).
+    words = [w for w in tm.content_words(f"{ref} {context}")
+             if w.upper() not in keys_said and w not in clients_]
     have_context = bool(words or owner)
     clients = dict(resolver.named_clients())
     if instance_hint and instance_hint not in clients:
@@ -154,7 +184,7 @@ async def resolve_ref(resolver: InstanceResolver, ref: str, context: str = "",
         targets = [n for n, ks in where.items() if project in ks] or list(where)
         found = await bounded_map(lambda n: _fetch(clients[n], iid), targets)
         cands = [(n, clients[n], i) for n, i in zip(targets, found) if i]
-        ranked = _rank(cands, words, owner)
+        ranked = _rank(cands, words, owner, vocabulary=True)
         verdict = "none" if not ranked else (
             "exact" if not have_context or ranked[0]["score"] >= WEAK else "weak")
         return {"ref": ref, "confidence": verdict, "candidates": ranked, "checked": [iid]}
@@ -185,7 +215,6 @@ async def resolve_ref(resolver: InstanceResolver, ref: str, context: str = "",
     # A project key or instance name said aloud ("the PRJB team", "on
     # second") is the strongest route there is: try those first and stop
     # there when they already give a confident answer (ADR-070).
-    said = {w.upper() for w in re.findall(r"[A-Za-z][A-Za-z0-9_]*", f"{ref} {context}")}
     named = [t for t in tries if t[1].upper() in said or t[0].upper() in said]
     phases = [named, [t for t in tries if t not in named]] if named else [tries]
 
@@ -197,7 +226,11 @@ async def resolve_ref(resolver: InstanceResolver, ref: str, context: str = "",
         ids += batch
         found = await bounded_map(lambda t: _fetch(clients[t[0]], t[1]), batch, limit=READ_CONCURRENCY)
         cands += [(inst, clients[inst], i) for (inst, _), i in zip(batch, found) if i]
-        ranked = _rank(cands, words, owner)
+        ranked = _rank(cands, words, owner, vocabulary=True)
+        # A key said aloud acts as the hint: stay there unless it holds no
+        # such ticket or the words contradict it (ADR-071).
+        if phase is named and _verdict([dict(b) for b in ranked], have_context) != "none":
+            break
         if _verdict([dict(b) for b in ranked], have_context) == "confident":
             break
     if not have_context:
@@ -286,9 +319,19 @@ async def match_text(resolver, client, name: str, text: str, since: str, project
     # Generic words alone never make a match (ADR-070).
     good = [b for b in ranked if b["score"] >= TEXT_THRESHOLD and b.get("distinctive")]
     verdict = _verdict(good, True) if good else "none"
+    if verdict == "confident":
+        # One shared distinctive word is not enough to name a ticket from
+        # free text: an old bug about the same component would win. Require
+        # two, or one on a ticket touched in the last few days (ADR-071).
+        top = good[0]
+        recent = now_ms - (top.get("updated") or 0) <= RECENT_DAYS * 86_400_000
+        if top.get("n_distinctive", 0) < 2 and not recent:
+            verdict = "weak"
+            top["why"] += "; one distinctive word on an older ticket"
     if verdict == "none":
         good = []
-    out = {"text": text, "match": verdict, "candidates": good[:1] if verdict == "confident" else good[:max_per_text]}
+    out = {"text": text, "match": verdict,
+           "candidates": good[:1] if verdict == "confident" else good[:max_per_text]}
     if not good:
         out["note"] = f"no confident match among {len(ranked)} candidate(s)"
     return out
@@ -302,7 +345,7 @@ def _render_candidate(b: dict) -> str:
 
 
 def _strip_internal(b: dict) -> dict:
-    return {k: v for k, v in b.items() if k not in ("resolved", "updated", "distinctive")}
+    return {k: v for k, v in b.items() if k not in ("resolved", "updated", "distinctive", "n_distinctive")}
 
 
 def register(mcp, resolver: InstanceResolver):
@@ -347,7 +390,7 @@ def register(mcp, resolver: InstanceResolver):
         """Turn spoken ticket references into verified tickets, across instances.
 
         Each ref is a bare number or a key, ideally with the words said
-        around it: "1947 (proxy health check)", "task 2317", "WEB-12". A bare
+        around it: "4101 (queue lag alert)", "task 4102", "WEB-12". A bare
         number is tried in every likely project (YOUTRACK_REF_ROUTES context
         routes first, else every project of every instance) and each hit is
         checked against the words: an existing number is NOT a match by
@@ -370,6 +413,9 @@ def register(mcp, resolver: InstanceResolver):
         if format == "json":
             for r in results:
                 r["candidates"] = [_strip_internal(b) for b in r["candidates"]]
+                # Stable top-level fields for headless callers (ADR-071).
+                r["verdict"] = r["confidence"]
+                r["top"] = r["candidates"][0]["id"] if r["candidates"] else None
             return json.dumps(results, ensure_ascii=False)
         lines = [f"## {len(results)} reference(s)"]
         for r in results:
@@ -415,6 +461,8 @@ def register(mcp, resolver: InstanceResolver):
         if format == "json":
             for r in results:
                 r["candidates"] = [_strip_internal(b) for b in r["candidates"]]
+                r["verdict"] = r["match"]
+                r["top"] = r["candidates"][0]["id"] if r["candidates"] else None
             return json.dumps(results, ensure_ascii=False)
         lines = [f"## Tickets for {len(results)} text(s)"]
         for r in results:

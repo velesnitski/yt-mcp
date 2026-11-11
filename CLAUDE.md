@@ -22,6 +22,7 @@ YOUTRACK_URL=... YOUTRACK_TOKEN=... uv run python scripts/verify_contract.py
 src/yt_mcp/
   server.py          # entry point, FastMCP setup, OAuth lazy loading; dispatches `run`/`tools` to headless
   headless.py        # `yt-mcp run <tool>` / `yt-mcp tools`: in-process list_tools/call_tool, exit 0/1/2 (ADR-065)
+  evalcases.py       # `yt-mcp eval cases.json`: local ticket-matching cases in-process, PASS/FAIL (ADR-071)
   client.py          # YouTrackClient (httpx async, HTTP/2); maps 401/403 → YouTrackPermissionError; retries 429/503 only; caches the project list (ADR-064)
   fanout.py          # bounded_map: ≤4 writes / ≤16 reads in flight, input order (ADR-064, ADR-068)
   lookups.py         # current_user (cached per client), count_issues via /api/issuesGetter/count (ADR-068)

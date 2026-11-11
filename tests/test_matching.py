@@ -17,14 +17,14 @@ from yt_mcp.tools import issues, matching
 
 ISSUES = {
     "main": {
-        "OPS-1947": {"summary": "Nightly database copy to staging, then cache warmup"},
-        "OPS-2317": {"summary": "Rotate TLS certificates on the edge"},
-        "WEB-2317": {"summary": "Footer layout on the pricing page"},
+        "OPS-4101": {"summary": "Nightly database copy to staging, then cache warmup"},
+        "OPS-4102": {"summary": "Rotate TLS certificates on the edge"},
+        "WEB-4102": {"summary": "Footer layout on the pricing page"},
     },
     "second": {
-        "CORE-1947": {"summary": "Automatic restart for the cache proxy container",
+        "CORE-4101": {"summary": "Automatic restart for the cache queue worker",
                       "assignee": {"login": "dana.lee", "name": "Dana Lee"}},
-        "CORE-77": {"summary": "Автоматический перезапуск контейнера прокси"},
+        "CORE-77": {"summary": "Автоматический перезапуск воркера очереди"},
     },
 }
 PROJECTS = {"main": ["OPS", "WEB"], "second": ["CORE"]}
@@ -83,8 +83,8 @@ def _no_routes(monkeypatch):
 
 class TestTextmatch:
     def test_russian_inflections_meet(self):
-        m = tm.score(tm.content_words("занимаются перезапуском контейнеров"),
-                     "Автоматический перезапуск контейнера прокси")
+        m = tm.score(tm.content_words("занимаются перезапуском воркеров"),
+                     "Автоматический перезапуск воркера очереди")
         assert m.score >= 0.6 and len(m.in_summary) == 2
 
     def test_english_variants_and_hyphens(self):
@@ -95,7 +95,7 @@ class TestTextmatch:
         assert tm.score(tm.content_words("отчёт по продажам"), "Footer layout").score == 0
 
     def test_refs_and_keys_are_found(self):
-        assert tm.BARE_REF.findall("задача 1947 и task #2317, тикет №55") == ["1947", "2317", "55"]
+        assert tm.BARE_REF.findall("задача 4101 и task #4102, тикет №55") == ["4101", "4102", "55"]
         assert tm.ISSUE_KEY.findall("see OPS-12 and core_x-3") == ["OPS-12", "core_x-3"]
 
     def test_stopwords_and_numbers_dropped(self):
@@ -125,63 +125,63 @@ class TestResolveRefs:
     @pytest.mark.asyncio
     async def test_context_picks_the_right_instance(self):
         _, tools = _setup()
-        [r] = _json(await tools["resolve_ticket_refs"](refs=["1947 (restart cache proxy)"], format="json"))
+        [r] = _json(await tools["resolve_ticket_refs"](refs=["4101 (restart cache queue)"], format="json"))
         assert r["confidence"] == "confident"
         [c] = r["candidates"]
-        assert (c["id"], c["instance"]) == ("CORE-1947", "second")
-        assert c["url"] == "https://second.example.youtrack.cloud/issue/CORE-1947"
-        assert "summary: restart, cache, proxy" in c["why"]
+        assert (c["id"], c["instance"]) == ("CORE-4101", "second")
+        assert c["url"] == "https://second.example.youtrack.cloud/issue/CORE-4101"
+        assert "summary: restart, cache, queue" in c["why"]
 
     @pytest.mark.asyncio
     async def test_existing_number_with_contradicting_context_is_none(self):
         _, tools = _setup()
-        [r] = _json(await tools["resolve_ticket_refs"](refs=["1947"], context="invoice fonts", format="json"))
+        [r] = _json(await tools["resolve_ticket_refs"](refs=["4101"], context="invoice fonts", format="json"))
         assert r["confidence"] == "none" and r["candidates"] == []
-        assert "OPS-1947" in r["note"] and "CORE-1947" in r["note"]
+        assert "OPS-4101" in r["note"] and "CORE-4101" in r["note"]
 
     @pytest.mark.asyncio
     async def test_no_context_gives_unverified_candidates(self):
         _, tools = _setup()
-        [r] = _json(await tools["resolve_ticket_refs"](refs=["1947"], format="json"))
+        [r] = _json(await tools["resolve_ticket_refs"](refs=["4101"], format="json"))
         assert r["confidence"] == "candidates"
-        assert {c["id"] for c in r["candidates"]} == {"OPS-1947", "CORE-1947"}
+        assert {c["id"] for c in r["candidates"]} == {"OPS-4101", "CORE-4101"}
 
     @pytest.mark.asyncio
     async def test_routes_narrow_the_search(self, monkeypatch):
         monkeypatch.setenv("YOUTRACK_REF_ROUTES", "ops:main:OPS,proxies:second:CORE")
         _, tools = _setup()
-        [r] = _json(await tools["resolve_ticket_refs"](refs=["proxies 1947 restart"], format="json"))
-        assert r["checked"] == ["CORE-1947", "OPS-1947"]  # route named in the words first, WEB never tried
-        assert r["candidates"][0]["id"] == "CORE-1947"
+        [r] = _json(await tools["resolve_ticket_refs"](refs=["proxies 4101 restart"], format="json"))
+        assert r["checked"] == ["CORE-4101", "OPS-4101"]  # route named in the words first, WEB never tried
+        assert r["candidates"][0]["id"] == "CORE-4101"
 
     @pytest.mark.asyncio
     async def test_a_key_said_aloud_is_tried_first_and_alone(self):
         clients, tools = _setup()
         [r] = _json(await tools["resolve_ticket_refs"](
-            refs=["1947 restart"], context="CORE team, proxy", format="json"))
-        assert r["confidence"] == "confident" and r["checked"] == ["CORE-1947"]
+            refs=["4101 restart"], context="CORE team, queue", format="json"))
+        assert r["confidence"] == "confident" and r["checked"] == ["CORE-4101"]
         assert not any(p.startswith("/api/issues/") for p, _ in clients["main"].calls)
 
     @pytest.mark.asyncio
     async def test_named_route_widens_when_it_does_not_confirm(self):
         _, tools = _setup()
         [r] = _json(await tools["resolve_ticket_refs"](
-            refs=["1947 database copy"], context="CORE", format="json"))
-        assert r["checked"][0] == "CORE-1947" and "OPS-1947" in r["checked"]
-        assert r["candidates"][0]["id"] == "OPS-1947"
+            refs=["4101 database copy"], context="CORE", format="json"))
+        assert r["checked"][0] == "CORE-4101" and "OPS-4101" in r["checked"]
+        assert r["candidates"][0]["id"] == "OPS-4101"
 
     @pytest.mark.asyncio
     async def test_instance_hint_limits_instances(self):
         clients, tools = _setup()
-        [r] = _json(await tools["resolve_ticket_refs"](refs=["1947"], instance_hint="main", format="json"))
-        assert [c["id"] for c in r["candidates"]] == ["OPS-1947"]
+        [r] = _json(await tools["resolve_ticket_refs"](refs=["4101"], instance_hint="main", format="json"))
+        assert [c["id"] for c in r["candidates"]] == ["OPS-4101"]
         assert not any(p.startswith("/api/issues/") for p, _ in clients["second"].calls)
 
     @pytest.mark.asyncio
     async def test_explicit_key_is_exact_or_flagged(self):
         _, tools = _setup()
         [a, b] = _json(await tools["resolve_ticket_refs"](
-            refs=["CORE-1947", "OPS-1947 (pricing page footer layout)"], format="json"))
+            refs=["CORE-4101", "OPS-4101 (pricing page footer layout)"], format="json"))
         assert a["confidence"] == "exact" and a["candidates"][0]["instance"] == "second"
         assert b["confidence"] == "weak"  # exists, but the words say otherwise
 
@@ -189,18 +189,18 @@ class TestResolveRefs:
     async def test_tie_is_weak_and_owner_breaks_it(self):
         _, tools = _setup()
         # "cache" is in both summaries, "tuesday" in neither: a tie.
-        [tie] = _json(await tools["resolve_ticket_refs"](refs=["1947 cache tuesday"], format="json"))
+        [tie] = _json(await tools["resolve_ticket_refs"](refs=["4101 cache tuesday"], format="json"))
         assert tie["confidence"] == "weak"
-        assert {c["id"] for c in tie["candidates"]} == {"OPS-1947", "CORE-1947"}
+        assert {c["id"] for c in tie["candidates"]} == {"OPS-4101", "CORE-4101"}
         [r] = _json(await tools["resolve_ticket_refs"](
-            refs=["1947 cache tuesday"], owner="Dana Lee", format="json"))
-        assert r["confidence"] == "confident" and r["candidates"][0]["id"] == "CORE-1947"
+            refs=["4101 cache tuesday"], owner="Dana Lee", format="json"))
+        assert r["confidence"] == "confident" and r["candidates"][0]["id"] == "CORE-4101"
         assert "assignee matches owner" in r["candidates"][0]["why"]
 
     @pytest.mark.asyncio
     async def test_russian_reference(self):
         _, tools = _setup()
-        [r] = _json(await tools["resolve_ticket_refs"](refs=["задача 77 (перезапуск прокси)"], format="json"))
+        [r] = _json(await tools["resolve_ticket_refs"](refs=["задача 77 (перезапуск очереди)"], format="json"))
         assert r["confidence"] == "confident" and r["candidates"][0]["id"] == "CORE-77"
 
     @pytest.mark.asyncio
@@ -224,41 +224,41 @@ def _search_returning(*iids_by_instance):
 class TestFindForText:
     @pytest.mark.asyncio
     async def test_inflected_russian_phrase_matches_summary(self):
-        _, tools = _setup(_search_returning(("second", "CORE-77"), ("main", "OPS-2317")))
+        _, tools = _setup(_search_returning(("second", "CORE-77"), ("main", "OPS-4102")))
         [r] = _json(await tools["find_issues_for_text"](
-            texts=["девопсы занимаются перезапуском контейнеров прокси"], format="json"))
+            texts=["девопсы занимаются перезапуском воркеров очереди"], format="json"))
         assert r["match"] == "confident" and r["candidates"][0]["id"] == "CORE-77"
         assert set(r["candidates"][0]) >= {"id", "url", "summary", "state", "assignee", "score", "why"}
-        assert "OPS-2317" not in [c["id"] for c in r["candidates"]]  # below threshold
+        assert "OPS-4102" not in [c["id"] for c in r["candidates"]]  # below threshold
 
     @pytest.mark.asyncio
     async def test_unrelated_text_is_no_match_not_noise(self):
-        _, tools = _setup(_search_returning(("main", "OPS-2317"), ("main", "WEB-2317")))
+        _, tools = _setup(_search_returning(("main", "OPS-4102"), ("main", "WEB-4102")))
         [r] = _json(await tools["find_issues_for_text"](texts=["quarterly budget review"], format="json"))
         assert r["match"] == "none" and r["candidates"] == []
         assert "no confident match among 2" in r["note"]
 
     @pytest.mark.asyncio
     async def test_explicit_key_bypasses_search(self):
-        clients, tools = _setup(_search_returning(("main", "WEB-2317")))
-        [r] = _json(await tools["find_issues_for_text"](texts=["see OPS-1947 today"], format="json"))
-        assert r["match"] == "exact" and r["candidates"][0]["id"] == "OPS-1947"
+        clients, tools = _setup(_search_returning(("main", "WEB-4102")))
+        [r] = _json(await tools["find_issues_for_text"](texts=["see OPS-4101 today"], format="json"))
+        assert r["match"] == "exact" and r["candidates"][0]["id"] == "OPS-4101"
         assert not any(p == "/api/issues" for p, _ in clients["main"].calls)
 
     @pytest.mark.asyncio
     async def test_bare_number_tried_against_projects(self):
         _, tools = _setup()
         [r] = _json(await tools["find_issues_for_text"](
-            texts=["task 2317: rotate the certificates"], projects="WEB,OPS", format="json"))
-        assert r["candidates"][0]["id"] == "OPS-2317"  # WEB-2317 exists but is about a footer
+            texts=["task 4102: rotate the certificates"], projects="WEB,OPS", format="json"))
+        assert r["candidates"][0]["id"] == "OPS-4102"  # WEB-4102 exists but is about a footer
 
     @pytest.mark.asyncio
     async def test_query_is_scoped_and_one_word_per_query(self):
         clients, tools = _setup()
-        await tools["find_issues_for_text"](texts=["cache proxy"], projects="OPS, Big Team", since="2026-10-01")
+        await tools["find_issues_for_text"](texts=["cache queue"], projects="OPS, Big Team", since="2026-10-01")
         queries = [p["query"] for path, p in clients["main"].calls if path == "/api/issues"]
         assert queries == ["project: OPS, {Big Team} updated: 2026-10-01 .. Today cache",
-                           "project: OPS, {Big Team} updated: 2026-10-01 .. Today proxy"]
+                           "project: OPS, {Big Team} updated: 2026-10-01 .. Today queue"]
 
     @pytest.mark.asyncio
     async def test_bad_since_is_explained(self):
@@ -314,9 +314,9 @@ class TestGetIssuesBatch:
     @pytest.mark.asyncio
     async def test_non_ids_never_reach_the_query(self):
         client, fn = _issues_tool(self._get(batch_fails=False))
-        out = _json(await fn(ids="OPS-1, 1947, OPS-1, do-", format="json"))
+        out = _json(await fn(ids="OPS-1, 4101, OPS-1, do-", format="json"))
         assert client.get.await_args.kwargs["params"]["query"] == "#OPS-1"
-        assert out[1] == {"id": "1947", "error": "not an issue ID"} and len(out) == 3
+        assert out[1] == {"id": "4101", "error": "not an issue ID"} and len(out) == 3
 
     @pytest.mark.asyncio
     async def test_permission_error_is_not_masked(self):
@@ -359,8 +359,8 @@ class TestRouting:
     @pytest.mark.asyncio
     async def test_key_from_the_other_instance_is_found_there(self):
         clients, fn = self._tool()
-        out = _json(await fn(ids="CORE-1947,OPS-2317", fields="idReadable,summary", format="json"))
-        assert [o.get("idReadable") for o in out] == ["CORE-1947", "OPS-2317"]
+        out = _json(await fn(ids="CORE-4101,OPS-4102", fields="idReadable,summary", format="json"))
+        assert [o.get("idReadable") for o in out] == ["CORE-4101", "OPS-4102"]
         assert out[0]["instance"] == "second" and out[0]["url"].startswith("https://second.")
         assert out[1]["instance"] == "main"
 
@@ -379,8 +379,8 @@ class TestLiveFindings:
     @pytest.mark.asyncio
     async def test_russian_speech_matches_english_summary(self):
         _, tools = _setup()
-        [r] = _json(await tools["resolve_ticket_refs"](refs=["задача 1947 (перезапуск прокси)"], format="json"))
-        assert r["confidence"] == "confident" and r["candidates"][0]["id"] == "CORE-1947"
+        [r] = _json(await tools["resolve_ticket_refs"](refs=["задача 4101 (перезапуск очереди)"], format="json"))
+        assert r["confidence"] == "confident" and r["candidates"][0]["id"] == "CORE-4101"
 
     def test_bridge_is_exact_for_short_stems(self):
         assert tm.score(tm.content_words("продажи за месяц"), "Prod deploy checklist").score == 0
@@ -428,7 +428,7 @@ class TestLiveFindings:
         assert tm.score(["deploy", "dev"], "Deploy checklist").score > 0.7
 
     def test_idf_downweights_words_every_candidate_shares(self):
-        w = tm.idf_weights(["cache", "warmup"], ["cache proxy", "cache warmup job", "cache size"])
+        w = tm.idf_weights(["cache", "warmup"], ["cache queue", "cache warmup job", "cache size"])
         assert w["warmup"] > w["cache"]
 
     @pytest.mark.asyncio
@@ -436,7 +436,95 @@ class TestLiveFindings:
         PROJECTS["second"] = ["CORE", "OPS"]
         try:
             _, tools = _setup()
-            [r] = _json(await tools["resolve_ticket_refs"](refs=["1947"], format="json"))
-            assert "OPS-1947 (main)" in r["checked"] and "OPS-1947 (second)" in r["checked"]
+            [r] = _json(await tools["resolve_ticket_refs"](refs=["4101"], format="json"))
+            assert "OPS-4101 (main)" in r["checked"] and "OPS-4101 (second)" in r["checked"]
         finally:
             PROJECTS["second"] = ["CORE"]
+
+
+# ---------------------------------------------------------------- S (live re-test, invented data)
+
+
+class TestReTestFindings:
+    @pytest.mark.asyncio
+    async def test_long_filler_context_does_not_sink_the_verdict(self):
+        _, tools = _setup()
+        [r] = _json(await tools["resolve_ticket_refs"](
+            refs=["4101 restart итоги созвона заметки по формату"],
+            context="Quarterly platform sync notes", format="json"))
+        assert r["confidence"] == "confident" and r["candidates"][0]["id"] == "CORE-4101"
+
+    @pytest.mark.asyncio
+    async def test_said_key_acts_as_the_hint(self):
+        clients, tools = _setup()
+        [r] = _json(await tools["resolve_ticket_refs"](
+            refs=["4101 worker"], context="CORE weekly sync", format="json"))
+        assert r["checked"] == ["CORE-4101"] and r["candidates"][0]["id"] == "CORE-4101"
+        assert not any(p.startswith("/api/issues/") for p, _ in clients["main"].calls)
+
+    @pytest.mark.asyncio
+    async def test_said_key_holds_even_when_only_weak(self):
+        ISSUES["second"]["CORE-4103"] = {"summary": "Core queue fix on dev"}
+        ISSUES["main"]["OPS-4103"] = {"summary": "Dev server certificate renewal"}
+        try:
+            _, tools = _setup()
+            [r] = _json(await tools["resolve_ticket_refs"](refs=["4103 dev"], context="CORE", format="json"))
+            # Generic word only → weak; the key itself is routing, not evidence;
+            # and the said key is not abandoned for a weak answer.
+            assert r["confidence"] == "weak" and r["checked"] == ["CORE-4103"]
+        finally:
+            del ISSUES["second"]["CORE-4103"], ISSUES["main"]["OPS-4103"]
+
+    @pytest.mark.asyncio
+    async def test_said_key_without_such_ticket_widens(self):
+        _, tools = _setup()
+        [r] = _json(await tools["resolve_ticket_refs"](
+            refs=["4102 rotate certificates"], context="CORE weekly sync", format="json"))
+        assert r["checked"][0] == "CORE-4102" and r["candidates"][0]["id"] == "OPS-4102"
+
+    @pytest.mark.asyncio
+    async def test_said_key_is_not_a_word_to_match(self):
+        _, tools = _setup()
+        [r] = _json(await tools["resolve_ticket_refs"](refs=["CORE 4101 queue"], format="json"))
+        assert "CORE" not in r["candidates"][0]["why"]
+
+
+def _dated(iid, summary, days_ago):
+    import time
+    return {"idReadable": iid, "summary": summary, "description": "", "resolved": None,
+            "updated": int((time.time() - days_ago * 86400) * 1000), "customFields": []}
+
+
+class TestOneDistinctiveWord:
+    @staticmethod
+    async def _find(issue, text):
+        _, tools = _setup(lambda params: [issue])
+        [r] = _json(await tools["find_issues_for_text"](texts=[text], format="json"))
+        return r
+
+    @pytest.mark.asyncio
+    async def test_old_ticket_sharing_one_word_is_only_weak(self):
+        r = await self._find(_dated("WEB-8", "Missing CORS headers on the password reset endpoint", 40),
+                             "CORS client-api dev")
+        assert r["match"] == "weak" and "one distinctive word" in r["candidates"][0]["why"]
+
+    @pytest.mark.asyncio
+    async def test_one_word_on_a_ticket_touched_today_is_confident(self):
+        r = await self._find(_dated("WEB-9", "CORS failures on the client api", 0), "CORS client-api dev")
+        assert r["match"] == "confident"
+
+    @pytest.mark.asyncio
+    async def test_two_distinctive_words_are_confident_even_if_old(self):
+        r = await self._find(_dated("WEB-10", "Rotate signing keys for webhooks", 90),
+                             "webhooks signing keys rotation")
+        assert r["match"] == "confident"
+
+
+class TestJsonFields:
+    @pytest.mark.asyncio
+    async def test_verdict_and_top_are_top_level_fields(self):
+        _, tools = _setup(_search_returning(("second", "CORE-77")))
+        [r] = _json(await tools["resolve_ticket_refs"](refs=["4101 restart cache queue"], format="json"))
+        assert (r["verdict"], r["top"]) == ("confident", "CORE-4101")
+        [t] = _json(await tools["find_issues_for_text"](texts=["quarterly budget"], format="json"))
+        assert (t["verdict"], t["top"]) == ("none", None)

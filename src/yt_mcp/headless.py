@@ -2,6 +2,7 @@
 
     yt-mcp tools [--json]
     yt-mcp run <tool> [key=value ...] [--args JSON|-] [--json] [--timeout 5m]
+    yt-mcp eval <cases.json> [--json] [--verbose] [--timeout 2m]   (ADR-071)
 
 The command builds the server exactly as the transports do and calls it
 through FastMCP's own `list_tools` / `call_tool`, so a scheduler — cron,
@@ -41,7 +42,7 @@ class UsageError(Exception):
 
 
 def is_headless(argv: list[str]) -> bool:
-    return bool(argv) and argv[0] in ("run", "tools")
+    return bool(argv) and argv[0] in ("run", "tools", "eval")
 
 
 def run_headless(argv: list[str], stdin: TextIO = sys.stdin,
@@ -59,6 +60,8 @@ def run_headless(argv: list[str], stdin: TextIO = sys.stdin,
 async def _main(argv: list[str], stdin: TextIO, stdout: TextIO, stderr: TextIO) -> int:
     command, rest = argv[0], argv[1:]
     # Parse before building: a usage mistake must not cost a server start.
+    if command == "eval":
+        return await _eval(rest, stdout)
     opts = _parse_run(rest) if command == "run" else _parse_tools(rest)
     bundle = _build()
     try:
@@ -67,6 +70,44 @@ async def _main(argv: list[str], stdin: TextIO, stdout: TextIO, stderr: TextIO) 
             _print_tools(tools, opts["json"], stdout)
             return EXIT_OK
         return await _run(bundle.mcp, tools, opts, stdin, stdout, stderr)
+    finally:
+        await bundle.aclose()
+
+
+async def _eval(args: list[str], stdout: TextIO) -> int:
+    """Run a local case file against this checkout, one server start."""
+    import time
+    from yt_mcp import evalcases
+
+    usage = "usage: yt-mcp eval <cases.json> [--json] [--verbose] [--timeout 2m]"
+    opts = {"json": False, "verbose": False, "timeout": 120.0, "path": None}
+    it = iter(args)
+    for a in it:
+        flag, eq, inline = a.partition("=")
+        if a == "--json":
+            opts["json"] = True
+        elif a == "--verbose":
+            opts["verbose"] = True
+        elif flag == "--timeout":
+            value = inline if eq else next(it, None)
+            if value is None:
+                raise UsageError("--timeout needs a value")
+            opts["timeout"] = _duration(value)
+        elif a.startswith("-") or opts["path"]:
+            raise UsageError(f"unexpected argument {a!r}; {usage}")
+        else:
+            opts["path"] = a
+    if not opts["path"]:
+        raise UsageError(usage)
+    try:
+        cases = evalcases.load_cases(opts["path"])
+    except ValueError as e:
+        raise UsageError(str(e)) from None
+    bundle = _build()
+    try:
+        t0 = time.monotonic()
+        results = await evalcases.run_cases(bundle.mcp, cases, opts["timeout"])
+        return evalcases.report(results, time.monotonic() - t0, stdout, opts["json"], opts["verbose"])
     finally:
         await bundle.aclose()
 
