@@ -489,10 +489,13 @@ class TestReTestFindings:
         assert "CORE" not in r["candidates"][0]["why"]
 
 
-def _dated(iid, summary, days_ago):
+def _dated(iid, summary, days_ago, touched_days_ago=None):
     import time
+    ms = lambda d: int((time.time() - d * 86400) * 1000)  # noqa: E731
     return {"idReadable": iid, "summary": summary, "description": "", "resolved": None,
-            "updated": int((time.time() - days_ago * 86400) * 1000), "customFields": []}
+            "created": ms(days_ago),
+            "updated": ms(days_ago if touched_days_ago is None else touched_days_ago),
+            "customFields": []}
 
 
 class TestOneDistinctiveWord:
@@ -509,7 +512,14 @@ class TestOneDistinctiveWord:
         assert r["match"] == "weak" and "one distinctive word" in r["candidates"][0]["why"]
 
     @pytest.mark.asyncio
-    async def test_one_word_on_a_ticket_touched_today_is_confident(self):
+    async def test_old_ticket_touched_today_is_still_only_weak(self):
+        r = await self._find(
+            _dated("WEB-11", "Missing CORS headers on the password reset endpoint", 40, touched_days_ago=0),
+            "CORS client-api dev")
+        assert r["match"] == "weak"
+
+    @pytest.mark.asyncio
+    async def test_one_word_on_a_ticket_created_today_is_confident(self):
         r = await self._find(_dated("WEB-9", "CORS failures on the client api", 0), "CORS client-api dev")
         assert r["match"] == "confident"
 

@@ -31,7 +31,7 @@ LEAD_FLOOR = 0.34    # ...or clear this floor and double the runner-up (ADR-070)
 TEXT_THRESHOLD = 0.34
 RECENT_DAYS = 3      # a status check talks about now (ADR-071)
 MAX_KEYS_PER_NUMBER = 60
-ISSUE_FIELDS = ("idReadable,summary,description,resolved,updated,project(shortName),"
+ISSUE_FIELDS = ("idReadable,summary,description,resolved,created,updated,project(shortName),"
                 "assignee(login,name),customFields(name,value(name,login))")
 _SINCE = re.compile(r"^(\d+)\s*([dw])$", re.IGNORECASE)
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -69,6 +69,7 @@ def _brief(name: str, client, issue: dict) -> dict:
         "assignee": _resolve_assignee(issue) or "",
         "resolved": bool(issue.get("resolved")),
         "updated": issue.get("updated") or 0,
+        "created": issue.get("created") or 0,
     }
 
 
@@ -322,9 +323,10 @@ async def match_text(resolver, client, name: str, text: str, since: str, project
     if verdict == "confident":
         # One shared distinctive word is not enough to name a ticket from
         # free text: an old bug about the same component would win. Require
-        # two, or one on a ticket touched in the last few days (ADR-071).
+        # two, or one on a ticket CREATED in the last few days — an old
+        # ticket touched today is still an old ticket (ADR-071).
         top = good[0]
-        recent = now_ms - (top.get("updated") or 0) <= RECENT_DAYS * 86_400_000
+        recent = now_ms - (top.get("created") or 0) <= RECENT_DAYS * 86_400_000
         if top.get("n_distinctive", 0) < 2 and not recent:
             verdict = "weak"
             top["why"] += "; one distinctive word on an older ticket"
@@ -345,7 +347,8 @@ def _render_candidate(b: dict) -> str:
 
 
 def _strip_internal(b: dict) -> dict:
-    return {k: v for k, v in b.items() if k not in ("resolved", "updated", "distinctive", "n_distinctive")}
+    return {k: v for k, v in b.items()
+            if k not in ("resolved", "updated", "created", "distinctive", "n_distinctive")}
 
 
 def register(mcp, resolver: InstanceResolver):

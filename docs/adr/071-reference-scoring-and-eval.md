@@ -55,3 +55,10 @@ Checking releases also meant reading six to eight live tool outputs by hand.
   single-word match now arrives as `weak`, with the candidate shown.
 - Each rule is pinned by a test and was checked against a mutant of the
   code it guards.
+
+## Correction (1.40.1)
+
+The single-word exception first keyed on `updated`. A live run showed an
+older ticket being touched on the same day as the event it did not describe,
+which made it look current. The exception now keys on `created`: one shared
+distinctive word is enough only on a ticket opened in the last three days.
