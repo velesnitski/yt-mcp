@@ -89,7 +89,7 @@ _RU_EN = {
 _GENERIC = frozenset("""
 dev stage staging prod production test qa client api server app application web site backend frontend
 ios android mac macos windows linux desktop mobile build version release fix bug feature update new old
-connect connection error crash problem fail failure broken issue work
+connect connection error crash problem fail failure broken issue
 """.split())
 
 

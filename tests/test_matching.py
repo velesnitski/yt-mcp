@@ -463,17 +463,24 @@ class TestReTestFindings:
         assert not any(p.startswith("/api/issues/") for p, _ in clients["main"].calls)
 
     @pytest.mark.asyncio
-    async def test_said_key_holds_even_when_only_weak(self):
+    async def test_generic_word_needs_a_said_key_to_be_a_lead(self):
         ISSUES["second"]["CORE-4103"] = {"summary": "Core queue fix on dev"}
         ISSUES["main"]["OPS-4103"] = {"summary": "Dev server certificate renewal"}
         try:
             _, tools = _setup()
             [r] = _json(await tools["resolve_ticket_refs"](refs=["4103 dev"], context="CORE", format="json"))
-            # Generic word only → weak; the key itself is routing, not evidence;
-            # and the said key is not abandoned for a weak answer.
+            # The project was named and holds the number; "dev" does not
+            # contradict it: a lead to confirm, never confident (ADR-072).
             assert r["confidence"] == "weak" and r["checked"] == ["CORE-4103"]
+            assert "project named in context" in r["candidates"][0]["why"]
+            [r] = _json(await tools["resolve_ticket_refs"](refs=["4103 dev"], format="json"))
+            # Without the key, generic words alone are no lead at all.
+            assert r["confidence"] == "none" and r["candidates"] == []
         finally:
             del ISSUES["second"]["CORE-4103"], ISSUES["main"]["OPS-4103"]
+
+    def test_worker_is_not_the_generic_word_work(self):
+        assert not tm.is_generic("worker")
 
     @pytest.mark.asyncio
     async def test_said_key_without_such_ticket_widens(self):
@@ -538,3 +545,35 @@ class TestJsonFields:
         assert (r["verdict"], r["top"]) == ("confident", "CORE-4101")
         [t] = _json(await tools["find_issues_for_text"](texts=["quarterly budget"], format="json"))
         assert (t["verdict"], t["top"]) == ("none", None)
+
+
+class TestFalsePositiveProbe:
+    """Shapes from a live false-positive probe (invented data, ADR-072)."""
+
+    @pytest.mark.asyncio
+    async def test_generic_body_hit_is_none_not_weak(self):
+        ISSUES["main"]["OPS-4104"] = {"summary": "Add a subscription button", "description": "test plan attached"}
+        try:
+            _, tools = _setup()
+            [r] = _json(await tools["resolve_ticket_refs"](refs=["4104 тест"], format="json"))
+            assert r["confidence"] == "none"
+        finally:
+            del ISSUES["main"]["OPS-4104"]
+
+    @pytest.mark.asyncio
+    async def test_ticket_closed_long_ago_is_offered_not_asserted(self):
+        import time
+        issue = _dated("WEB-12", "Tune tooltip timing for onboarding tooltips", 60)
+        issue["resolved"] = int((time.time() - 30 * 86400) * 1000)
+        _, tools = _setup(lambda params: [issue])
+        [r] = _json(await tools["find_issues_for_text"](texts=["onboarding tooltip timing broken"], format="json"))
+        assert r["match"] == "weak" and "closed over 7 days ago" in r["candidates"][0]["why"]
+
+    @pytest.mark.asyncio
+    async def test_recently_closed_ticket_can_still_be_confident(self):
+        import time
+        issue = _dated("WEB-13", "Tune tooltip timing for onboarding tooltips", 1)
+        issue["resolved"] = int((time.time() - 1 * 86400) * 1000)
+        _, tools = _setup(lambda params: [issue])
+        [r] = _json(await tools["find_issues_for_text"](texts=["onboarding tooltip timing broken"], format="json"))
+        assert r["match"] == "confident"

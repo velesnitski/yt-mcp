@@ -29,6 +29,7 @@ WEAK = 0.2
 MARGIN = 0.2         # best must beat the runner-up by this much to be confident
 LEAD_FLOOR = 0.34    # ...or clear this floor and double the runner-up (ADR-070)
 TEXT_THRESHOLD = 0.34
+STALE_RESOLVED_DAYS = 7  # a status line is about live work (ADR-072)
 RECENT_DAYS = 3      # a status check talks about now (ADR-071)
 MAX_KEYS_PER_NUMBER = 60
 ISSUE_FIELDS = ("idReadable,summary,description,resolved,created,updated,project(shortName),"
@@ -68,6 +69,7 @@ def _brief(name: str, client, issue: dict) -> dict:
         "state": _resolve_state(issue) or "",
         "assignee": _resolve_assignee(issue) or "",
         "resolved": bool(issue.get("resolved")),
+        "resolved_at": issue.get("resolved") or 0,
         "updated": issue.get("updated") or 0,
         "created": issue.get("created") or 0,
     }
@@ -131,13 +133,14 @@ def _rank(cands: list[tuple[str, object, dict]], words: list[str], owner: str,
                 why += "; assignee matches owner"
         b = _brief(name, client, issue)
         b.update(score=round(s, 3), why=why, distinctive=m.distinctive,
-                 n_distinctive=sum(1 for w in m.in_summary if not tm.is_generic(w)))
+                 n_distinctive=sum(1 for w in m.in_summary if not tm.is_generic(w)),
+                 any_distinctive=any(not tm.is_generic(w) for w in m.in_summary + m.in_body))
         ranked.append(b)
     ranked.sort(key=lambda b: (-b["score"], b["resolved"], -b["updated"]))
     return ranked
 
 
-def _verdict(ranked: list[dict], have_context: bool) -> str:
+def _verdict(ranked: list[dict], have_context: bool, key_said: bool = False) -> str:
     """confident / weak / none (or `candidates` with nothing to verify by).
 
     Confident needs a distinctive word in the winner's summary — generic
@@ -159,6 +162,16 @@ def _verdict(ranked: list[dict], have_context: bool) -> str:
         if lead and not strong:
             top["why"] += f"; clear lead ({best} vs {second})"
         return "confident"
+    # Even a candidate to pick from needs one specific word somewhere: a
+    # match on "test" or "server" alone is noise, not a lead (ADR-072).
+    if not top.get("any_distinctive", True):
+        if key_said and best >= WEAK:
+            # The project was named and the number exists in it: that is
+            # identity evidence the generic words do not contradict.
+            if "project named" not in top["why"]:
+                top["why"] += "; project named in context, only generic words match"
+            return "weak"
+        return "none"
     return "weak" if best >= WEAK else "none"
 
 
@@ -222,6 +235,7 @@ async def resolve_ref(resolver: InstanceResolver, ref: str, context: str = "",
     ids: list[tuple[str, str]] = []
     cands: list = []
     ranked: list[dict] = []
+    held_by_key = False
     for phase in phases:
         batch = [(inst, f"{key}-{n}") for inst, key in phase]
         ids += batch
@@ -230,7 +244,8 @@ async def resolve_ref(resolver: InstanceResolver, ref: str, context: str = "",
         ranked = _rank(cands, words, owner, vocabulary=True)
         # A key said aloud acts as the hint: stay there unless it holds no
         # such ticket or the words contradict it (ADR-071).
-        if phase is named and _verdict([dict(b) for b in ranked], have_context) != "none":
+        if phase is named and _verdict([dict(b) for b in ranked], have_context, True) != "none":
+            held_by_key = True
             break
         if _verdict([dict(b) for b in ranked], have_context) == "confident":
             break
@@ -239,7 +254,7 @@ async def resolve_ref(resolver: InstanceResolver, ref: str, context: str = "",
         order = {iid: k for k, (_, iid) in enumerate(ids)}
         ranked.sort(key=lambda b: order.get(b["id"], 0))
     dup = {iid for _, iid in ids if sum(1 for _, x in ids if x == iid) > 1}
-    out = {"ref": ref, "confidence": _verdict(ranked, have_context),
+    out = {"ref": ref, "confidence": _verdict(ranked, have_context, held_by_key),
            "candidates": ranked,
            "checked": [f"{iid} ({inst})" if iid in dup else iid for inst, iid in ids]}
     if out["confidence"] in ("confident",):
@@ -330,6 +345,12 @@ async def match_text(resolver, client, name: str, text: str, since: str, project
         if top.get("n_distinctive", 0) < 2 and not recent:
             verdict = "weak"
             top["why"] += "; one distinctive word on an older ticket"
+        # A status line talks about live work: a ticket closed (done or
+        # cancelled) more than a week ago is offered, never asserted (ADR-072).
+        closed = top.get("resolved_at") or 0
+        if verdict == "confident" and closed and now_ms - closed > STALE_RESOLVED_DAYS * 86_400_000:
+            verdict = "weak"
+            top["why"] += f"; closed over {STALE_RESOLVED_DAYS} days ago ({top.get('state') or 'resolved'})"
     if verdict == "none":
         good = []
     out = {"text": text, "match": verdict,
@@ -348,7 +369,8 @@ def _render_candidate(b: dict) -> str:
 
 def _strip_internal(b: dict) -> dict:
     return {k: v for k, v in b.items()
-            if k not in ("resolved", "updated", "created", "distinctive", "n_distinctive")}
+            if k not in ("resolved", "resolved_at", "updated", "created", "distinctive",
+                         "n_distinctive", "any_distinctive")}
 
 
 def register(mcp, resolver: InstanceResolver):
