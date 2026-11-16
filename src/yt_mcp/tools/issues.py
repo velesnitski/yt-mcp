@@ -190,6 +190,7 @@ def register(mcp, resolver: InstanceResolver):
         instance: str = "",
         include_bots: bool = False,
         comment_chars: int = 200,
+        description_chars: int = -1,
     ) -> str:
         """Get full details of a YouTrack issue.
 
@@ -220,6 +221,9 @@ def register(mcp, resolver: InstanceResolver):
                 always reported).
             comment_chars: Per-comment truncation in compact mode
                 (default: 200; 0 = untruncated).
+            description_chars: Description cap in the report format, in
+                characters. 0 = full text; -1 (default) keeps the mode's
+                default (compact mode caps at 500, the full report does not).
         """
         client = resolver.resolve(instance, issue_id)
         issue_id = parse_issue_id(issue_id)
@@ -257,7 +261,9 @@ def register(mcp, resolver: InstanceResolver):
             if hidden and isinstance(payload, dict):
                 payload["comments_hidden"] = hidden
             return json.dumps(payload, indent=2, ensure_ascii=False)
-        out = format_issue_detail(data, comment_chars=comment_chars)
+        out = format_issue_detail(
+            data, comment_chars=comment_chars,
+            description_chars=None if description_chars < 0 else description_chars)
         if hidden:
             out += f"\n_({hidden} service/bot comments hidden — include_bots=True to show)_"
         return out

@@ -67,7 +67,7 @@ class TestExitCodes:
         (["run", "--json"], "usage:"),
         (["run", "nope"], "unknown tool 'nope'"),
         (["run", "get_issue"], "get_issue needs issue_id="),
-        (["run", "get_issue", "issue_id=A-1", "bogus=1"], "takes: comment_chars, fields"),
+        (["run", "get_issue", "issue_id=A-1", "bogus=1"], "takes: comment_chars, description_chars, fields"),
         (["run", "get_issue", "issue_id"], "is not key=value"),
         (["run", "search_issues", "query=x", "max_results=abc"], "not a whole number"),
         (["run", "get_issue", "issue_id=A-1", "include_comments=maybe"], "not true or false"),

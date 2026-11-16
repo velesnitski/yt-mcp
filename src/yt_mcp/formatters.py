@@ -374,11 +374,16 @@ def _truncate_desc(desc: str, limit: int = _DESC_TRUNCATE_LIMIT) -> str:
     cut = window[:boundary] if boundary >= limit - 80 else window
     return (
         f"{cut.rstrip()}\n"
-        f"_… truncated ({len(desc)} chars total) — use format=json for full_"
+        f"_… truncated ({len(desc)} chars total) — description_chars=0 "
+        f"for the full text_"
     )
 
 
-def format_issue_detail(data: dict, comment_chars: int = 200) -> str:
+def format_issue_detail(data: dict, comment_chars: int = 200,
+                        description_chars: int | None = None) -> str:
+    """`description_chars`: None keeps each mode's default (compact caps at
+    500, full report shows everything); 0 means the full text in both; a
+    positive value caps the description in both (ADR-073)."""
     state_name = _resolve_state(data)
     priority_name = _resolve_priority(data)
     assignee_name = _resolve_assignee(data)
@@ -387,6 +392,10 @@ def format_issue_detail(data: dict, comment_chars: int = 200) -> str:
     tags = data.get("tags") or []
     desc = data.get("description")
     links = data.get("links") or []
+    if desc and description_chars is not None and description_chars > 0:
+        desc = _truncate_desc(desc, description_chars)
+    elif desc and description_chars is None and COMPACT:
+        desc = _truncate_desc(desc)
 
     if COMPACT:
         iid = (data.get("idReadable") or "?")
@@ -403,7 +412,7 @@ def format_issue_detail(data: dict, comment_chars: int = 200) -> str:
             # Compact mode truncates the description — self-announcing and
             # link-safe (ADR-028), so it never masquerades as "the end" or
             # severs a markdown link (e.g. a Figma URL) mid-string.
-            parts.append(_truncate_desc(desc))
+            parts.append(desc)
         for link in links:
             lt = (link.get("linkType") or {}).get("name", "?")
             d = link.get("direction", "?")

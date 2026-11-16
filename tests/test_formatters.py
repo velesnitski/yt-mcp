@@ -520,7 +520,7 @@ class TestTruncateDesc:
         out = _truncate_desc(d)
         assert "truncated" in out
         assert str(len(d)) in out          # true total length surfaced
-        assert "format=json" in out        # tells the reader how to get it all
+        assert "description_chars=0" in out  # names the knob that lifts it
         assert len(out) < len(d)
 
     def test_does_not_split_a_straddling_markdown_link(self):
@@ -538,3 +538,36 @@ class TestTruncateDesc:
         assert "truncated" in out
         # hard-cut near the limit rather than gutting to nothing
         assert len(out.split("\n")[0]) >= _LIM - 80
+
+
+# --- description_chars on the report format (ADR-073) ---
+
+from yt_mcp.formatters import format_issue_detail as _fid
+
+_LONG = "\n".join(f"line {i} " + "x" * 50 for i in range(110)) + "\nLAST-LINE-PRJB"
+
+
+class TestDescriptionChars:
+    def _issue(self):
+        return {"idReadable": "PRJB-4101", "summary": "s", "description": _LONG}
+
+    def test_compact_default_caps_and_names_the_knob(self, monkeypatch):
+        monkeypatch.setattr(_fmt, "COMPACT", True)
+        out = _fid(self._issue())
+        assert "LAST-LINE-PRJB" not in out
+        assert "description_chars=0" in out
+
+    def test_compact_zero_gives_full_text(self, monkeypatch):
+        monkeypatch.setattr(_fmt, "COMPACT", True)
+        out = _fid(self._issue(), description_chars=0)
+        assert "LAST-LINE-PRJB" in out and "truncated" not in out
+
+    def test_full_report_default_is_uncut(self, monkeypatch):
+        monkeypatch.setattr(_fmt, "COMPACT", False)
+        assert "LAST-LINE-PRJB" in _fid(self._issue())
+
+    def test_positive_cap_applies_in_full_report(self, monkeypatch):
+        monkeypatch.setattr(_fmt, "COMPACT", False)
+        out = _fid(self._issue(), description_chars=1000)
+        assert "LAST-LINE-PRJB" not in out
+        assert f"{len(_LONG)} chars total" in out
