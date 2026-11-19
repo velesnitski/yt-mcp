@@ -126,25 +126,45 @@ def main():
         mcp.run(transport="stdio")
         return
 
-    # For HTTP transports: add verify route if access code is configured
-    if bundle.oauth_provider and os.environ.get("YOUTRACK_ACCESS_CODE"):
-        import uvicorn
-        from starlette.applications import Starlette
-        from starlette.routing import Route, Mount
-        from yt_mcp.auth import create_verify_handler
+    import uvicorn
+    uvicorn.run(http_app(bundle, args.transport, args.host, args.port),
+                host=args.host, port=args.port)
 
-        if args.transport == "sse":
-            mcp_app = mcp.sse_app()
-        else:
-            mcp_app = mcp.streamable_http_app()
 
-        app = Starlette(routes=[
-            Route("/auth/verify", create_verify_handler(bundle.oauth_provider), methods=["GET", "POST"]),
+_LOCAL_HOSTS = ("127.0.0.1", "localhost", "::1")
+
+
+def http_app(bundle: ServerBundle, transport: str, host: str, port: int):
+    """The ASGI app for an HTTP transport, served by uvicorn on every path
+    (ADR-074). `FastMCP.run()` takes no host or port since mcp 1.30, so the
+    server never builds its own listener.
+
+    The SDK turns on DNS-rebinding protection (localhost Host headers only)
+    when the server is constructed for localhost, which is the default. Bound
+    to any other address (a container's 0.0.0.0), that would refuse every
+    remote client, so it applies only when bound to localhost — the SDK's own
+    rule for a server built with that host."""
+    mcp = bundle.mcp
+    mcp.settings.host, mcp.settings.port = host, port
+    if host not in _LOCAL_HOSTS:
+        mcp.settings.transport_security = None
+    mcp_app = mcp.sse_app() if transport == "sse" else mcp.streamable_http_app()
+    if not (bundle.oauth_provider and os.environ.get("YOUTRACK_ACCESS_CODE")):
+        return mcp_app
+
+    from starlette.applications import Starlette
+    from starlette.routing import Mount, Route
+    from yt_mcp.auth import create_verify_handler
+    # A mounted app's lifespan does not run, and streamable HTTP needs it to
+    # start its session manager: carry it to the outer app.
+    return Starlette(
+        routes=[
+            Route("/auth/verify", create_verify_handler(bundle.oauth_provider),
+                  methods=["GET", "POST"]),
             Mount("/", mcp_app),
-        ])
-        uvicorn.run(app, host=args.host, port=args.port)
-    else:
-        mcp.run(transport=args.transport, host=args.host, port=args.port)
+        ],
+        lifespan=lambda app: mcp_app.router.lifespan_context(mcp_app),
+    )
 
 
 if __name__ == "__main__":

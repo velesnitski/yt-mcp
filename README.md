@@ -661,6 +661,8 @@ The server will be available at `http://localhost:8000/mcp`.
 | `--host` | `0.0.0.0` | Host to bind to |
 | `--port` | `8000` | Port to bind to |
 
+Bound to `127.0.0.1` or `localhost`, the server accepts only localhost `Host` headers (DNS-rebinding protection). Bound to any other address, such as `0.0.0.0` in a container, it accepts clients that reach it by any name.
+
 ### n8n setup
 
 1. Start the server in SSE mode (see above)
@@ -761,6 +763,8 @@ docker run -d -p 9000:9000 \
   -e YOUTRACK_URL="..." -e YOUTRACK_TOKEN="..." \
   velesnitski/yt-mcp --transport streamable-http --port 9000
 ```
+
+The image's healthcheck probes port 8000. With another port, override it: `--health-cmd "python -c \"import socket; socket.create_connection(('127.0.0.1', 9000), 3)\""`.
 
 **Build from source:**
 
