@@ -30,7 +30,7 @@ being this that these those it its as not no yes do does did done doing has have
 may might must we you they he she i me my our your their them us what which who whom when where why how all any
 some each every more most other such only own same so than too very just also still yet again about after before
 there here then now today yesterday tomorrow week day days please team guys work working task tasks ticket issue
-issues bug status update updates check see let lets via per
+issues bug status update updates check see let lets via per like
 и в во не что он на я с со как а то все она так его но да ты к у же вы за бы по только ее мне было вот от меня
 еще нет о из ему теперь когда даже ну вдруг ли если уже или ни быть был него до вас нибудь опять уж вам ведь там
 потом себя ничего ей может они тут где есть надо ней для мы тебя их чем была сам чтоб без будто чего раз тоже
@@ -38,7 +38,7 @@ issues bug status update updates check see let lets via per
 были куда зачем всех никогда можно при наконец два об другой хоть после над больше тот через эти нас про всего
 них какая много разве три эту моя впрочем хорошо свою этой перед иногда лучше чуть том нельзя такой им более
 всегда конечно всю между это эта сегодня вчера завтра неделе неделю ребята команда задача задачи задачу задаче
-тикет тикета статус работа работы работают работаем делаем сделать делать сделали занимаются занимается сейчас
+тикет тикета статус работа работы работают работаем делаем сделать делать сделали занимаются занимается сейчас типа
 """.split())
 
 _RU_ENDINGS = sorted("""
@@ -169,9 +169,12 @@ class Match:
         return "; ".join(parts) or "no shared words"
 
 
-def weight(word: str, idf: dict[str, float] | None = None) -> float:
+def weight(word: str, idf: dict[str, float] | None = None,
+           frequent: frozenset | set = frozenset()) -> float:
+    """`frequent`: words that occur in so many of the searched tickets that
+    they tell them apart no better than a generic word (ADR-075)."""
     w = (idf or {}).get(word, 1.0)
-    return w * (0.3 if is_generic(word) else 1.0)
+    return w * (0.3 if word in frequent or is_generic(word) else 1.0)
 
 
 def idf_weights(words: list[str], docs: list[str]) -> dict[str, float]:
@@ -188,7 +191,8 @@ def idf_weights(words: list[str], docs: list[str]) -> dict[str, float]:
 
 
 def score(words: list[str], summary: str, body: str = "",
-          idf: dict[str, float] | None = None) -> Match:
+          idf: dict[str, float] | None = None,
+          frequent: frozenset | set = frozenset()) -> Match:
     """0..1: weighted share of the phrase's content words found in the
     ticket, a summary hit counting three times a description/comment hit.
     Generic words weigh 0.3; `idf` (from idf_weights) favours rare words."""
@@ -197,12 +201,12 @@ def score(words: list[str], summary: str, body: str = "",
     in_summary = _hits(words, stems(summary))
     rest = [w for w in words if w not in in_summary]
     in_body = _hits(rest, stems(body))
-    ws = {w: weight(w, idf) for w in words}
+    ws = {w: weight(w, idf, frequent) for w in words}
     # A long sentence must not make every match weak: the denominator counts
     # the six heaviest words only.
     denom = 3 * sum(sorted(ws.values(), reverse=True)[:6])
     value = min(1.0, (3 * sum(ws[w] for w in in_summary) + sum(ws[w] for w in in_body)) / denom)
-    distinctive = any(not is_generic(w) for w in in_summary)
+    distinctive = any(w not in frequent and not is_generic(w) for w in in_summary)
     return Match(round(value, 3), in_summary, in_body, distinctive)
 
 

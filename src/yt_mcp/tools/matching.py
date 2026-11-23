@@ -32,6 +32,7 @@ TEXT_THRESHOLD = 0.34
 STALE_RESOLVED_DAYS = 7  # a status line is about live work (ADR-072)
 RECENT_DAYS = 3      # a status check talks about now (ADR-071)
 MAX_KEYS_PER_NUMBER = 60
+PAGE = 30            # tickets fetched per word; a full page marks the word frequent (ADR-075)
 ISSUE_FIELDS = ("idReadable,summary,description,resolved,created,updated,project(shortName),"
                 "assignee(login,name),customFields(name,value(name,login))")
 _SINCE = re.compile(r"^(\d+)\s*([dw])$", re.IGNORECASE)
@@ -108,7 +109,7 @@ async def _keys_said(resolver: InstanceResolver, said: set[str]) -> set[str]:
 
 
 def _rank(cands: list[tuple[str, object, dict]], words: list[str], owner: str,
-          vocabulary: bool = False) -> list[dict]:
+          vocabulary: bool = False, frequent: frozenset | set = frozenset()) -> list[dict]:
     docs = [f"{i.get('summary') or ''} {(i.get('description') or '')[:4000]}" for _, _, i in cands]
     if vocabulary and docs:
         # A ticket number already narrows the field to a handful of tickets;
@@ -121,7 +122,8 @@ def _rank(cands: list[tuple[str, object, dict]], words: list[str], owner: str,
     idf = tm.idf_weights(words, docs) if len(cands) > 2 else None
     ranked = []
     for name, client, issue in cands:
-        m = tm.score(words, issue.get("summary") or "", (issue.get("description") or "")[:4000], idf)
+        m = tm.score(words, issue.get("summary") or "", (issue.get("description") or "")[:4000],
+                     idf, frequent)
         s = m.score
         why = m.why()
         if owner:
@@ -132,9 +134,11 @@ def _rank(cands: list[tuple[str, object, dict]], words: list[str], owner: str,
             if hit:
                 why += "; assignee matches owner"
         b = _brief(name, client, issue)
+        specific = [w for w in m.in_summary + m.in_body
+                    if w not in frequent and not tm.is_generic(w)]
         b.update(score=round(s, 3), why=why, distinctive=m.distinctive,
-                 n_distinctive=sum(1 for w in m.in_summary if not tm.is_generic(w)),
-                 any_distinctive=any(not tm.is_generic(w) for w in m.in_summary + m.in_body))
+                 n_distinctive=sum(1 for w in m.in_summary if w in specific),
+                 any_distinctive=bool(specific))
         ranked.append(b)
     ranked.sort(key=lambda b: (-b["score"], b["resolved"], -b["updated"]))
     return ranked
@@ -199,9 +203,16 @@ async def resolve_ref(resolver: InstanceResolver, ref: str, context: str = "",
         found = await bounded_map(lambda n: _fetch(clients[n], iid), targets)
         cands = [(n, clients[n], i) for n, i in zip(targets, found) if i]
         ranked = _rank(cands, words, owner, vocabulary=True)
-        verdict = "none" if not ranked else (
-            "exact" if not have_context or ranked[0]["score"] >= WEAK else "weak")
-        return {"ref": ref, "confidence": verdict, "candidates": ranked, "checked": [iid]}
+        out = {"ref": ref, "confidence": "exact" if ranked else "none",
+               "candidates": ranked, "checked": [iid]}
+        if ranked and have_context and ranked[0]["score"] < WEAK:
+            # The key exists, so it IS the ticket; words that do not fit are
+            # worth saying, not a reason to doubt the key (ADR-075).
+            top = ranked[0]
+            top["why"] = ("words differ from the summary" if top["why"] == "no shared words"
+                          else top["why"] + "; words differ from the summary")
+            out["words_differ"] = True
+        return out
 
     numbers = tm.BARE_REF.findall(ref) or re.findall(r"\b(\d{1,7})\b", ref)
     if not numbers:
@@ -260,7 +271,12 @@ async def resolve_ref(resolver: InstanceResolver, ref: str, context: str = "",
     if out["confidence"] in ("confident",):
         out["candidates"] = ranked[:1]
     elif out["confidence"] == "weak":
-        out["candidates"] = ranked[:3]
+        # A candidate sharing no word with the reference is noise under a
+        # weak answer: count it, do not list it (ADR-075).
+        related = [b for b in ranked if b["score"] > 0]
+        out["candidates"] = related[:3]
+        if len(ranked) > len(related):
+            out["unrelated"] = len(ranked) - len(related)
     elif out["confidence"] == "none" and ranked:
         out["note"] = (f"{len(ranked)} ticket(s) with this number exist but none matches "
                        "the context: " + ", ".join(b["id"] for b in ranked[:5]))
@@ -320,14 +336,18 @@ async def match_text(resolver, client, name: str, text: str, since: str, project
     # free-text phrase is not something to rely on, and inflected words may
     # match on their own where the phrase does not. Ranking happens here.
     batches = await bounded_map(
-        lambda w: client.get("/api/issues", params={"query": f"{base} {w}", "fields": fields, "$top": "30"}),
+        lambda w: client.get("/api/issues", params={"query": f"{base} {w}", "fields": fields, "$top": str(PAGE)}),
         words[:6])
+    # A word whose own search fills the page is in too many tickets to tell
+    # one from another, like a brand or product name in every summary: it
+    # weighs as a generic word and is never the distinctive one (ADR-075).
+    frequent = {w for w, batch in zip(words, batches) if len(batch or []) >= PAGE}
     seen: dict[str, dict] = {}
     for batch in batches:
         for issue in batch or []:
             seen.setdefault(issue.get("idReadable") or "?", issue)
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-    ranked = _rank([(name, client, i) for i in seen.values()], words, "")
+    ranked = _rank([(name, client, i) for i in seen.values()], words, "", frequent=frequent)
     for b in ranked:
         issue = seen.get(b["id"], {})
         b["score"] = round(min(1.0, b["score"] + _bonus(issue, now_ms)) if b["score"] else 0.0, 3)
@@ -357,6 +377,8 @@ async def match_text(resolver, client, name: str, text: str, since: str, project
            "candidates": good[:1] if verdict == "confident" else good[:max_per_text]}
     if not good:
         out["note"] = f"no confident match among {len(ranked)} candidate(s)"
+    if frequent:
+        out["frequent_words"] = sorted(frequent)
     return out
 
 
@@ -444,8 +466,11 @@ def register(mcp, resolver: InstanceResolver):
             return json.dumps(results, ensure_ascii=False)
         lines = [f"## {len(results)} reference(s)"]
         for r in results:
-            lines.append(f"- **{r['ref']}** → {r['confidence']}")
+            differ = " · words differ from the summary" if r.get("words_differ") else ""
+            lines.append(f"- **{r['ref']}** → {r['confidence']}{differ}")
             lines += [_render_candidate(b) for b in r["candidates"]]
+            if r.get("unrelated"):
+                lines.append(f"  _+{r['unrelated']} unrelated (no shared words)_")
             if r.get("note"):
                 lines.append(f"  _{r['note']}_")
         return "\n".join(lines)
@@ -494,6 +519,8 @@ def register(mcp, resolver: InstanceResolver):
             head = r["text"] if len(r["text"]) <= 80 else r["text"][:77] + "…"
             lines.append(f"- “{head}” → {r['match']}")
             lines += [_render_candidate(b) for b in r["candidates"]]
+            if r.get("frequent_words"):
+                lines.append(f"  _frequent here, weighed as generic: {', '.join(r['frequent_words'])}_")
             if r.get("note"):
                 lines.append(f"  _{r['note']}_")
         return "\n".join(lines)

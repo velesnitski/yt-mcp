@@ -183,7 +183,10 @@ class TestResolveRefs:
         [a, b] = _json(await tools["resolve_ticket_refs"](
             refs=["CORE-4101", "OPS-4101 (pricing page footer layout)"], format="json"))
         assert a["confidence"] == "exact" and a["candidates"][0]["instance"] == "second"
-        assert b["confidence"] == "weak"  # exists, but the words say otherwise
+        # The key exists, so it is the ticket; the mismatch is said, not
+        # turned into doubt about the key (ADR-075).
+        assert b["confidence"] == "exact" and b["words_differ"] is True
+        assert "words differ from the summary" in b["candidates"][0]["why"]
 
     @pytest.mark.asyncio
     async def test_tie_is_weak_and_owner_breaks_it(self):
@@ -577,3 +580,62 @@ class TestFalsePositiveProbe:
         _, tools = _setup(lambda params: [issue])
         [r] = _json(await tools["find_issues_for_text"](texts=["onboarding tooltip timing broken"], format="json"))
         assert r["match"] == "confident"
+
+
+class TestPapercuts:
+    """Frequent words, explicit keys whose words differ, zero-score noise
+    (invented data, ADR-075)."""
+
+    def test_like_and_tipa_are_stopwords(self):
+        assert tm.content_words("export like pricing") == ["export", "pricing"]
+        assert tm.content_words("экспорт типа прайсинга") == ["экспорт", "прайсинга"]
+
+    @staticmethod
+    def _crowded(target, filler_words):
+        """Search stub: every word in `filler_words` fills a whole page of
+        tickets, the way a brand or product name sits in most summaries."""
+        filler = [_dated(f"APP-{4200 + i}", f"Nimbus Lite settings item {i}", 20) for i in range(30)]
+
+        def search(params):
+            word = params["query"].rsplit(" ", 1)[1]
+            hits = [t for t in [target] + filler if word.lower() in t["summary"].lower()]
+            return hits[:matching.PAGE] if word in filler_words else [target]
+        return search
+
+    @pytest.mark.asyncio
+    async def test_only_frequent_words_shared_is_not_confident(self):
+        target = _dated("APP-4300", "Nimbus Lite onboarding tooltip timing", 20)
+        _, tools = _setup(self._crowded(target, {"Nimbus", "Lite"}))
+        [r] = _json(await tools["find_issues_for_text"](
+            texts=["Lite export like Nimbus"], format="json"))
+        assert r["match"] in ("weak", "none")
+        assert r["match"] == "none"  # nothing specific is shared at all
+        assert r["frequent_words"] == ["Lite", "Nimbus"]
+
+    @pytest.mark.asyncio
+    async def test_frequent_word_does_not_hide_a_real_match(self):
+        target = _dated("APP-4301", "Nimbus CSV export times out", 20)
+        _, tools = _setup(self._crowded(target, {"Nimbus"}))
+        [r] = _json(await tools["find_issues_for_text"](
+            texts=["Nimbus CSV export"], format="json"))
+        assert r["match"] == "confident" and r["top"] == "APP-4301"
+
+    @pytest.mark.asyncio
+    async def test_weak_answer_counts_unrelated_instead_of_listing_them(self):
+        ISSUES["main"]["WEB-4101"] = {"summary": "Pricing page footer spacing"}
+        try:
+            _, tools = _setup()
+            [r] = _json(await tools["resolve_ticket_refs"](refs=["4101 cache tuesday"], format="json"))
+            assert r["confidence"] == "weak"
+            assert {c["id"] for c in r["candidates"]} == {"OPS-4101", "CORE-4101"}
+            assert r["unrelated"] == 1
+            text = await tools["resolve_ticket_refs"](refs=["4101 cache tuesday"])
+            assert "+1 unrelated" in text and "WEB-4101" not in text
+        finally:
+            del ISSUES["main"]["WEB-4101"]
+
+    @pytest.mark.asyncio
+    async def test_explicit_key_report_says_words_differ(self):
+        _, tools = _setup()
+        text = await tools["resolve_ticket_refs"](refs=["OPS-4101 pricing page footer layout"])
+        assert "→ exact · words differ from the summary" in text
