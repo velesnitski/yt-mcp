@@ -148,18 +148,31 @@ def setup_sentry() -> None:
     if not dsn:
         return
 
-    import sentry_sdk
+    # Error reporting must never stop the server (ADR-076): a sentry-sdk
+    # release that rejects an option, or any other init failure, leaves the
+    # server running without Sentry and says so on stderr.
+    try:
+        import sentry_sdk
 
-    sentry_sdk.init(
-        dsn=dsn,
-        release=f"yt-mcp@{__version__}",
-        environment=os.environ.get("SENTRY_ENVIRONMENT", "production"),
-        traces_sample_rate=0,
-        send_default_pii=False,
-        before_send=_scrub_event,
-    )
-    sentry_sdk.set_tag("instance_id", INSTANCE_ID)
-    sentry_sdk.set_tag("transport", os.environ.get("YT_MCP_TRANSPORT", "stdio"))
+        options = dict(
+            dsn=dsn,
+            release=f"yt-mcp@{__version__}",
+            environment=os.environ.get("SENTRY_ENVIRONMENT", "production"),
+            traces_sample_rate=0,
+            send_default_pii=False,
+            before_send=_scrub_event,
+        )
+        try:
+            sentry_sdk.init(**options)
+        except TypeError:
+            # A newer SDK that no longer knows an option: retry with the
+            # minimum. The scrubber stays, so nothing personal is sent.
+            options.pop("send_default_pii", None)
+            sentry_sdk.init(**options)
+        sentry_sdk.set_tag("instance_id", INSTANCE_ID)
+        sentry_sdk.set_tag("transport", os.environ.get("YT_MCP_TRANSPORT", "stdio"))
+    except Exception as exc:  # noqa: BLE001 – telemetry is optional
+        print(f"yt-mcp: Sentry disabled ({type(exc).__name__}: {exc})", file=sys.stderr)
 
 
 _IGNORED_EXCEPTIONS = (BrokenPipeError, ConnectionResetError)

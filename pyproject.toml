@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "yt-mcp"
-version = "1.42.0"
+version = "1.42.1"
 description = "YouTrack MCP server for Claude Code, GitHub Copilot, Cursor, JetBrains, n8n, and any MCP-compatible client"
 readme = "README.md"
 license = "MIT"
@@ -26,7 +26,9 @@ classifiers = [
 dependencies = [
     "mcp>=1.30.0,<2.0.0",
     "httpx[http2]>=0.27.0",
-    "sentry-sdk>=2.0",
+    # 3.x dropped init options the server passes; an unbounded range let
+    # uvx install 3.0.1 and the server died at startup (ADR-076).
+    "sentry-sdk>=2.0,<3",
     "PyJWT>=2.15.0",
     "cryptography>=50.0.0",
     # Transitive via mcp/httpx, pinned explicitly for CVE-2026-63374
